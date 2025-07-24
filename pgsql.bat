@@ -1,0 +1,1 @@
+postgres.exe -D .\postgres-data

@@ -21,3 +21,6 @@ examples/**/eval_*
 
 /.vscode
 /*.session.sql
+cocoindex-env
+pgvector-temp
+postgres-data

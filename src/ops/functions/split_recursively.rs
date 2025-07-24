@@ -102,7 +102,7 @@ static TREE_SITTER_LANGUAGE_BY_LANG: LazyLock<
         &mut map,
         "C++",
         [".cpp", ".cc", ".cxx", ".h", ".hpp", "cpp"],
-        tree_sitter_c::LANGUAGE,
+        tree_sitter_cpp::LANGUAGE,
         [],
     );
     add_treesitter_language(

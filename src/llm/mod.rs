@@ -154,12 +154,15 @@ pub async fn new_llm_embedding_client(
         LlmApiType::OpenAi => {
             Box::new(openai::Client::new(address)?) as Box<dyn LlmEmbeddingClient>
         }
+        LlmApiType::LiteLlm => {
+            Box::new(litellm::Client::new_litellm(address).await?) as Box<dyn LlmEmbeddingClient>
+        }
         LlmApiType::Voyage => {
             Box::new(voyage::Client::new(address)?) as Box<dyn LlmEmbeddingClient>
         }
         LlmApiType::VertexAi => Box::new(gemini::VertexAiClient::new(address, api_config).await?)
             as Box<dyn LlmEmbeddingClient>,
-        LlmApiType::OpenRouter | LlmApiType::LiteLlm | LlmApiType::Vllm | LlmApiType::Anthropic => {
+        LlmApiType::OpenRouter | LlmApiType::Vllm | LlmApiType::Anthropic => {
             api_bail!("Embedding is not supported for API type {:?}", api_type)
         }
     };

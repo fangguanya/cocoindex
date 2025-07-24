@@ -1,0 +1,1 @@
+.\cocoindex-env\Scripts\Activate.ps1
