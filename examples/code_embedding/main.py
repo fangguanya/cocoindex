@@ -37,7 +37,11 @@ class ProgressMonitor:
         self.start_time = time.time()
         self.thread = threading.Thread(target=self._monitor, daemon=True)
         self.thread.start()
-        print("📊 进度监控已启动...")
+        message = "📊 进度监控已启动..."
+        print(message)
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(message)
         
     def stop(self):
         """停止监控进度"""
@@ -77,8 +81,11 @@ class ProgressMonitor:
                                 
                                 if new_records > 0:
                                     speed = new_records / elapsed if elapsed > 0 else 0
-                                    print(f"📈 处理进度: {total_count} 个代码块 | {file_count} 个文件 | "
-                                          f"速度: {speed:.1f} 块/秒 | 运行时间: {elapsed:.1f}秒")
+                                    message = f"📈 处理进度: {total_count} 个代码块 | {file_count} 个文件 | 速度: {speed:.1f} 块/秒 | 运行时间: {elapsed:.1f}秒"
+                                    print(message)  # 保持控制台输出
+                                    import logging
+                                    logger = logging.getLogger(__name__)
+                                    logger.info(message)  # 同时记录到日志文件
                                     self.last_count = total_count
                                     self.start_time = time.time()  # 重置计时器
                             except Exception as inner_e:
@@ -107,30 +114,42 @@ def extract_extension(filename: str) -> str:
 @cocoindex.op.function()
 def track_file_progress(filename: str) -> str:
     """跟踪文件处理进度"""
+    import logging
+    logger = logging.getLogger(__name__)
     with stats_lock:
         processing_stats["files_processed"] += 1
         processing_stats["current_file"] = filename
-        print(f"📄 正在处理文件 #{processing_stats['files_processed']}: {os.path.basename(filename)}")
+        message = f"📄 正在处理文件 #{processing_stats['files_processed']}: {os.path.basename(filename)}"
+        print(message)  # 保持控制台输出
+        logger.info(message)  # 同时记录到日志文件
     return filename
 
 
 @cocoindex.op.function()
 def track_chunk_progress(text: str) -> str:
     """跟踪代码块处理进度"""
+    import logging
+    logger = logging.getLogger(__name__)
     with stats_lock:
         processing_stats["chunks_processed"] += 1
         if processing_stats["chunks_processed"] % 10 == 0:  # 每10个块显示一次
-            print(f"✂️  已分割 {processing_stats['chunks_processed']} 个代码块")
+            message = f"✂️  已分割 {processing_stats['chunks_processed']} 个代码块"
+            print(message)  # 保持控制台输出
+            logger.info(message)  # 同时记录到日志文件
     return text
 
 
 @cocoindex.op.function()
 def track_embedding_progress(embedding: NDArray[np.float32]) -> NDArray[np.float32]:
     """跟踪嵌入生成进度"""
+    import logging
+    logger = logging.getLogger(__name__)
     with stats_lock:
         processing_stats["embeddings_created"] += 1
         if processing_stats["embeddings_created"] % 10 == 0:  # 每10个嵌入显示一次
-            print(f"🤖 已生成 {processing_stats['embeddings_created']} 个向量嵌入")
+            message = f"🤖 已生成 {processing_stats['embeddings_created']} 个向量嵌入"
+            print(message)  # 保持控制台输出
+            logger.info(message)  # 同时记录到日志文件
     return embedding
 
 
@@ -177,10 +196,12 @@ def code_embedding_flow(
     print("🔍 正在扫描源文件...")
     data_scope["files"] = flow_builder.add_source(
         cocoindex.sources.LocalFile(
-            path="D:/c7_i9_EngineDev/Client",
+            path="D:/c7_i9_EngineDev",
             #included_patterns=["*.py", "*.rs", "*.toml", "*.md", "*.mdx"],
-            included_patterns=["*.cpp", "*.h", "*.hpp", "*.c", "*.h", "*.hpp"],
-            excluded_patterns=["**/.*", "target", "**/node_modules", "**/Binaries", "**/DerivedDataCache", "**/Intermediate", "**/Saved", "**/Build", "**/Content"],
+            included_patterns=["*.cpp", "*.h", "*.hpp", "*.c", "*.h", "*.hpp", "*.lua"],
+            excluded_patterns=["**/.*", "target", "**/node_modules", 
+                "**/Binaries", "**/DerivedDataCache", "**/Intermediate", "**/Saved", "**/Build", "**/Content", "*.luac",
+                "**/Engine/Source/Programs", "**/ThirdParty"],
         )
     )
     
@@ -367,14 +388,34 @@ if __name__ == "__main__":
     
     # 配置日志级别为DEBUG以显示详细进度
     import logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
+    
+    # 设置日志格式
+    log_formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    
+    # 创建文件处理器
+    file_handler = logging.FileHandler("code_embedding.log", encoding='utf-8')
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(log_formatter)
+    
+    # 创建控制台处理器
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(log_formatter)
+    
+    # 配置根日志记录器
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(console_handler)
     
     # 启用cocoindex的详细日志
     cocoindex_logger = logging.getLogger('cocoindex')
     cocoindex_logger.setLevel(logging.DEBUG)
+    
+    print("📝 日志输出已配置：")
+    print(f"   - 控制台输出：INFO级别及以上")
+    print(f"   - 文件输出：code_embedding.log (INFO级别及以上)")
+    print(f"   - CocoIndex详细日志：DEBUG级别")
     
     cocoindex.init()
     _main()
