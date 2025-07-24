@@ -15,8 +15,8 @@ import os
 import sys
 import threading
 import time
+import re
 from typing import Dict, List, Optional, Any
-from datetime import datetime
 import argparse
 from numpy.typing import NDArray
 import numpy as np
@@ -27,26 +27,16 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'python'))
 import cocoindex
 from cocoindex import flow, lib, setting
 from cocoindex.cli import (
-    _load_user_app, _get_app_ref_from_specifier, _parse_app_flow_specifier,
-    _flow_by_name, _setup_flows, _run_server as cli_run_server
+    _load_user_app, _get_app_ref_from_specifier
 )
 
 # 导入FastMCP
-try:
-    from fastmcp import FastMCP
-    FASTMCP_AVAILABLE = True
-except ImportError:
-    FASTMCP_AVAILABLE = False
+from fastmcp import FastMCP
 
 # 添加数据库相关导入
-try:
-    from psycopg_pool import ConnectionPool
-    from pgvector.psycopg import register_vector
-    from psycopg import sql
-    POSTGRES_AVAILABLE = True
-except ImportError:
-    POSTGRES_AVAILABLE = False
-
+from psycopg_pool import ConnectionPool
+from pgvector.psycopg import register_vector
+from psycopg import sql
 
 # 全局变量用于跟踪进度
 processing_stats = {
@@ -89,40 +79,39 @@ class ProgressMonitor:
             while self.running:
                 try:
                     # 连接数据库检查记录数
-                    pool = ConnectionPool(self.db_url)
-                    with pool.connection() as conn:
-                        with conn.cursor() as cur:
-                            # 检查总记录数
-                            try:
-                                cur.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(self.table_name)))
-                                total_count = cur.fetchone()
-                                if total_count:
-                                    total_count = total_count[0]
-                                else:
-                                    total_count = 0
-                                
-                                # 检查不同文件数
-                                cur.execute(sql.SQL("SELECT COUNT(DISTINCT filename) FROM {}").format(sql.Identifier(self.table_name)))
-                                file_count = cur.fetchone()
-                                if file_count:
-                                    file_count = file_count[0]
-                                else:
-                                    file_count = 0
-                                
-                                # 计算处理速度
-                                elapsed = time.time() - (self.start_time or time.time())
-                                new_records = total_count - self.last_count
-                                
-                                if new_records > 0:
-                                    speed = new_records / elapsed if elapsed > 0 else 0
-                                    print(f"📈 处理进度: {total_count} 个代码块 | {file_count} 个文件 | "
-                                          f"速度: {speed:.1f} 块/秒 | 运行时间: {elapsed:.1f}秒")
-                                    self.last_count = total_count
-                                    self.start_time = time.time()  # 重置计时器
-                            except Exception as inner_e:
-                                if "does not exist" not in str(inner_e):
-                                    print(f"⚠️  查询错误: {inner_e}")
-                    pool.close()
+                    with ConnectionPool(self.db_url, open=True) as pool:
+                        with pool.connection() as conn:
+                            with conn.cursor() as cur:
+                                # 检查总记录数
+                                try:
+                                    cur.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(self.table_name)))
+                                    total_count = cur.fetchone()
+                                    if total_count:
+                                        total_count = total_count[0]
+                                    else:
+                                        total_count = 0
+                                    
+                                    # 检查不同文件数
+                                    cur.execute(sql.SQL("SELECT COUNT(DISTINCT filename) FROM {}").format(sql.Identifier(self.table_name)))
+                                    file_count = cur.fetchone()
+                                    if file_count:
+                                        file_count = file_count[0]
+                                    else:
+                                        file_count = 0
+                                    
+                                    # 计算处理速度
+                                    elapsed = time.time() - (self.start_time or time.time())
+                                    new_records = total_count - self.last_count
+                                    
+                                    if new_records > 0:
+                                        speed = new_records / elapsed if elapsed > 0 else 0
+                                        print(f"📈 处理进度: {total_count} 个代码块 | {file_count} 个文件 | "
+                                              f"速度: {speed:.1f} 块/秒 | 运行时间: {elapsed:.1f}秒")
+                                        self.last_count = total_count
+                                        self.start_time = time.time()  # 重置计时器
+                                except Exception as inner_e:
+                                    if "does not exist" not in str(inner_e):
+                                        print(f"⚠️  查询错误: {inner_e}")
                     
                 except Exception as e:
                     # 如果表还不存在，静默等待
@@ -257,6 +246,170 @@ def code_embedding_flow(
     print("✅ 流程定义完成！")
 
 
+class ImprovedCodeSearch:
+    """改进的代码搜索引擎"""
+    
+    def __init__(self, db_url: str):
+        self.db_url = db_url
+        self.table_name = "codeembedding__code_embeddings"
+        
+        # 初始化CocoIndex
+        settings = setting.Settings.from_env()
+        lib.init(settings)
+    
+    def exact_search(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """精确匹配搜索"""
+        results = []
+        try:
+            import psycopg
+            with psycopg.connect(self.db_url) as conn:
+                with conn.cursor() as cur:
+                    search_query = sql.SQL("""
+                        SELECT filename, code, start, "end", 'exact' as match_type
+                        FROM {} 
+                        WHERE code ILIKE %s
+                        ORDER BY LENGTH(code) ASC
+                        LIMIT %s
+                    """).format(sql.Identifier(self.table_name))
+                    
+                    cur.execute(search_query, (f'%{query}%', limit))
+                    rows = cur.fetchall()
+                    
+                    for row in rows:
+                        results.append({
+                            "filename": row[0],
+                            "code": row[1],
+                            "start": row[2],
+                            "end": row[3],
+                            "match_type": row[4],
+                            "score": 1.0,  # 精确匹配给满分
+                        })
+        except Exception as e:
+            print(f"精确搜索错误: {e}")
+        
+        return results
+    
+    def fuzzy_search(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """模糊匹配搜索（分解查询词）"""
+        results = []
+        
+        # 将查询分解为单词（处理驼峰命名）
+        words = re.findall(r'[A-Z][a-z]*|[a-z]+|\d+', query)
+        
+        if len(words) > 1:
+            try:
+                import psycopg
+                with psycopg.connect(self.db_url) as conn:
+                    with conn.cursor() as cur:
+                        # 构建模糊搜索条件
+                        conditions = []
+                        params = []
+                        for word in words:
+                            conditions.append("code ILIKE %s")
+                            params.append(f'%{word}%')
+                        
+                        search_query = sql.SQL("""
+                            SELECT filename, code, start, "end", 'fuzzy' as match_type
+                            FROM {} 
+                            WHERE {}
+                            ORDER BY LENGTH(code) ASC
+                            LIMIT %s
+                        """).format(
+                            sql.Identifier(self.table_name),
+                            sql.SQL(' AND ').join(sql.SQL(cond) for cond in conditions)
+                        )
+                        
+                        params.append(limit)
+                        cur.execute(search_query, params)
+                        rows = cur.fetchall()
+                        
+                        for row in rows:
+                            # 计算匹配度
+                            code = row[1].lower()
+                            matched_words = sum(1 for word in words if word.lower() in code)
+                            score = matched_words / len(words) * 0.8  # 模糊匹配给80%权重
+                            
+                            results.append({
+                                "filename": row[0],
+                                "code": row[1],
+                                "start": row[2],
+                                "end": row[3],
+                                "match_type": row[4],
+                                "score": score,
+                            })
+            except Exception as e:
+                print(f"模糊搜索错误: {e}")
+        
+        return results
+    
+    def semantic_search(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """语义搜索"""
+        results = []
+        try:
+            import psycopg
+            from pgvector.psycopg import register_vector
+            with psycopg.connect(self.db_url) as conn:
+                register_vector(conn)
+                with conn.cursor() as cur:
+                    # 生成查询向量
+                    query_vector = code_to_embedding.eval(query)
+                    
+                    # 执行向量搜索
+                    search_query = sql.SQL("""
+                        SELECT filename, code, embedding <=> %s AS distance, start, "end"
+                        FROM {} 
+                        ORDER BY distance 
+                        LIMIT %s
+                    """).format(sql.Identifier(self.table_name))
+                    
+                    cur.execute(search_query, (query_vector, limit))
+                    rows = cur.fetchall()
+                    
+                    for row in rows:
+                        similarity = 1.0 - row[2]
+                        # 只有相似度够高的才认为是有效结果
+                        if similarity > 0.2:  # 降低阈值以获得更多结果
+                            results.append({
+                                "filename": row[0],
+                                "code": row[1],
+                                "start": row[3],
+                                "end": row[4],
+                                "match_type": "semantic",
+                                "score": similarity * 0.6,  # 语义搜索权重较低
+                            })
+        except Exception as e:
+            print(f"语义搜索错误: {e}")
+        
+        return results
+    
+    def hybrid_search(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """混合搜索：结合精确、模糊和语义搜索"""
+        # 执行三种搜索
+        exact_results = self.exact_search(query, limit)
+        fuzzy_results = self.fuzzy_search(query, limit)
+        semantic_results = self.semantic_search(query, limit)
+        
+        # 合并结果，去重
+        all_results = []
+        seen = set()
+        
+        # 优先级：精确 > 模糊 > 语义
+        for results_list in [exact_results, fuzzy_results, semantic_results]:
+            for result in results_list:
+                # 使用文件名+位置作为唯一标识，转换dict为字符串
+                start_str = str(result["start"])
+                end_str = str(result["end"])
+                key = (result["filename"], start_str, end_str)
+                if key not in seen:
+                    seen.add(key)
+                    all_results.append(result)
+        
+        # 按分数排序
+        all_results.sort(key=lambda x: x["score"], reverse=True)
+        
+        return all_results[:limit]
+
+
 class CocoIndexMcpServer:
     """MCP Server for CocoIndex code analysis using FastMCP."""
     
@@ -267,16 +420,12 @@ class CocoIndexMcpServer:
         self.logger = logging.getLogger(__name__)
         self._initialized = False
         self.db_pool: Optional[ConnectionPool] = None
+        self.search_engine: Optional[ImprovedCodeSearch] = None
         
-        # 初始化FastMCP服务器（修复弃用警告）
-        if FASTMCP_AVAILABLE:
-            self.mcp_server = FastMCP(            
-                name="CocoIndex"
-            )
-            self._setup_tools()
-        else:
-            self.logger.error("FastMCP not available. Install with: pip install fastmcp")
-            raise ImportError("FastMCP is required")
+        self.mcp_server = FastMCP(            
+            name="CocoIndex"
+        )
+        self._setup_tools()
     
     async def initialize(self):
         """初始化MCP服务器"""
@@ -289,15 +438,13 @@ class CocoIndexMcpServer:
             lib.init(settings)
             
             # 初始化数据库连接池
-            if POSTGRES_AVAILABLE:
-                db_url = os.getenv("COCOINDEX_DATABASE_URL")
-                if db_url:
-                    self.db_pool = ConnectionPool(db_url)
-                    self.logger.info("Database connection pool initialized")
-                else:
-                    self.logger.warning("COCOINDEX_DATABASE_URL not set, database queries will not work")
+            db_url = os.getenv("COCOINDEX_DATABASE_URL")
+            if db_url:
+                self.db_pool = ConnectionPool(db_url, open=True)
+                self.search_engine = ImprovedCodeSearch(db_url)
+                self.logger.info("Database connection pool and search engine initialized")
             else:
-                self.logger.warning("psycopg_pool not available, install with: pip install psycopg[pool] pgvector")
+                self.logger.warning("COCOINDEX_DATABASE_URL not set, database queries will not work")
             
             # 确保flows可用
             try:
@@ -405,9 +552,8 @@ class CocoIndexMcpServer:
             """测试CocoIndex连接和服务器状态"""
             status = {
                 "cocoindex_initialized": self._initialized,
-                "postgres_available": POSTGRES_AVAILABLE,
-                "fastmcp_available": FASTMCP_AVAILABLE,
                 "database_connected": bool(self.db_pool),
+                "search_engine_ready": bool(self.search_engine),
                 "flow_name": self.flow_name
             }
             
@@ -436,85 +582,41 @@ class CocoIndexMcpServer:
         @self.mcp_server.tool()
         async def search_code(
             query: str, 
+            search_type: str = "hybrid",
             flow_name: Optional[str] = None,
             top_k: int = 5
         ) -> List[Dict[str, Any]]:
-            """使用CocoIndex进行语义代码搜索"""
-            if not self.db_pool:
-                return [{"error": "Database not available. Set COCOINDEX_DATABASE_URL and install psycopg[pool] pgvector."}]
+            """改进的代码搜索，支持精确、模糊、语义和混合搜索"""
+            if not self.search_engine:
+                return [{"error": "Search engine not available. Please check database connection."}]
             
             try:
-                # 获取当前可用的flows
-                current_flows = list(flow.flow_names())
+                # 使用改进的搜索引擎
+                if search_type == "exact":
+                    results = self.search_engine.exact_search(query, top_k)
+                elif search_type == "fuzzy":
+                    results = self.search_engine.fuzzy_search(query, top_k)
+                elif search_type == "semantic":
+                    results = self.search_engine.semantic_search(query, top_k)
+                else:  # hybrid (default)
+                    results = self.search_engine.hybrid_search(query, top_k)
                 
-                if not current_flows:
-                    return [{"error": "No flows available. Please run a CocoIndex flow first."}]
+                # 格式化结果，添加match_type字段
+                formatted_results = []
+                for result in results:
+                    formatted_results.append({
+                        "filename": result["filename"],
+                        "code": result["code"],
+                        "score": result["score"],
+                        "match_type": result["match_type"],
+                        "start": result["start"],
+                        "end": result["end"],
+                    })
                 
-                # 确定要搜索的flow
-                if flow_name and flow_name in current_flows:
-                    target_flow = flow.flow_by_name(flow_name)
-                else:
-                    # 寻找CodeEmbedding flow或使用第一个可用的
-                    target_flow = None
-                    for fname in current_flows:
-                        if "embedding" in fname.lower() or "code" in fname.lower():
-                            target_flow = flow.flow_by_name(fname)
-                            break
-                    
-                    if not target_flow and current_flows:
-                        target_flow = flow.flow_by_name(current_flows[0])
-                
-                if not target_flow:
-                    return [{"error": "No suitable flow found for code search"}]
-                
-                # 获取表名（使用实际的表名）
-                table_name = "codeembedding__code_embeddings"
-                
-                # 使用transform flow获取查询向量
-                try:
-                    query_vector = code_to_embedding.eval(query)
-                except Exception as e:
-                    return [{"error": f"Failed to generate query embedding: {str(e)}"}]
-                
-                # 执行向量相似度搜索
-                with self.db_pool.connection() as conn:
-                    register_vector(conn)
-                    with conn.cursor() as cur:
-                        # 检查表是否存在
-                        cur.execute(
-                            "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = %s)",
-                            (table_name,)
-                        )
-                        
-                        table_exists = cur.fetchone()
-                        if not table_exists or not table_exists[0]:
-                            return [{"error": f"Table '{table_name}' does not exist. Please run indexing first."}]
-                        
-                        # 执行向量搜索（使用余弦相似度）
-                        search_query = sql.SQL("""
-                            SELECT filename, code, embedding <=> %s AS distance, start, "end"
-                            FROM {} 
-                            ORDER BY distance 
-                            LIMIT %s
-                        """).format(sql.Identifier(table_name))
-                        
-                        cur.execute(search_query, (query_vector, top_k))
-                        
-                        results = []
-                        rows = cur.fetchall()
-                        for row in rows:
-                            results.append({
-                                "filename": row[0],
-                                "code": row[1],
-                                "score": 1.0 - row[2],  # 转换distance为similarity score
-                                "start": row[3],
-                                "end": row[4],
-                            })
-                        
-                        return results
+                return formatted_results
                         
             except Exception as e:
-                self.logger.error(f"Error in semantic search: {e}")
+                self.logger.error(f"Error in improved search: {e}")
                 return [{"error": f"Search error: {str(e)}"}]
 
         @self.mcp_server.tool()
@@ -571,7 +673,7 @@ class CocoIndexMcpServer:
                     
                     current_flow_names = list(flow.flow_names())
                     result["current_flows"] = current_flow_names
-                    result["app_target"] = str(app_ref)
+                    result["app_target"] = [str(app_ref)]
                     
                     persisted_set = set(persisted_flow_names)
                     missing_setup = [name for name in current_flow_names if name not in persisted_set]
@@ -601,8 +703,6 @@ class CocoIndexMcpServer:
         """测试CocoIndex连接和服务器状态（用于测试模式）"""
         status = {
             "cocoindex_initialized": self._initialized,
-            "postgres_available": POSTGRES_AVAILABLE,
-            "fastmcp_available": FASTMCP_AVAILABLE,
             "database_connected": bool(self.db_pool),
             "flow_name": self.flow_name
         }
@@ -647,9 +747,9 @@ def main_sync():
     parser = argparse.ArgumentParser(description="CocoIndex MCP Server")
     parser.add_argument("--flow", default="gmzz", help="CocoIndex flow name")
     parser.add_argument("--log-level", default="INFO", help="Logging level")
-    parser.add_argument("--transport", choices=["stdio", "sse"], default="stdio", 
+    parser.add_argument("--transport", choices=["stdio", "sse"], default="sse", 
                        help="Transport type (stdio or sse)")
-    parser.add_argument("--host", default="127.0.0.1", help="Server host")
+    parser.add_argument("--host", default="0.0.0.0", help="Server host")
     parser.add_argument("--port", type=int, default=2010, help="Server port")
     parser.add_argument("--test", action="store_true", help="Run test mode")
     
