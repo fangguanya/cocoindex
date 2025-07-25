@@ -7,6 +7,7 @@ Supports dual-path design for project_root and scan_directory.
 """
 
 import time
+import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set
 from dataclasses import dataclass, field
@@ -38,8 +39,6 @@ class AnalysisConfig:
         '*/DerivedDataCache/*',  # UE缓存
         '*/Saved/*',         # UE保存文件
     })
-    use_compile_commands: bool = True  # 是否使用compile_commands.json
-    generate_compile_commands: bool = True  # 是否自动生成compile_commands.json
     max_files: Optional[int] = None
     verbose: bool = False
 
@@ -111,7 +110,7 @@ class CppAnalyzer:
             # 2. 扫描文件
             scan_result = self._scan_files(config)
             if not scan_result.files:
-                return self._create_empty_result(config, "未找到匹配的C++文件")
+                raise Exception("未找到匹配的C++文件")
             
             if config.verbose:
                 self.console.print(f"找到 {len(scan_result.files)} 个C++文件")
@@ -162,26 +161,71 @@ class CppAnalyzer:
     
     def _initialize_parser(self, config: AnalysisConfig):
         """初始化解析器 - 支持指定的compile_commands.json路径"""
-        if config.use_compile_commands:
-            # 确定 compile_commands.json 的路径
-            if config.compile_commands_path:
-                compile_commands_path = config.compile_commands_path
-            else:
-                compile_commands_path = str(Path(config.project_root) / "compile_commands.json")
-            
-            # 直接加载指定的文件
-            if Path(compile_commands_path).exists():
-                self.clang_parser.load_compile_commands(compile_commands_path)
-            else:
-                from .logger import get_logger
-                logger = get_logger()
-                logger.warning(f"指定的 compile_commands.json 文件不存在: {compile_commands_path}")
-
+        # 确定 compile_commands.json 的路径
+        if config.compile_commands_path:
+            compile_commands_path = config.compile_commands_path
+        else:
+            compile_commands_path = str(Path(config.project_root) / "compile_commands.json")
+        
+        # 直接加载指定的文件
+        if Path(compile_commands_path).exists():
+            self.clang_parser.load_compile_commands(compile_commands_path)
+        else:
+            from .logger import get_logger
+            logger = get_logger()
+            logger.warning(f"指定的 compile_commands.json 文件不存在: {compile_commands_path}")
     
     def _scan_files(self, config: AnalysisConfig) -> ScanResult:
-        """扫描文件"""
-        return self.file_scanner.scan_directory(config)
-    
+        """从compile_commands数据中筛选文件
+        
+        Args:
+            config: 分析配置
+            
+        Returns:
+            ScanResult: 筛选后的文件列表和映射
+        """
+        from .logger import get_logger
+        logger = get_logger()
+        
+        # 从clang_parser获取已加载的compile_commands数据
+        compile_commands = self.clang_parser.compile_commands or {}
+        
+        # 提取所有文件路径（compile_commands的key就是文件路径）
+        all_files = []
+        for file_path in compile_commands.keys():
+            if Path(file_path).exists():
+                all_files.append(file_path)
+        
+        logger.info(f"从compile_commands提取到 {len(all_files)} 个有效文件")
+        
+        # 根据scan_directory筛选文件
+        filtered_files = []
+        scan_dir_path = Path(config.scan_directory).resolve()
+        
+        for file_path in all_files:
+            try:
+                file_abs_path = Path(file_path).resolve()
+                
+                # 检查文件是否在scan_directory下 - 使用file_scanner的方法
+                if self.file_scanner._is_under_directory(file_abs_path, scan_dir_path):
+                    # 检查是否应该包含该文件 - 使用file_scanner的方法
+                    filtered_files.append(file_path)
+                    logger.info(f"✓ 包含文件: {file_path}")
+                else:
+                    logger.info(f"⚠ 跳过文件（不在scan_directory下）: {file_path}")
+                    logger.info(f"   文件路径: {file_abs_path}")
+                    logger.info(f"   扫描目录: {scan_dir_path}")
+                    
+            except Exception as e:
+                logger.warning(f"处理文件路径时出错 {file_path}: {e}")
+                continue
+        
+        logger.info(f"筛选后的文件数量: {len(filtered_files)}")
+        
+        # 生成文件映射
+        file_mappings = self.file_scanner._generate_file_mappings(filtered_files, config.project_root)
+        return ScanResult(files=filtered_files, file_mappings=file_mappings)
+
     def _parse_files(self, file_paths: List[str], config: AnalysisConfig) -> List[ParsedFile]:
         """解析文件"""
         if config.max_files:
@@ -249,15 +293,3 @@ class CppAnalyzer:
         self.console.print(f"提取命名空间: {statistics['total_namespaces']}")
         self.console.print(f"总用时: {statistics['analysis_time']:.2f}秒")
     
-    def _create_empty_result(self, config: AnalysisConfig, reason: str) -> AnalysisResult:
-        """创建空结果"""
-        self.console.print(f"[yellow]{reason}[/yellow]")
-        
-        return AnalysisResult(
-            success=False,
-            extracted_entities={},
-            file_mappings={},
-            parsed_files=[],
-            config=config,
-            statistics={"reason": reason}
-        ) 

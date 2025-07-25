@@ -114,10 +114,10 @@ class ClangParser:
             # 处理UE的@response_file.rsp格式
             processed_args = []
             for arg in args:
-                arg = arg.strip()
-                if arg.startswith('@') and arg.endswith('.rsp'):
+                if arg.startswith('@'):
                     # 解析.rsp响应文件
-                    rsp_args = self._parse_rsp_file(arg[1:])  # 移除@符号
+                    arg = arg[1:].strip('"\'')
+                    rsp_args = self._parse_rsp_file(arg)
                     processed_args.extend(rsp_args)
                 else:
                     processed_args.append(arg)
@@ -278,7 +278,7 @@ class ClangParser:
                 continue
             
             # 跳过输入/输出文件
-            if arg in ['-o', '-c', '/c'] and i + 1 < len(raw_args):
+            if arg in ['-o', '-c', '/c'] and i + 1 < len(expanded_args):
                 skip_next = True
                 continue
             
@@ -291,8 +291,8 @@ class ClangParser:
                 continue
             
             # 处理include路径去重
-            if arg in ['-I', '/I'] and i + 1 < len(raw_args):
-                include_path = raw_args[i + 1]
+            if arg in ['-I', '/I'] and i + 1 < len(expanded_args):
+                include_path = expanded_args[i + 1]
                 if include_path not in seen_includes:
                     processed_args.extend(['-I', include_path])
                     seen_includes.add(include_path)
@@ -379,66 +379,12 @@ class ClangParser:
         """获取文件特定的编译参数"""
         # 规范化输入路径
         normalized_input = self._normalize_path(file_path)
-        
-        # 首先尝试精确匹配
-        if normalized_input in self.compile_commands:
-            return self.compile_commands[normalized_input]["args"]
-        
-        # 尝试规范化后的路径匹配
-        for cmd_path in list(self.compile_commands.keys()):
-            normalized_cmd_path = self._normalize_path(cmd_path)
-            if normalized_input == normalized_cmd_path:
-                return self.compile_commands[cmd_path]["args"]
-        
-        # 如果精确匹配失败，尝试按文件名匹配
-        file_name = Path(file_path).name.lower()
-        for cmd_path, args_data in self.compile_commands.items():
-            if Path(cmd_path).name.lower() == file_name:
-                from .logger import get_logger
-                logger = get_logger()
-                logger.compilation_info(f"找到匹配文件: {file_name} -> {cmd_path}", len(args_data["args"]))
-                
-                if self.console:
-                    self.console.print(f"🔍 找到匹配文件: {file_name} -> {cmd_path}", style="cyan")
-                return args_data["args"]
-        
-        # 回退到默认参数
-        from .logger import get_logger
-        logger = get_logger()
-        logger.warning(f"未找到编译参数，使用默认: {file_path}")
-        return []
+        return self.compile_commands[normalized_input]["args"]
     
     def _get_file_directory(self, file_path: str) -> str:
         """获取文件的编译目录"""
         normalized_input = self._normalize_path(file_path)
-        
-        # 首先尝试精确匹配
-        if normalized_input in self.compile_commands:
-            return self.compile_commands[normalized_input]["directory"]
-        
-        # 尝试规范化后的路径匹配
-        for cmd_path in list(self.compile_commands.keys()):
-            normalized_cmd_path = self._normalize_path(cmd_path)
-            if normalized_input == normalized_cmd_path:
-                return self.compile_commands[cmd_path]["directory"]
-        
-        # 如果精确匹配失败，尝试按文件名匹配
-        file_name = Path(file_path).name.lower()
-        for cmd_path, args_data in self.compile_commands.items():
-            if Path(cmd_path).name.lower() == file_name:
-                from .logger import get_logger
-                logger = get_logger()
-                logger.compilation_info(f"找到匹配文件: {file_name} -> {cmd_path}", len(args_data["args"]))
-                
-                if self.console:
-                    self.console.print(f"🔍 找到匹配文件: {file_name} -> {cmd_path}", style="cyan")
-                return args_data["directory"]
-        
-        # 回退到项目根目录
-        from .logger import get_logger
-        logger = get_logger()
-        logger.warning(f"未找到编译目录，使用项目根目录: {file_path}")
-        return ""
+        return self.compile_commands[normalized_input]["directory"]
     
     def _normalize_path(self, path: str) -> str:
         """规范化路径 - 处理大小写、软链接等"""
@@ -521,6 +467,8 @@ class ClangParser:
             
             # 收集详细诊断信息
             diagnostics = []
+            # 显示详细的诊断信息
+            error_count = 0
             for diag in tu.diagnostics:
                 if diag.severity >= clang.Diagnostic.Warning:
                     severity_map = {
@@ -539,11 +487,6 @@ class ClangParser:
                         column=diag.location.column,
                         category=diag.category_name
                     ))
-            
-            # 显示详细的诊断信息
-            error_count = 0
-            for diag in tu.diagnostics:
-                if diag.severity >= clang.Diagnostic.Warning:
                     severity_name = {
                         clang.Diagnostic.Warning: 'WARNING',
                         clang.Diagnostic.Error: 'ERROR',
@@ -557,9 +500,7 @@ class ClangParser:
                         error_count += 1
             
             success = error_count == 0
-            
             parse_time = time.time() - start_time
-            
             return ParsedFile(
                 file_path=file_path,
                 translation_unit=tu,

@@ -92,9 +92,7 @@ def main():
             # clang_working_directory 不再需要，会自动从compile_commands.json获取
             output_path=OUTPUT_FILE,
             verbose=VERBOSE,
-            max_files=MAX_FILES,
-            use_compile_commands=True,
-            generate_compile_commands=True
+            max_files=MAX_FILES
         )
         
         analysis_time = time.time() - start_time

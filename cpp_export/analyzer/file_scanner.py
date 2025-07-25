@@ -206,9 +206,8 @@ class FileScanner:
         if path_obj.suffix.lower() not in config.include_extensions:
             return False
         
-        # 检查排除模式
-        exclude_patterns = config.exclude_patterns or self.DEFAULT_EXCLUDE_PATTERNS
-        if self._should_exclude_file(file_path, exclude_patterns):
+        # 检查排除模式 - 使用配置中的排除模式
+        if config.exclude_patterns and self._should_exclude_file(file_path, config.exclude_patterns):
             return False
         
         # 检查文件是否存在和可读
@@ -252,4 +251,11 @@ class FileScanner:
                 file_mappings[file_id] = str(Path(file_path).resolve()).replace('\\', '/')
         
         return file_mappings
-    
+
+    def _is_under_directory(self, file_path: Path, directory_path: Path) -> bool:
+        """判断文件是否在指定目录下"""
+        try:
+            file_path.relative_to(directory_path)
+            return True
+        except ValueError:
+            return False

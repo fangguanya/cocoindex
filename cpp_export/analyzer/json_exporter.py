@@ -131,7 +131,6 @@ class JsonExporter:
             "language": "C++",
             "analysis_timestamp": datetime.now().isoformat(),
             "analyzer_config": {
-                "use_compile_commands": getattr(config, 'use_compile_commands', True),
                 "generate_compile_commands": getattr(config, 'generate_compile_commands', True),
                 "include_extensions": list(getattr(config, 'include_extensions', [])),
                 "exclude_patterns": list(getattr(config, 'exclude_patterns', [])),
