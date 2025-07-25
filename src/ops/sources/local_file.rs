@@ -69,8 +69,10 @@ impl SourceExecutor for Executor {
                             None
                         };
                         if let Some(relative_path) = relative_path.to_str() {
+                            // 将Windows路径中的反斜杠转换为正斜杠，避免JSON序列化时的Unicode转义序列问题
+                            let normalized_path = relative_path.replace('\\', "/");
                             yield vec![PartialSourceRowMetadata {
-                                key: KeyValue::Str(relative_path.into()),
+                                key: KeyValue::Str(normalized_path.into()),
                                 ordinal,
                             }];
                         } else {
@@ -89,20 +91,27 @@ impl SourceExecutor for Executor {
         key: &KeyValue,
         options: &SourceExecutorGetOptions,
     ) -> Result<PartialSourceRowData> {
-        if !self.is_file_included(key.str_value()?.as_ref()) {
+        let key_str = key.str_value()?;
+        if !self.is_file_included(key_str.as_ref()) {
             return Ok(PartialSourceRowData {
                 value: Some(SourceValue::NonExistence),
                 ordinal: Some(Ordinal::unavailable()),
             });
         }
-        let path = self.root_path.join(key.str_value()?.as_ref());
+        // 在Windows系统中，需要将标准化的路径（正斜杠）转换回系统路径（反斜杠）
+        let system_path = if cfg!(windows) {
+            key_str.replace('/', "\\")
+        } else {
+            key_str.to_string()
+        };
+        let path = self.root_path.join(system_path);
         let ordinal = if options.include_ordinal {
             Some(path.metadata()?.modified()?.try_into()?)
         } else {
             None
         };
         let value = if options.include_value {
-            match std::fs::read(path) {
+            match std::fs::read(&path) {
                 Ok(content) => {
                     let content = if self.binary {
                         fields_value!(content)

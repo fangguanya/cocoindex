@@ -97,5 +97,5 @@ class SentenceTransformerEmbedExecutor:
 
     def __call__(self, text: str) -> NDArray[np.float32]:
         assert self._model is not None
-        result: NDArray[np.float32] = self._model.encode(text, convert_to_numpy=True)
+        result: NDArray[np.float32] = self._model.encode(text, convert_to_numpy=True, show_progress_bar=False)
         return result

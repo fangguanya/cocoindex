@@ -82,7 +82,7 @@ class ProgressMonitor:
                                 if new_records > 0:
                                     speed = new_records / elapsed if elapsed > 0 else 0
                                     message = f"📈 处理进度: {total_count} 个代码块 | {file_count} 个文件 | 速度: {speed:.1f} 块/秒 | 运行时间: {elapsed:.1f}秒"
-                                    print(message)  # 保持控制台输出
+                                    #print(message)  # 保持控制台输出
                                     import logging
                                     logger = logging.getLogger(__name__)
                                     logger.info(message)  # 同时记录到日志文件
@@ -134,7 +134,7 @@ def track_chunk_progress(text: str) -> str:
         processing_stats["chunks_processed"] += 1
         if processing_stats["chunks_processed"] % 10 == 0:  # 每10个块显示一次
             message = f"✂️  已分割 {processing_stats['chunks_processed']} 个代码块"
-            print(message)  # 保持控制台输出
+            #print(message)  # 保持控制台输出
             logger.info(message)  # 同时记录到日志文件
     return text
 
@@ -148,7 +148,7 @@ def track_embedding_progress(embedding: NDArray[np.float32]) -> NDArray[np.float
         processing_stats["embeddings_created"] += 1
         if processing_stats["embeddings_created"] % 10 == 0:  # 每10个嵌入显示一次
             message = f"🤖 已生成 {processing_stats['embeddings_created']} 个向量嵌入"
-            print(message)  # 保持控制台输出
+            #print(message)  # 保持控制台输出
             logger.info(message)  # 同时记录到日志文件
     return embedding
 
@@ -194,16 +194,21 @@ def code_embedding_flow(
     Define an example flow that embeds files into a vector database with progress tracking.
     """
     print("🔍 正在扫描源文件...")
+    path = "D:/c7_i9_EngineDev/Client"
+    included_patterns = ["*.cpp", "*.h", "*.hpp", "*.c"]
+    #included_patterns=["*.py", "*.rs", "*.toml", "*.md", "*.mdx"],
+    #included_patterns=["*.cpp", "*.h", "*.hpp", "*.c", "*.lua"],
     data_scope["files"] = flow_builder.add_source(
         cocoindex.sources.LocalFile(
-            path="D:/c7_i9_EngineDev",
-            #included_patterns=["*.py", "*.rs", "*.toml", "*.md", "*.mdx"],
-            included_patterns=["*.cpp", "*.h", "*.hpp", "*.c", "*.h", "*.hpp", "*.lua"],
+            path=path,
+            included_patterns=included_patterns,
             excluded_patterns=["**/.*", "target", "**/node_modules", 
                 "**/Binaries", "**/DerivedDataCache", "**/Intermediate", "**/Saved", "**/Build", "**/Content", "*.luac",
                 "**/Engine/Source/Programs", "**/ThirdParty"],
         )
     )
+    print("📋 处理的文件路径: ", path)
+    print("🔍 包含的文件类型: ", included_patterns)
     
     print("📊 开始处理文件并收集数据...")
     code_embeddings = data_scope.add_collector()
@@ -302,8 +307,6 @@ def _main() -> None:
     
     try:
         print("⏳ 正在处理文件，这可能需要一些时间...")
-        print("📋 处理的文件路径: D:/c7_i9_EngineDev/Client")
-        print("🔍 包含的文件类型: *.cpp, *.h, *.hpp, *.c")
         
         stats = code_embedding_flow.update()
         
@@ -406,7 +409,7 @@ if __name__ == "__main__":
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
     root_logger.addHandler(file_handler)
-    root_logger.addHandler(console_handler)
+    #root_logger.addHandler(console_handler)
     
     # 启用cocoindex的详细日志
     cocoindex_logger = logging.getLogger('cocoindex')

@@ -18,6 +18,7 @@ import time
 import re
 from typing import Dict, List, Optional, Any
 import argparse
+import uuid
 from numpy.typing import NDArray
 import numpy as np
 
@@ -46,7 +47,6 @@ processing_stats = {
     "current_file": ""
 }
 stats_lock = threading.Lock()
-
 
 class ProgressMonitor:
     """监控cocoindex处理进度的类"""
@@ -150,19 +150,19 @@ def track_file_progress(filename: str) -> str:
 
 def track_chunk_progress(text: str) -> str:
     """跟踪代码块处理进度"""
-    with stats_lock:
-        processing_stats["chunks_processed"] += 1
-        if processing_stats["chunks_processed"] % 1000 == 0:  # 每10个块显示一次
-            print(f"✂️  已分割 {processing_stats['chunks_processed']} 个代码块")
+    # with stats_lock:
+    #     processing_stats["chunks_processed"] += 1
+    #     if processing_stats["chunks_processed"] % 1000 == 0:  # 每10个块显示一次
+    #         print(f"✂️  已分割 {processing_stats['chunks_processed']} 个代码块")
     return text
 
 
 def track_embedding_progress(embedding: NDArray[np.float32]) -> NDArray[np.float32]:
     """跟踪嵌入生成进度"""
-    with stats_lock:
-        processing_stats["embeddings_created"] += 1
-        if processing_stats["embeddings_created"] % 1000 == 0:  # 每10个嵌入显示一次
-            print(f"🤖 已生成 {processing_stats['embeddings_created']} 个向量嵌入")
+    # with stats_lock:
+    #     processing_stats["embeddings_created"] += 1
+    #     if processing_stats["embeddings_created"] % 1000 == 0:  # 每10个嵌入显示一次
+    #         print(f"🤖 已生成 {processing_stats['embeddings_created']} 个向量嵌入")
     return embedding
 
 
@@ -189,13 +189,17 @@ def code_embedding_flow(
     Define an example flow that embeds files into a vector database with progress tracking.
     """
     print("🔍 正在扫描源文件...")
+    path = "D:/c7_i9_EngineDev/Client"
+    included_patterns = ["*.cpp", "*.h", "*.hpp", "*.c"]
     data_scope["files"] = flow_builder.add_source(
         cocoindex.sources.LocalFile(
-            path="D:/c7_i9_EngineDev/Client",
-            included_patterns=["*.cpp", "*.h", "*.hpp", "*.c"],
+            path=path,
+            included_patterns=included_patterns,
             excluded_patterns=["**/.*", "target", "**/node_modules", "**/Binaries", "**/DerivedDataCache", "**/Intermediate", "**/Saved", "**/Build", "**/Content"],
         )
     )
+    print("📋 处理的文件路径: ", path)
+    print("🔍 包含的文件类型: ", included_patterns)
     
     print("📊 开始处理文件并收集数据...")
     code_embeddings = data_scope.add_collector()
@@ -432,6 +436,8 @@ class CocoIndexMcpServer:
         if self._initialized:
             return
             
+        self.logger.info("🚀 开始初始化 CocoIndex MCP 服务器...")
+            
         try:
             # 初始化CocoIndex
             settings = setting.Settings.from_env()
@@ -457,6 +463,7 @@ class CocoIndexMcpServer:
             await self._auto_initialize_flow()
             
             self._initialized = True
+            self.logger.info("🎉 CocoIndex MCP 服务器初始化完成！")
             
         except Exception as e:
             self.logger.error(f"Failed to initialize MCP server: {e}")
@@ -504,8 +511,6 @@ class CocoIndexMcpServer:
                     self.logger.debug(f"检查现有数据时出错: {e}")
             
             self.logger.info("⏳ 正在处理文件，这可能需要一些时间...")
-            self.logger.info("📋 处理的文件路径: D:/c7_i9_EngineDev/Client")
-            self.logger.info("🔍 包含的文件类型: *.cpp, *.h, *.hpp, *.c")
             
             try:
                 # 更新流程
@@ -550,34 +555,64 @@ class CocoIndexMcpServer:
         @self.mcp_server.tool()
         async def test_connection() -> Dict[str, Any]:
             """测试CocoIndex连接和服务器状态"""
-            status = {
-                "cocoindex_initialized": self._initialized,
-                "database_connected": bool(self.db_pool),
-                "search_engine_ready": bool(self.search_engine),
-                "flow_name": self.flow_name
-            }
+            # 生成请求ID并记录请求
+            request_id = str(uuid.uuid4())[:8]
+            self.logger.info(f"🔧 [请求 {request_id}] 工具: test_connection")
+            self.logger.info(f"📥 [请求 {request_id}] 参数: 无")
             
-            # 测试数据库连接
-            if self.db_pool:
-                try:
-                    with self.db_pool.connection() as conn:
-                        with conn.cursor() as cur:
-                            cur.execute("SELECT 1")
-                            result = cur.fetchone()
-                            status["database_test"] = "SUCCESS" if result else "FAILED"
-                except Exception as e:
-                    status["database_test"] = f"ERROR: {str(e)}"
-            else:
-                status["database_test"] = "NO_POOL"
+            start_time = time.time()
             
-            # 检查可用的flows
             try:
-                current_flows = list(flow.flow_names())
-                status["available_flows"] = current_flows
+                self.logger.info(f"⚙️  [处理 {request_id}] 正在执行工具: test_connection")
+                
+                status = {
+                    "cocoindex_initialized": self._initialized,
+                    "database_connected": bool(self.db_pool),
+                    "search_engine_ready": bool(self.search_engine),
+                    "flow_name": self.flow_name
+                }
+                
+                # 测试数据库连接
+                if self.db_pool:
+                    try:
+                        with self.db_pool.connection() as conn:
+                            with conn.cursor() as cur:
+                                cur.execute("SELECT 1")
+                                result = cur.fetchone()
+                                status["database_test"] = "SUCCESS" if result else "FAILED"
+                    except Exception as e:
+                        status["database_test"] = f"ERROR: {str(e)}"
+                else:
+                    status["database_test"] = "NO_POOL"
+                
+                # 检查可用的flows
+                try:
+                    current_flows = list(flow.flow_names())
+                    status["available_flows"] = current_flows
+                except Exception as e:
+                    status["available_flows"] = f"ERROR: {str(e)}"
+                
+                # 记录成功响应
+                execution_time = time.time() - start_time
+                self.logger.info(f"✅ [响应 {request_id}] 工具: test_connection - 执行成功")
+                self.logger.info(f"⏱️  [响应 {request_id}] 执行耗时: {execution_time:.3f}秒")
+                
+                result_str = str(status)
+                if len(result_str) > 500:
+                    result_preview = result_str[:500] + "... (结果被截断)"
+                else:
+                    result_preview = result_str
+                self.logger.info(f"📤 [响应 {request_id}] 返回结果: {result_preview}")
+                
+                return status
+                
             except Exception as e:
-                status["available_flows"] = f"ERROR: {str(e)}"
-            
-            return status
+                # 记录错误响应
+                execution_time = time.time() - start_time
+                self.logger.error(f"❌ [响应 {request_id}] 工具: test_connection - 执行失败")
+                self.logger.error(f"⏱️  [响应 {request_id}] 执行耗时: {execution_time:.3f}秒")
+                self.logger.error(f"🚨 [响应 {request_id}] 错误信息: {str(e)}")
+                raise e
 
         @self.mcp_server.tool()
         async def search_code(
@@ -587,10 +622,27 @@ class CocoIndexMcpServer:
             top_k: int = 5
         ) -> List[Dict[str, Any]]:
             """改进的代码搜索，支持精确、模糊、语义和混合搜索"""
-            if not self.search_engine:
-                return [{"error": "Search engine not available. Please check database connection."}]
+            # 生成请求ID并记录请求
+            request_id = str(uuid.uuid4())[:8]
+            self.logger.info(f"🔧 [请求 {request_id}] 工具: search_code")
+            self.logger.info(f"📥 [请求 {request_id}] 参数: query='{query}', search_type='{search_type}', flow_name={flow_name}, top_k={top_k}")
+            
+            start_time = time.time()
             
             try:
+                self.logger.info(f"⚙️  [处理 {request_id}] 正在执行工具: search_code")
+                
+                if not self.search_engine:
+                    error_result = [{"error": "Search engine not available. Please check database connection."}]
+                    
+                    # 记录错误响应
+                    execution_time = time.time() - start_time
+                    self.logger.error(f"❌ [响应 {request_id}] 工具: search_code - 搜索引擎不可用")
+                    self.logger.error(f"⏱️  [响应 {request_id}] 执行耗时: {execution_time:.3f}秒")
+                    self.logger.error(f"📤 [响应 {request_id}] 返回结果: {error_result}")
+                    
+                    return error_result
+                
                 # 使用改进的搜索引擎
                 if search_type == "exact":
                     results = self.search_engine.exact_search(query, top_k)
@@ -613,19 +665,48 @@ class CocoIndexMcpServer:
                         "end": result["end"],
                     })
                 
+                # 记录成功响应
+                execution_time = time.time() - start_time
+                self.logger.info(f"✅ [响应 {request_id}] 工具: search_code - 执行成功")
+                self.logger.info(f"⏱️  [响应 {request_id}] 执行耗时: {execution_time:.3f}秒")
+                self.logger.info(f"📤 [响应 {request_id}] 搜索到 {len(formatted_results)} 个结果")
+                
                 return formatted_results
                         
             except Exception as e:
-                self.logger.error(f"Error in improved search: {e}")
-                return [{"error": f"Search error: {str(e)}"}]
+                # 记录错误响应
+                execution_time = time.time() - start_time
+                self.logger.error(f"❌ [响应 {request_id}] 工具: search_code - 执行失败")
+                self.logger.error(f"⏱️  [响应 {request_id}] 执行耗时: {execution_time:.3f}秒")
+                self.logger.error(f"🚨 [响应 {request_id}] 错误信息: {str(e)}")
+                
+                error_result = [{"error": f"Search error: {str(e)}"}]
+                return error_result
 
         @self.mcp_server.tool()
         async def get_database_stats() -> Dict[str, Any]:
             """获取数据库统计信息"""
-            if not self.db_pool:
-                return {"error": "Database not available"}
+            # 生成请求ID并记录请求
+            request_id = str(uuid.uuid4())[:8]
+            self.logger.info(f"🔧 [请求 {request_id}] 工具: get_database_stats")
+            self.logger.info(f"📥 [请求 {request_id}] 参数: 无")
+            
+            start_time = time.time()
             
             try:
+                self.logger.info(f"⚙️  [处理 {request_id}] 正在执行工具: get_database_stats")
+                
+                if not self.db_pool:
+                    error_result = {"error": "Database not available"}
+                    
+                    # 记录错误响应
+                    execution_time = time.time() - start_time
+                    self.logger.error(f"❌ [响应 {request_id}] 工具: get_database_stats - 数据库不可用")
+                    self.logger.error(f"⏱️  [响应 {request_id}] 执行耗时: {execution_time:.3f}秒")
+                    self.logger.error(f"📤 [响应 {request_id}] 返回结果: {error_result}")
+                    
+                    return error_result
+                
                 with self.db_pool.connection() as conn:
                     with conn.cursor() as cur:
                         # 获取正确的表名
@@ -640,28 +721,62 @@ class CocoIndexMcpServer:
                             file_count_result = cur.fetchone()
                             file_count = file_count_result[0] if file_count_result else 0
                             
-                            return {
+                            result = {
                                 "table_name": table_name,
                                 "total_records": count,
                                 "unique_files": file_count,
                                 "table_exists": True
                             }
+                            
+                            # 记录成功响应
+                            execution_time = time.time() - start_time
+                            self.logger.info(f"✅ [响应 {request_id}] 工具: get_database_stats - 执行成功")
+                            self.logger.info(f"⏱️  [响应 {request_id}] 执行耗时: {execution_time:.3f}秒")
+                            self.logger.info(f"📤 [响应 {request_id}] 数据库统计: {count} 条记录, {file_count} 个文件")
+                            
+                            return result
+                            
                         except Exception as e:
                             if "does not exist" in str(e):
-                                return {
+                                result = {
                                     "table_name": table_name,
                                     "table_exists": False,
                                     "message": "表不存在，请先运行初始化流程"
                                 }
+                                
+                                # 记录警告响应
+                                execution_time = time.time() - start_time
+                                self.logger.warning(f"⚠️  [响应 {request_id}] 工具: get_database_stats - 表不存在")
+                                self.logger.warning(f"⏱️  [响应 {request_id}] 执行耗时: {execution_time:.3f}秒")
+                                self.logger.warning(f"📤 [响应 {request_id}] 返回结果: {result}")
+                                
+                                return result
                             else:
                                 raise e
+                                
             except Exception as e:
-                return {"error": f"Database query failed: {str(e)}"}
+                # 记录错误响应
+                execution_time = time.time() - start_time
+                self.logger.error(f"❌ [响应 {request_id}] 工具: get_database_stats - 执行失败")
+                self.logger.error(f"⏱️  [响应 {request_id}] 执行耗时: {execution_time:.3f}秒")
+                self.logger.error(f"🚨 [响应 {request_id}] 错误信息: {str(e)}")
+                
+                error_result = {"error": f"Database query failed: {str(e)}"}
+                return error_result
 
         @self.mcp_server.tool()
         async def cli_list_flows(app_target: Optional[str] = None) -> Dict[str, Any]:
             """列出所有flows"""
+            # 生成请求ID并记录请求
+            request_id = str(uuid.uuid4())[:8]
+            self.logger.info(f"🔧 [请求 {request_id}] 工具: cli_list_flows")
+            self.logger.info(f"📥 [请求 {request_id}] 参数: app_target={app_target}")
+            
+            start_time = time.time()
+            
             try:
+                self.logger.info(f"⚙️  [处理 {request_id}] 正在执行工具: cli_list_flows")
+                
                 from cocoindex.setup import flow_names_with_setup
                 
                 persisted_flow_names = flow_names_with_setup()
@@ -679,10 +794,29 @@ class CocoIndexMcpServer:
                     missing_setup = [name for name in current_flow_names if name not in persisted_set]
                     result["missing_setup"] = missing_setup
                 
+                # 记录成功响应
+                execution_time = time.time() - start_time
+                self.logger.info(f"✅ [响应 {request_id}] 工具: cli_list_flows - 执行成功")
+                self.logger.info(f"⏱️  [响应 {request_id}] 执行耗时: {execution_time:.3f}秒")
+                
+                result_str = str(result)
+                if len(result_str) > 500:
+                    result_preview = result_str[:500] + "... (结果被截断)"
+                else:
+                    result_preview = result_str
+                self.logger.info(f"📤 [响应 {request_id}] 返回结果: {result_preview}")
+                
                 return result
+                
             except Exception as e:
-                self.logger.error(f"Error listing flows: {e}")
-                return {"error": str(e)}
+                # 记录错误响应
+                execution_time = time.time() - start_time
+                self.logger.error(f"❌ [响应 {request_id}] 工具: cli_list_flows - 执行失败")
+                self.logger.error(f"⏱️  [响应 {request_id}] 执行耗时: {execution_time:.3f}秒")
+                self.logger.error(f"🚨 [响应 {request_id}] 错误信息: {str(e)}")
+                
+                error_result = {"error": str(e)}
+                return error_result
 
         # 设置资源
         @self.mcp_server.resource("cocoindex://flows")
@@ -731,15 +865,16 @@ class CocoIndexMcpServer:
 
     def run_stdio(self):
         """运行stdio传输"""
-        self.logger.info("Starting MCP server with stdio transport")
+        self.logger.info("🔌 启动 MCP 服务器（stdio 传输）")
         self.mcp_server.run('stdio')
 
     def run_sse(self):
         """运行Streamable HTTP传输"""
-        self.logger.info(f"🚀 Starting MCP Streamable HTTP server at http://{self.host}:{self.port}")
-        self.logger.info(f"📡 Message endpoint: http://{self.host}:{self.port}/message")
-        self.logger.info(f"💚 Health check: http://{self.host}:{self.port}/health")
-        self.logger.info(f"📋 Transport: streamable-http (FastMCP)")
+        self.logger.info(f"🚀 启动 MCP Streamable HTTP 服务器: http://{self.host}:{self.port}")
+        self.logger.info(f"📡 消息端点: http://{self.host}:{self.port}/message")
+        self.logger.info(f"💚 健康检查: http://{self.host}:{self.port}/health")
+        self.logger.info(f"📋 传输方式: streamable-http (FastMCP)")
+        self.logger.info("🎯 MCP 服务器准备就绪，等待客户端请求...")
         self.mcp_server.run(transport="sse", host=self.host, port=self.port)
 
 def main_sync():
@@ -756,10 +891,13 @@ def main_sync():
     args = parser.parse_args()
     
     # 设置日志
-    log_formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    log_formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
     
     # 创建文件处理器
-    file_handler = logging.FileHandler("log.txt", encoding='utf-8')
+    file_handler = logging.FileHandler("cocoindex_mcp.log", encoding='utf-8')
     file_handler.setLevel(getattr(logging, args.log_level.upper()))
     file_handler.setFormatter(log_formatter)
     
@@ -814,9 +952,9 @@ def main_sync():
             asyncio.run(init_and_run())
             
     except KeyboardInterrupt:
-        logging.info("Server stopped by user")
+        logging.info("🛑 服务器被用户停止")
     except Exception as e:
-        logging.error(f"Server error: {e}")
+        logging.error(f"❌ 服务器错误: {e}")
         sys.exit(1)
 
 
