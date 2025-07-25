@@ -8,8 +8,9 @@ and Unreal Engine project structure.
 
 import os
 import fnmatch
+import re
 from pathlib import Path
-from typing import List, Set, Dict
+from typing import List, Set, Dict, Pattern
 from dataclasses import dataclass
 
 @dataclass
@@ -45,10 +46,22 @@ class FileScanner:
         '*/Release/*',           # Release输出
         '*/x64/*',               # x64输出
         '*/Win32/*',             # Win32输出
+        "*/.*",
+        "*/DerivedDataCache/*",
+        "*/Build/*",
+        "*/Content/*",
+        "*.luac",
+        "*/Engine/Source/Programs/*",
+        "*/ThirdParty/*",
+        "*/Client_WwiseProject/*",
     }
     
     def __init__(self):
-        pass
+        # 预处理排除模式以提高性能
+        self._excluded_dir_names: Set[str] = set()  # 纯目录名，O(1)查找
+        self._excluded_extensions: Set[str] = set()  # 文件扩展名
+        self._compiled_patterns: List[Pattern] = []  # 复杂模式的正则表达式
+        self._process_exclude_patterns()
     
     def scan_directory(self, config) -> ScanResult:
         """扫描目录 - 支持双路径设计
@@ -62,7 +75,8 @@ class FileScanner:
         files = []
         
         # 只扫描scan_directory
-        for file_path in self._walk_directory(config.scan_directory):
+        all_files = self._walk_directory(config.scan_directory)
+        for file_path in all_files:
             if self._should_include_file(file_path, config):
                 files.append(file_path)
         
@@ -71,8 +85,62 @@ class FileScanner:
         
         return ScanResult(files=files, file_mappings=file_mappings)
     
+    def _process_exclude_patterns(self):
+        """预处理排除模式，提高匹配效率"""
+        for pattern in self.DEFAULT_EXCLUDE_PATTERNS:
+            # 处理目录名模式，例如：*/Intermediate/* -> Intermediate
+            if pattern.startswith('*/') and pattern.endswith('/*'):
+                dir_name = pattern[2:-2]  # 移除 */ 和 /*
+                self._excluded_dir_names.add(dir_name)
+            # 处理以目录名结尾的模式，例如：*/Intermediate -> Intermediate
+            elif pattern.startswith('*/') and not pattern.endswith('/*'):
+                dir_name = pattern[2:]  # 移除 */
+                self._excluded_dir_names.add(dir_name)
+            # 处理文件扩展名模式，例如：*.luac -> .luac
+            elif pattern.startswith('*.'):
+                ext = pattern[1:]  # 移除 *
+                self._excluded_extensions.add(ext)
+            # 处理隐藏文件模式：*/.*
+            elif pattern == '*/.*':
+                # 这个会在快速检查中特殊处理
+                pass
+            # 其他复杂模式编译为正则表达式
+            else:
+                try:
+                    # 将fnmatch模式转换为正则表达式
+                    regex_pattern = fnmatch.translate(pattern)
+                    compiled = re.compile(regex_pattern)
+                    self._compiled_patterns.append(compiled)
+                except re.error:
+                    # 如果正则表达式编译失败，跳过该模式
+                    pass
+    
+    def _should_exclude_directory(self, dir_name: str, dir_path: str) -> bool:
+        """快速目录排除检查（高性能版本）"""
+        # 1. O(1) 检查隐藏目录
+        if dir_name.startswith('.'):
+            return True
+        
+        # 2. O(1) 检查预定义的目录名
+        if dir_name in self._excluded_dir_names:
+            return True
+        
+        # 3. 检查文件扩展名（虽然这里是目录，但可能有同名情况）
+        for ext in self._excluded_extensions:
+            if dir_name.endswith(ext):
+                return True
+        
+        # 4. 只有在必要时才进行复杂的正则匹配
+        if self._compiled_patterns:
+            normalized_path = dir_path.replace('\\', '/')
+            for pattern in self._compiled_patterns:
+                if pattern.match(normalized_path):
+                    return True
+        
+        return False
+    
     def _walk_directory(self, directory: str) -> List[str]:
-        """递归遍历目录获取所有文件"""
+        """递归遍历目录获取所有文件（优化版：在遍历期间应用排除模式）"""
         files = []
         directory_path = Path(directory)
         
@@ -83,18 +151,50 @@ class FileScanner:
             files.append(str(directory_path.resolve()))
             return files
         
+        # 性能统计
+        total_dirs_scanned = 0
+        dirs_excluded = 0
+        
         try:
             for root, dirs, filenames in os.walk(directory):
-                # 修改dirs列表以控制递归行为（跳过隐藏目录）
-                dirs[:] = [d for d in dirs if not d.startswith('.')]
+                total_dirs_scanned += 1
                 
+                # 过滤要递归的目录 - 使用高性能的快速检查！
+                dirs_to_remove = []
+                for dir_name in dirs:
+                    dir_path = Path(root) / dir_name
+                    full_dir_path = str(dir_path.resolve())
+                    
+                    # 使用预处理的快速检查方法
+                    if self._should_exclude_directory(dir_name, full_dir_path):
+                        dirs_to_remove.append(dir_name)
+                        dirs_excluded += 1
+                        from .logger import get_logger
+                        logger = get_logger()
+                        logger.debug(f"⚡ 跳过排除目录: {dir_name}")
+                        continue
+                
+                # 从dirs列表中移除被排除的目录，防止os.walk递归进入
+                for dir_to_remove in dirs_to_remove:
+                    dirs.remove(dir_to_remove)
+                
+                # 添加当前目录下的文件
                 for filename in filenames:
                     file_path = Path(root) / filename
                     files.append(str(file_path.resolve()))
+                    
         except (OSError, PermissionError) as e:
             from .logger import get_logger
             logger = get_logger()
             logger.warning(f"无法访问目录 {directory}: {e}")
+        
+        # 输出性能统计
+        from .logger import get_logger
+        logger = get_logger()
+        logger.info(f"📊 目录扫描统计: 总计扫描 {total_dirs_scanned} 个目录, 排除 {dirs_excluded} 个目录, 找到 {len(files)} 个文件")
+        if dirs_excluded > 0:
+            exclusion_rate = (dirs_excluded / total_dirs_scanned) * 100
+            logger.info(f"🚀 性能优化: 排除率 {exclusion_rate:.1f}%, 大大提升扫描速度！")
         
         return files
     
@@ -153,69 +253,3 @@ class FileScanner:
         
         return file_mappings
     
-
-
-# UE项目检测和支持函数
-def is_unreal_engine_project(directory: str) -> bool:
-    """检测目录是否为Unreal Engine项目"""
-    directory_path = Path(directory)
-    
-    # 检查UE项目标识文件
-    ue_indicators = [
-        "*.uproject",
-        "*.uplugin",
-        "Engine/Build/Build.version",
-        "Source/Runtime/Engine/Engine.Build.cs",
-        "Engine/Source/Runtime/Engine/Engine.Build.cs"
-    ]
-    
-    for pattern in ue_indicators:
-        if list(directory_path.glob(pattern)):
-            return True
-        # 也检查父目录
-        parent = directory_path.parent
-        if list(parent.glob(pattern)):
-            return True
-    
-    return False
-
-def get_unreal_include_paths(project_root: str) -> List[str]:
-    """获取Unreal Engine项目的include路径"""
-    include_paths = []
-    project_path = Path(project_root)
-    
-    # UE核心include目录模式
-    ue_include_patterns = [
-        # Engine核心
-        "Engine/Source/Runtime/*/Public",
-        "Engine/Source/Runtime/*/Classes",
-        "Engine/Source/Developer/*/Public", 
-        "Engine/Source/Editor/*/Public",
-        "Engine/Source/ThirdParty/*/include",
-        
-        # 插件
-        "Engine/Plugins/*/Source/*/Public",
-        "Engine/Plugins/*/Source/*/Classes",
-        "Plugins/*/Source/*/Public",
-        "Plugins/*/Source/*/Classes",
-        
-        # 项目源码
-        "Source/*/Public",
-        "Source/*/Classes",
-        "Source/*",
-        
-        # 第三方库
-        "ThirdParty/*/include",
-        "ThirdParty/*/Include",
-    ]
-    
-    # 搜索include路径
-    for pattern in ue_include_patterns:
-        for path in project_path.glob(pattern):
-            if path.is_dir():
-                include_paths.append(str(path))
-    
-    # 去重并排序
-    include_paths = sorted(list(set(include_paths)))
-    
-    return include_paths 

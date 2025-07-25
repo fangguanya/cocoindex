@@ -35,13 +35,13 @@ def main():
     PROJECT_ROOT = "D:/c7_i9_EngineDev/Engine"
     
     # 要分析的代码目录
-    SCAN_DIRECTORY = "D:/c7_i9_EngineDev/Engine/Source"
+    SCAN_DIRECTORY = "D:/c7_i9_EngineDev/Client"
     
     # compile_commands.json 文件的具体路径
     COMPILE_COMMANDS_PATH = "E:/mcp/codebase_index/cocoindex/cpp_export/compile_commands.json"
     
-    # clang 执行的工作目录（通常是 Engine 目录）
-    CLANG_WORKING_DIR = "D:/c7_i9_EngineDev/Engine"
+    # clang 执行的工作目录（现在会自动使用compile_commands.json中每个文件的directory字段）
+    # CLANG_WORKING_DIR = "D:/c7_i9_EngineDev/Engine"  # 不再需要，已自动从compile_commands.json获取
     
     # 输出 JSON 文件路径
     OUTPUT_FILE = "cpp_analysis_result.json"
@@ -56,7 +56,7 @@ def main():
     console.print(f"项目根目录: {PROJECT_ROOT}")
     console.print(f"扫描目录: {SCAN_DIRECTORY}")
     console.print(f"编译命令文件: {COMPILE_COMMANDS_PATH}")
-    console.print(f"clang工作目录: {CLANG_WORKING_DIR}")
+    console.print(f"clang工作目录: 自动从compile_commands.json获取")
     console.print(f"输出文件: {OUTPUT_FILE}")
     
     # 检查路径是否存在
@@ -89,7 +89,7 @@ def main():
             project_root=PROJECT_ROOT,
             scan_directory=SCAN_DIRECTORY,
             compile_commands_path=COMPILE_COMMANDS_PATH,
-            clang_working_directory=CLANG_WORKING_DIR,
+            # clang_working_directory 不再需要，会自动从compile_commands.json获取
             output_path=OUTPUT_FILE,
             verbose=VERBOSE,
             max_files=MAX_FILES,

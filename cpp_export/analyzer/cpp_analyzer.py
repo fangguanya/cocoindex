@@ -93,11 +93,7 @@ class CppAnalyzer:
         )
         
         return self._analyze_with_config(config)
-    
-    def analyze_directory(self, root_path: str, **kwargs) -> AnalysisResult:
-        """分析目录 - 向后兼容接口"""
-        return self.analyze(project_root=root_path, scan_directory=root_path, **kwargs)
-    
+        
     def _analyze_with_config(self, config: AnalysisConfig) -> AnalysisResult:
         """使用配置进行分析"""
         logger = get_logger()
@@ -165,7 +161,7 @@ class CppAnalyzer:
             )
     
     def _initialize_parser(self, config: AnalysisConfig):
-        """初始化解析器 - 支持指定的compile_commands.json路径和工作目录"""
+        """初始化解析器 - 支持指定的compile_commands.json路径"""
         if config.use_compile_commands:
             # 确定 compile_commands.json 的路径
             if config.compile_commands_path:
@@ -173,31 +169,13 @@ class CppAnalyzer:
             else:
                 compile_commands_path = str(Path(config.project_root) / "compile_commands.json")
             
-            # 确定 clang 的工作目录
-            if config.clang_working_directory:
-                clang_working_dir = config.clang_working_directory
+            # 直接加载指定的文件
+            if Path(compile_commands_path).exists():
+                self.clang_parser.load_compile_commands(compile_commands_path)
             else:
-                clang_working_dir = str(Path(config.project_root) / "Engine")
-            
-            # 设置 clang 的工作目录
-            self.clang_parser.set_working_directory(clang_working_dir)
-            
-            # 尝试加载或生成compile_commands.json
-            if config.generate_compile_commands:
-                # 如果指定了具体路径，先检查是否存在
-                if Path(compile_commands_path).exists():
-                    self.clang_parser.load_compile_commands(compile_commands_path)
-                else:
-                    # 尝试生成到指定位置
-                    self.clang_parser.ensure_compile_commands(config.project_root, compile_commands_path)
-            else:
-                # 直接加载指定的文件
-                if Path(compile_commands_path).exists():
-                    self.clang_parser.load_compile_commands(compile_commands_path)
-                else:
-                    from .logger import get_logger
-                    logger = get_logger()
-                    logger.warning(f"指定的 compile_commands.json 文件不存在: {compile_commands_path}")
+                from .logger import get_logger
+                logger = get_logger()
+                logger.warning(f"指定的 compile_commands.json 文件不存在: {compile_commands_path}")
 
     
     def _scan_files(self, config: AnalysisConfig) -> ScanResult:

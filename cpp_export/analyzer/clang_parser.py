@@ -46,9 +46,10 @@ class ClangParser:
         """初始化解析器"""
         self.console = console or Console()
         self.index = None
-        self.compile_commands: Dict[str, List[str]] = {}  # file -> compile args mapping
+        # 修改数据结构：存储每个文件的编译参数和工作目录
+        self.compile_commands: Dict[str, Dict[str, Any]] = {}  # file -> {"args": List[str], "directory": str}
         self._current_directory = ""  # 用于解析rsp相对路径
-        self._working_directory = ""  # clang执行的工作目录
+        self._working_directory = ""  # clang执行的工作目录（保留向后兼容）
         self._initialize_index()
     
     def set_working_directory(self, working_dir: str):
@@ -87,7 +88,8 @@ class ClangParser:
             logger.info(f"已加载 compile_commands.json: {len(self.compile_commands)} 文件")
             if len(self.compile_commands) > 0:
                 sample_file = list(self.compile_commands.keys())[0]
-                sample_args = self.compile_commands[sample_file]
+                sample_args_data = self.compile_commands[sample_file]
+                sample_args = sample_args_data["args"]
                 logger.debug(f"示例编译参数 ({len(sample_args)} 个): {' '.join(sample_args[:5])}...")
             
             if self.console:
@@ -112,6 +114,7 @@ class ClangParser:
             # 处理UE的@response_file.rsp格式
             processed_args = []
             for arg in args:
+                arg = arg.strip()
                 if arg.startswith('@') and arg.endswith('.rsp'):
                     # 解析.rsp响应文件
                     rsp_args = self._parse_rsp_file(arg[1:])  # 移除@符号
@@ -170,10 +173,54 @@ class ClangParser:
             logger.error(f"解析RSP文件失败 {rsp_path}: {e}")
             return []
     
-    def _parse_compile_commands(self, commands_data: List[Dict]) -> Dict[str, List[str]]:
+    def _expand_response_files_recursive(self, args: List[str], visited_files: Optional[Set[str]] = None) -> List[str]:
+        """递归展开所有@响应文件，防止循环引用"""
+        if visited_files is None:
+            visited_files = set()
+        
+        expanded_args = []
+        for arg in args:
+            if arg.startswith('@'):
+                # 移除引号和@符号
+                rsp_path = arg[1:].strip('"\'')
+                
+                # 获取绝对路径以便比较，防止循环引用
+                if Path(rsp_path).is_absolute():
+                    abs_path = str(Path(rsp_path).resolve())
+                else:
+                    if self._current_directory:
+                        abs_path = str(Path(self._current_directory, rsp_path).resolve())
+                    else:
+                        abs_path = str(Path(rsp_path).resolve())
+                
+                if abs_path in visited_files:
+                    # 检测到循环引用，记录警告并跳过
+                    from .logger import get_logger
+                    logger = get_logger()
+                    logger.warning(f"检测到循环引用的响应文件: {abs_path}")
+                    if self.console:
+                        self.console.print(f"⚠️  跳过循环引用的RSP文件: {abs_path}", style="yellow")
+                    continue
+                
+                # 标记当前文件为正在访问
+                visited_files.add(abs_path)
+                try:
+                    # 解析响应文件
+                    rsp_args = self._parse_rsp_file(rsp_path)
+                    # 递归处理从响应文件中读取的参数
+                    nested_expanded = self._expand_response_files_recursive(rsp_args, visited_files)
+                    expanded_args.extend(nested_expanded)
+                finally:
+                    # 移除标记以允许在其他分支中使用相同文件
+                    visited_files.discard(abs_path)
+            else:
+                expanded_args.append(arg)
+        
+        return expanded_args
+    
+    def _parse_compile_commands(self, commands_data: List[Dict]) -> Dict[str, Dict[str, Any]]:
         """解析compile_commands.json数据，支持UE的@rsp文件"""
         file_commands = {}
-        all_include_paths = set()
         
         for entry in commands_data:
             file_path = entry.get('file', '')
@@ -207,39 +254,14 @@ class ClangParser:
                 self.console.print(f"🔧 处理后参数 ({len(processed_args)} 个): {processed_args[:10]}...", style="dim")
             # 使用规范化路径作为键
             normalized_file_path = self._normalize_path(file_path)
-            file_commands[normalized_file_path] = processed_args
-            
-            # 收集include路径
-            for i, arg in enumerate(processed_args):
-                if arg == '-I' and i + 1 < len(processed_args):
-                    include_path = processed_args[i + 1]
-                    # 处理相对路径
-                    if not Path(include_path).is_absolute() and directory:
-                        include_path = str(Path(directory) / include_path)
-                    all_include_paths.add(include_path)
-                elif arg.startswith('-I') and len(arg) > 2:
-                    include_path = arg[2:]
-                    if not Path(include_path).is_absolute() and directory:
-                        include_path = str(Path(directory) / include_path)
-                    all_include_paths.add(include_path)
-        
-        # compile_commands.json已经包含了所有必要的include路径
+            file_commands[normalized_file_path] = {"args": processed_args, "directory": directory}
         
         return file_commands
     
     def _process_compile_args(self, raw_args: List[str]) -> List[str]:
         """处理和清理编译参数"""
-        expanded_args = []
-        
-        # 首先展开所有@rsp文件
-        for arg in raw_args:
-            if arg.startswith('@'):
-                # 移除引号和@符号
-                rsp_path = arg[1:].strip('"\'')
-                rsp_args = self._parse_rsp_file(rsp_path)
-                expanded_args.extend(rsp_args)
-            else:
-                expanded_args.append(arg)
+        # 使用递归方法展开所有@rsp文件（包括嵌套的）
+        expanded_args = self._expand_response_files_recursive(raw_args)
         
         processed_args = []
         skip_next = False
@@ -360,31 +382,63 @@ class ClangParser:
         
         # 首先尝试精确匹配
         if normalized_input in self.compile_commands:
-            return self.compile_commands[normalized_input]
+            return self.compile_commands[normalized_input]["args"]
         
         # 尝试规范化后的路径匹配
         for cmd_path in list(self.compile_commands.keys()):
             normalized_cmd_path = self._normalize_path(cmd_path)
             if normalized_input == normalized_cmd_path:
-                return self.compile_commands[cmd_path]
+                return self.compile_commands[cmd_path]["args"]
         
         # 如果精确匹配失败，尝试按文件名匹配
         file_name = Path(file_path).name.lower()
-        for cmd_path, args in self.compile_commands.items():
+        for cmd_path, args_data in self.compile_commands.items():
             if Path(cmd_path).name.lower() == file_name:
                 from .logger import get_logger
                 logger = get_logger()
-                logger.compilation_info(f"找到匹配文件: {file_name} -> {cmd_path}", len(args))
+                logger.compilation_info(f"找到匹配文件: {file_name} -> {cmd_path}", len(args_data["args"]))
                 
                 if self.console:
                     self.console.print(f"🔍 找到匹配文件: {file_name} -> {cmd_path}", style="cyan")
-                return args
+                return args_data["args"]
         
         # 回退到默认参数
         from .logger import get_logger
         logger = get_logger()
         logger.warning(f"未找到编译参数，使用默认: {file_path}")
         return []
+    
+    def _get_file_directory(self, file_path: str) -> str:
+        """获取文件的编译目录"""
+        normalized_input = self._normalize_path(file_path)
+        
+        # 首先尝试精确匹配
+        if normalized_input in self.compile_commands:
+            return self.compile_commands[normalized_input]["directory"]
+        
+        # 尝试规范化后的路径匹配
+        for cmd_path in list(self.compile_commands.keys()):
+            normalized_cmd_path = self._normalize_path(cmd_path)
+            if normalized_input == normalized_cmd_path:
+                return self.compile_commands[cmd_path]["directory"]
+        
+        # 如果精确匹配失败，尝试按文件名匹配
+        file_name = Path(file_path).name.lower()
+        for cmd_path, args_data in self.compile_commands.items():
+            if Path(cmd_path).name.lower() == file_name:
+                from .logger import get_logger
+                logger = get_logger()
+                logger.compilation_info(f"找到匹配文件: {file_name} -> {cmd_path}", len(args_data["args"]))
+                
+                if self.console:
+                    self.console.print(f"🔍 找到匹配文件: {file_name} -> {cmd_path}", style="cyan")
+                return args_data["directory"]
+        
+        # 回退到项目根目录
+        from .logger import get_logger
+        logger = get_logger()
+        logger.warning(f"未找到编译目录，使用项目根目录: {file_path}")
+        return ""
     
     def _normalize_path(self, path: str) -> str:
         """规范化路径 - 处理大小写、软链接等"""
@@ -401,155 +455,6 @@ class ClangParser:
             # 如果路径规范化失败，返回原路径
             return str(path)
     
-    def ensure_compile_commands(self, project_root: str, compile_commands_path: Optional[str] = None) -> bool:
-        """确保compile_commands.json存在，如果不存在则尝试生成
-        
-        Args:
-            project_root: 项目根目录
-            compile_commands_path: compile_commands.json的具体路径，如果为None则使用project_root下的
-        """
-        if compile_commands_path is None:
-            compile_commands_path = str(Path(project_root) / "compile_commands.json")
-        
-        compile_commands_file = Path(compile_commands_path)
-        
-        if compile_commands_file.exists():
-            return self.load_compile_commands(compile_commands_path)
-        
-        # 尝试生成compile_commands.json
-        if self._is_unreal_project(project_root):
-            return self._generate_unreal_compile_commands(project_root, compile_commands_path)
-        elif self._is_cmake_project(project_root):
-            return self._generate_cmake_compile_commands(project_root, compile_commands_path)
-        
-        if self.console:
-            self.console.print("⚠ 未找到compile_commands.json，使用默认编译参数", style="yellow")
-        
-        return False
-    
-    def _is_unreal_project(self, project_root: str) -> bool:
-        """检查是否为Unreal Engine项目"""
-        indicators = [
-            "*.uproject",
-            "Source",
-            "Config/DefaultEngine.ini",
-            "Plugins"
-        ]
-        
-        root_path = Path(project_root)
-        for indicator in indicators:
-            if indicator.startswith("*"):
-                if list(root_path.glob(indicator)):
-                    return True
-            elif (root_path / indicator).exists():
-                return True
-        
-        return False
-    
-    def _is_cmake_project(self, project_root: str) -> bool:
-        """检查是否为CMake项目"""
-        cmake_files = ["CMakeLists.txt", "cmake"]
-        root_path = Path(project_root)
-        
-        return any((root_path / f).exists() for f in cmake_files)
-    
-    def _generate_unreal_compile_commands(self, project_root: str, compile_commands_path: Optional[str] = None) -> bool:
-        """生成Unreal Engine的compile_commands.json"""
-        try:
-            # 查找.uproject文件
-            uproject_files = list(Path(project_root).glob("*.uproject"))
-            if not uproject_files:
-                return False
-            
-            uproject_file = uproject_files[0]
-            
-            if self.console:
-                self.console.print(f"正在为UE项目生成compile_commands.json: {uproject_file.name}", style="blue")
-            
-            # 设置工作目录为指定的clang工作目录
-            working_dir = self._working_directory if self._working_directory else project_root
-            
-            # Windows平台使用UnrealBuildTool
-            if platform.system() == 'Windows':
-                cmd = [
-                    "Engine/Binaries/DotNET/UnrealBuildTool/UnrealBuildTool.exe",
-                    "-Mode=GenerateClangDatabase",
-                    f"-Project={uproject_file}",
-                    "-Game",
-                    "-Engine"
-                ]
-            else:
-                cmd = [
-                    "Engine/Binaries/Linux/UnrealBuildTool",
-                    "-Mode=GenerateClangDatabase",
-                    f"-Project={uproject_file}",
-                    "-Game",
-                    "-Engine"
-                ]
-            
-            result = subprocess.run(cmd, cwd=working_dir, capture_output=True, text=True, timeout=300)
-            
-            if result.returncode == 0:
-                if compile_commands_path:
-                    target_path = Path(compile_commands_path)
-                    target_path.parent.mkdir(parents=True, exist_ok=True)
-                    # 从默认位置复制生成的文件
-                    default_path = Path(project_root) / "compile_commands.json"
-                    if default_path.exists():
-                        import shutil
-                        shutil.copy2(default_path, target_path)
-                        return self.load_compile_commands(str(target_path))
-                else:
-                    default_path = Path(project_root) / "compile_commands.json"
-                    if default_path.exists():
-                        return self.load_compile_commands(str(default_path))
-            
-        except Exception as e:
-            if self.console:
-                self.console.print(f"生成UE compile_commands.json失败: {e}", style="red")
-        
-        return False
-    
-    def _generate_cmake_compile_commands(self, project_root: str, compile_commands_path: Optional[str] = None) -> bool:
-        """生成CMake的compile_commands.json"""
-        try:
-            if self.console:
-                self.console.print("正在为CMake项目生成compile_commands.json", style="blue")
-            
-            # 创建build目录
-            build_dir = Path(project_root) / "build"
-            build_dir.mkdir(exist_ok=True)
-            
-            # 设置工作目录
-            working_dir = self._working_directory if self._working_directory else str(build_dir)
-            
-            cmd = ["cmake", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON", ".."]
-            result = subprocess.run(cmd, cwd=working_dir, capture_output=True, text=True, timeout=120)
-            
-            if result.returncode == 0:
-                source_path = build_dir / "compile_commands.json"
-                
-                if compile_commands_path:
-                    target_path = Path(compile_commands_path)
-                    target_path.parent.mkdir(parents=True, exist_ok=True)
-                    if source_path.exists():
-                        import shutil
-                        shutil.copy2(source_path, target_path)
-                        return self.load_compile_commands(str(target_path))
-                else:
-                    target_path = Path(project_root) / "compile_commands.json"
-                    if source_path.exists():
-                        # 复制到项目根目录
-                        import shutil
-                        shutil.copy2(source_path, target_path)
-                        return self.load_compile_commands(str(target_path))
-            
-        except Exception as e:
-            if self.console:
-                self.console.print(f"生成CMake compile_commands.json失败: {e}", style="red")
-        
-        return False
-    
     def parse_files(self, file_paths: List[str], progress: Optional[Progress] = None, 
                    task_id: Optional[TaskID] = None) -> List[ParsedFile]:
         """解析多个文件"""
@@ -559,9 +464,10 @@ class ClangParser:
             if progress and task_id:
                 progress.update(task_id, completed=i)
             
-            # 获取文件特定的编译参数
+            # 获取文件特定的编译参数和工作目录
             file_args = self._get_file_compile_args(file_path)
-            parsed_file = self._parse_single_file(file_path, file_args)
+            file_directory = self._get_file_directory(file_path)
+            parsed_file = self._parse_single_file(file_path, file_args, file_directory)
             results.append(parsed_file)
             
             # 输出解析状态
@@ -577,7 +483,7 @@ class ClangParser:
         
         return results
     
-    def _parse_single_file(self, file_path: str, compile_args: Optional[List[str]] = None) -> ParsedFile:
+    def _parse_single_file(self, file_path: str, compile_args: Optional[List[str]] = None, directory: Optional[str] = None) -> ParsedFile:
         """解析单个文件"""
         start_time = time.time()
         
@@ -589,12 +495,16 @@ class ClangParser:
             if not self.index:
                 raise RuntimeError("libclang索引未初始化")
             
-            # 如果设置了工作目录，需要在解析前切换到工作目录
+            # 使用文件特定的directory或全局的_working_directory（向后兼容）
             original_cwd = None
-            if self._working_directory and Path(self._working_directory).exists():
+            target_directory = directory or self._working_directory
+            
+            if target_directory and Path(target_directory).exists():
                 import os
                 original_cwd = os.getcwd()
-                os.chdir(self._working_directory)
+                os.chdir(target_directory)
+                if self.console:
+                    self.console.print(f"🔀 切换工作目录到: {target_directory}", style="dim cyan")
                 
             try:    
                 tu = self.index.parse(

@@ -127,7 +127,7 @@ class JsonExporter:
             "root_path": project_root,
             "scan_path": scan_directory,
             "version": "1.0.0",
-            "description": f"C++ Analysis of {project_root}",
+            "description": f"C++ Analysis of {scan_directory}",
             "language": "C++",
             "analysis_timestamp": datetime.now().isoformat(),
             "analyzer_config": {
@@ -948,43 +948,6 @@ class JsonExporter:
                                 "value": "1",  # 默认值
                                 "source": "command_line"
                             }
-            
-            # 从compile_commands.json中获取宏定义
-            if hasattr(config, 'project_root'):
-                compile_commands_path = Path(config.project_root) / "compile_commands.json"
-                if compile_commands_path.exists():
-                    import json
-                    with open(compile_commands_path, 'r', encoding='utf-8') as f:
-                        compile_commands = json.load(f)
-                    
-                    for cmd in compile_commands:
-                        # 解析command或arguments字段中的宏定义
-                        command_args = []
-                        if 'command' in cmd:
-                            import shlex
-                            command_args = shlex.split(cmd['command'])
-                        elif 'arguments' in cmd:
-                            command_args = cmd['arguments']
-                        
-                        for arg in command_args:
-                            if arg.startswith('-D') or arg.startswith('/D'):
-                                macro_def = arg[2:]
-                                if '=' in macro_def:
-                                    name, value = macro_def.split('=', 1)
-                                    macros[name] = {
-                                        "name": name,
-                                        "value": value,
-                                        "source": "compile_commands",
-                                        "file": cmd.get('file', 'unknown')
-                                    }
-                                else:
-                                    macros[macro_def] = {
-                                        "name": macro_def,
-                                        "value": "1",
-                                        "source": "compile_commands",
-                                        "file": cmd.get('file', 'unknown')
-                                    }
-        
         except Exception as e:
             logger = get_logger()
             logger.error(f"提取宏定义失败: {e}")
