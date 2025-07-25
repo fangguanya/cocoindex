@@ -1,0 +1,8 @@
+[
+  {
+    "file": "D:/c7_i9_EngineDev/Client/Plugins/KGCore/Intermediate/Build/Win64/UnrealEditor/Inc/KGCore/UHT/KGCurveUtil.gen.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"D:/c7_i9_EngineDev/Client/Plugins/KGCore/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCore/KGCurveUtil.gen.cpp.obj.rsp\"",
+    "directory": "D:/c7_i9_EngineDev/Engine/Source",
+    "output": "D:/c7_i9_EngineDev/Client/Plugins/KGCore/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCore/KGCurveUtil.gen.cpp.obj"
+  }
+] 

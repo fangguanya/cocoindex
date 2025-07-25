@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+from .logger import get_logger
 
 class JsonExporter:
     """JSON导出器 - 支持格式版本2.3和完整诊断信息"""
@@ -284,6 +285,7 @@ class JsonExporter:
     
     def add_diagnostics(self, diagnostics: List[Any]):
         """添加诊断信息用于统计"""
+        logger = get_logger()
         try:
             for diag in diagnostics:
                 severity = getattr(diag, 'severity', 'unknown')
@@ -312,7 +314,7 @@ class JsonExporter:
                     self.diagnostics_summary['by_file'][filename] += 1
         
         except Exception as e:
-            print(f"添加诊断信息失败: {e}")
+            logger.error(f"添加诊断信息失败: {e}")
     
     def _extract_global_variables(self, extracted_entities: Dict[str, Any]) -> Dict[str, Any]:
         """提取全局变量信息"""
@@ -984,7 +986,8 @@ class JsonExporter:
                                     }
         
         except Exception as e:
-            print(f"提取宏定义失败: {e}")
+            logger = get_logger()
+            logger.error(f"提取宏定义失败: {e}")
         
         # 合并AST中的宏定义
         if extracted_entities:
@@ -1030,7 +1033,8 @@ class JsonExporter:
                         friend_relationships[class_key]["friends"].append(friend_info)
         
         except Exception as e:
-            print(f"分析友元关系失败: {e}")
+            logger = get_logger()
+            logger.error(f"分析友元关系失败: {e}")
         
         return friend_relationships
     
@@ -1069,7 +1073,8 @@ class JsonExporter:
                     operator_overloads[operator_name]["overloads"].append(overload_info)
         
         except Exception as e:
-            print(f"分析操作符重载失败: {e}")
+            logger = get_logger()
+            logger.error(f"分析操作符重载失败: {e}")
         
         return operator_overloads
     
@@ -1106,7 +1111,8 @@ class JsonExporter:
                     }
         
         except Exception as e:
-            print(f"分析lambda表达式失败: {e}")
+            logger = get_logger()
+            logger.error(f"分析lambda表达式失败: {e}")
         
         return lambda_expressions
     
@@ -1130,7 +1136,8 @@ class JsonExporter:
                 }
         
         except Exception as e:
-            print(f"分析概念失败: {e}")
+            logger = get_logger()
+            logger.error(f"分析概念失败: {e}")
         
         return concepts
     
@@ -1154,7 +1161,8 @@ class JsonExporter:
                 }
         
         except Exception as e:
-            print(f"分析模块失败: {e}")
+            logger = get_logger()
+            logger.error(f"分析模块失败: {e}")
         
         return modules
     
@@ -1181,7 +1189,8 @@ class JsonExporter:
                     }
         
         except Exception as e:
-            print(f"分析协程失败: {e}")
+            logger = get_logger()
+            logger.error(f"分析协程失败: {e}")
         
         return coroutines
     
@@ -1218,9 +1227,9 @@ class JsonExporter:
             try:
                 # 某些版本的libclang有version属性
                 if hasattr(clang, 'version'):
-                    return f"libclang {clang.version}"
+                    return f"libclang {getattr(clang, 'version', 'unknown')}"
                 elif hasattr(clang, '__version__'):
-                    return f"libclang {clang.__version__}"
+                    return f"libclang {getattr(clang, '__version__', 'unknown')}"
                 else:
                     return "libclang (version unknown)"
             except:
@@ -1269,7 +1278,8 @@ class JsonExporter:
             # TODO: 检测循环include依赖
             
         except Exception as e:
-            print(f"构建include图失败: {e}")
+            logger = get_logger()
+            logger.error(f"构建include图失败: {e}")
         
         return include_graph
     
@@ -1316,6 +1326,7 @@ class JsonExporter:
                                 })
         
         except Exception as e:
-            print(f"Diamond检测失败: {e}")
+            logger = get_logger()
+            logger.error(f"Diamond检测失败: {e}")
         
         return diamonds 

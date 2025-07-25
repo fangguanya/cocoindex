@@ -10,6 +10,7 @@ import re
 from pathlib import Path
 from typing import List, Dict, Set, Any, Optional
 from dataclasses import dataclass, field
+from .logger import get_logger
 
 # 导入状态位掩码定义
 class FunctionStatusFlags:
@@ -155,9 +156,10 @@ class EntityExtractor:
                         self.reverse_file_mappings[abs_parsed_path] = file_id
                         break
         
-        print(f"DEBUG: 文件映射: {self.file_mappings}")
-        print(f"DEBUG: 反向文件映射: {self.reverse_file_mappings}")
-        print(f"DEBUG: 要处理的文件数: {len(parsed_files)}")
+        logger = get_logger()
+        logger.debug(f"文件映射: {self.file_mappings}")
+        logger.debug(f"反向文件映射: {self.reverse_file_mappings}")
+        logger.debug(f"要处理的文件数: {len(parsed_files)}")
         
         # 清理之前的数据
         self.functions.clear()
@@ -173,28 +175,28 @@ class EntityExtractor:
         invalid_files = 0
         
         for parsed_file in parsed_files:
-            print(f"DEBUG: 处理文件 {parsed_file.file_path}, 成功: {parsed_file.success}, 有翻译单元: {parsed_file.translation_unit is not None}")
+            logger.debug(f"处理文件 {parsed_file.file_path}, 成功: {parsed_file.success}, 有翻译单元: {parsed_file.translation_unit is not None}")
             
             # 严格检查translation_unit的有效性
             if parsed_file.translation_unit and parsed_file.translation_unit.cursor:
                 try:
-                    print(f"DEBUG: 开始提取实体 from {parsed_file.file_path}")
+                    logger.debug(f"开始提取实体 from {parsed_file.file_path}")
                     self._extract_from_cursor(
                         parsed_file.translation_unit.cursor,
                         parsed_file.file_path
                     )
-                    print(f"DEBUG: 完成提取实体 from {parsed_file.file_path}")
+                    logger.debug(f"完成提取实体 from {parsed_file.file_path}")
                     valid_files += 1
                 except Exception as e:
-                    print(f"ERROR: 提取实体失败 {parsed_file.file_path}: {e}")
+                    logger.error(f"提取实体失败 {parsed_file.file_path}: {e}")
                     import traceback
                     traceback.print_exc()
                     invalid_files += 1
             else:
-                print(f"WARNING: 跳过文件 {parsed_file.file_path} - translation_unit无效")
+                logger.warning(f"跳过文件 {parsed_file.file_path} - translation_unit无效")
                 invalid_files += 1
         
-        print(f"SUMMARY: 成功处理 {valid_files} 个文件，跳过 {invalid_files} 个无效文件")
+        logger.info(f"成功处理 {valid_files} 个文件，跳过 {invalid_files} 个无效文件")
         
         return {
             'functions': {key: self._function_to_dict(func) for key, func in self.functions.items()},
@@ -215,49 +217,50 @@ class EntityExtractor:
                 self._extract_from_cursor(child, current_file_path)
             return
         
+        logger = get_logger()
         try:
             # 导入clang模块
             import clang.cindex as clang
             
             # 添加调试信息
             if cursor.spelling:
-                print(f"DEBUG: 处理游标 {cursor.spelling}, 类型: {cursor.kind}, 文件: {current_file_path}")
+                logger.debug(f"处理游标 {cursor.spelling}, 类型: {cursor.kind}, 文件: {current_file_path}")
             
             # 根据游标类型进行处理
             if cursor.kind == clang.CursorKind.FUNCTION_DECL:
-                print(f"DEBUG: 发现函数 {cursor.spelling}")
+                logger.entity_found("函数", cursor.spelling, current_file_path)
                 self._extract_function(cursor, current_file_path)
             elif cursor.kind == clang.CursorKind.CXX_METHOD:
-                print(f"DEBUG: 发现方法 {cursor.spelling}")
+                logger.entity_found("方法", cursor.spelling, current_file_path)
                 self._extract_method(cursor, current_file_path)
             elif cursor.kind == clang.CursorKind.CONSTRUCTOR:
-                print(f"DEBUG: 发现构造函数 {cursor.spelling}")
+                logger.entity_found("构造函数", cursor.spelling, current_file_path)
                 self._extract_constructor(cursor, current_file_path)
             elif cursor.kind == clang.CursorKind.DESTRUCTOR:
-                print(f"DEBUG: 发现析构函数 {cursor.spelling}")
+                logger.entity_found("析构函数", cursor.spelling, current_file_path)
                 self._extract_destructor(cursor, current_file_path)
             elif cursor.kind == clang.CursorKind.UNION_DECL:
-                print(f"DEBUG: 发现联合体 {cursor.spelling}")
+                logger.entity_found("联合体", cursor.spelling, current_file_path)
                 self._extract_class(cursor, current_file_path)
             elif cursor.kind == clang.CursorKind.NAMESPACE:
-                print(f"DEBUG: 发现命名空间 {cursor.spelling}")
+                logger.entity_found("命名空间", cursor.spelling, current_file_path)
                 self._extract_namespace(cursor, current_file_path)
             elif cursor.kind == clang.CursorKind.INCLUSION_DIRECTIVE:
-                print(f"DEBUG: 发现include指令 {cursor.spelling}")
+                logger.entity_found("include指令", cursor.spelling, current_file_path)
                 self._extract_include(cursor, current_file_path)
             elif cursor.kind == clang.CursorKind.TYPEDEF_DECL:
-                print(f"DEBUG: 发现typedef {cursor.spelling}")
+                logger.entity_found("typedef", cursor.spelling, current_file_path)
                 self._extract_typedef(cursor, current_file_path)
             elif cursor.kind == clang.CursorKind.MACRO_DEFINITION:
-                print(f"DEBUG: 发现宏定义 {cursor.spelling}")
+                logger.entity_found("宏定义", cursor.spelling, current_file_path)
                 self._extract_macro_definition(cursor, current_file_path)
             elif cursor.kind in [clang.CursorKind.CLASS_DECL, clang.CursorKind.STRUCT_DECL]:
                 # 检查是否为前向声明
                 if self._is_forward_declaration(cursor):
-                    print(f"DEBUG: 发现前向声明 {cursor.spelling}")
+                    logger.entity_found("前向声明", cursor.spelling, current_file_path)
                     self._extract_forward_declaration(cursor, current_file_path)
                 else:
-                    print(f"DEBUG: 发现类定义 {cursor.spelling}, 类型: {cursor.kind}")
+                    logger.entity_found("类定义", cursor.spelling, current_file_path)
                     self._extract_class(cursor, current_file_path)
             
             # 递归处理子游标
@@ -265,14 +268,15 @@ class EntityExtractor:
                 self._extract_from_cursor(child, current_file_path)
                 
         except Exception as e:
-            print(f"处理游标时出错: {e}")
+            logger.error(f"处理游标时出错: {e}")
     
     def _is_from_current_file(self, cursor, current_file_path: str) -> bool:
         """检查游标是否来自当前文件"""
+        logger = get_logger()
         if not cursor.location or not cursor.location.file:
             # 对于没有位置信息的游标，允许进一步处理
             if cursor.spelling:
-                print(f"DEBUG: 游标 {cursor.spelling} 没有位置信息，允许处理")
+                logger.debug(f"游标 {cursor.spelling} 没有位置信息，允许处理")
             return True
         
         cursor_file = str(cursor.location.file)
@@ -282,9 +286,9 @@ class EntityExtractor:
         is_match = cursor_file == current_file
         if cursor.spelling:
             if is_match:
-                print(f"DEBUG: 处理游标 {cursor.spelling} - 文件匹配: {cursor_file}")
+                logger.debug(f"处理游标 {cursor.spelling} - 文件匹配: {cursor_file}")
             else:
-                print(f"DEBUG: 跳过游标 {cursor.spelling} - 文件不匹配: {cursor_file} != {current_file}")
+                logger.debug(f"跳过游标 {cursor.spelling} - 文件不匹配: {cursor_file} != {current_file}")
         
         return is_match
     
@@ -323,7 +327,8 @@ class EntityExtractor:
             self.functions[function.signature_key] = function
             
         except Exception as e:
-            print(f"提取函数失败 {cursor.spelling}: {e}")
+            logger = get_logger()
+            logger.error(f"提取函数失败 {cursor.spelling}: {e}")
     
     def _extract_method(self, cursor, current_file_path: str):
         """提取方法信息（类方法）"""
@@ -380,7 +385,8 @@ class EntityExtractor:
             self.classes[class_obj.qualified_key] = class_obj
             
         except Exception as e:
-            print(f"提取类失败 {cursor.spelling}: {e}")
+            logger = get_logger()
+            logger.error(f"提取类失败 {cursor.spelling}: {e}")
     
     def _extract_namespace(self, cursor, current_file_path: str):
         """提取命名空间信息"""
@@ -400,7 +406,8 @@ class EntityExtractor:
             self.namespaces[key] = namespace
             
         except Exception as e:
-            print(f"提取命名空间失败 {cursor.spelling}: {e}")
+            logger = get_logger()
+            logger.error(f"提取命名空间失败 {cursor.spelling}: {e}")
     
     def _calculate_function_status_flags(self, cursor) -> int:
         """计算函数状态位掩码"""
@@ -470,7 +477,8 @@ class EntityExtractor:
                 flags |= FunctionStatusFlags.FUNC_IS_OPERATOR_OVERLOAD
             
         except Exception as e:
-            print(f"计算函数状态位掩码失败: {e}")
+            logger = get_logger()
+            logger.error(f"计算失败: {e}")
         
         return flags
     
@@ -481,9 +489,8 @@ class EntityExtractor:
         try:
             import clang.cindex as clang
             
-            # 添加ClassStatusFlags中缺少的常量
-            if not hasattr(ClassStatusFlags, 'CLASS_IS_STRUCT'):
-                ClassStatusFlags.CLASS_IS_STRUCT = 1 << 16
+            # 定义结构体标志常量
+            CLASS_IS_STRUCT = 1 << 16
             
             # 检查模板类
             if self._is_template_class(cursor):
@@ -497,7 +504,7 @@ class EntityExtractor:
             if cursor.kind == clang.CursorKind.UNION_DECL:
                 flags |= ClassStatusFlags.CLASS_IS_UNION
             elif cursor.kind == clang.CursorKind.STRUCT_DECL:
-                flags |= ClassStatusFlags.CLASS_IS_STRUCT
+                flags |= CLASS_IS_STRUCT
             
             # 检查抽象类（有纯虚函数）
             if self._is_abstract_class(cursor):
@@ -562,7 +569,8 @@ class EntityExtractor:
                 flags |= ClassStatusFlags.CLASS_HAS_MOVE_ASSIGNMENT
             
         except Exception as e:
-            print(f"计算类状态位掩码失败: {e}")
+            logger = get_logger()
+            logger.error(f"计算失败: {e}")
         
         return flags
     
@@ -702,7 +710,7 @@ class EntityExtractor:
                 return "extern"
             elif storage == clang.StorageClass.STATIC:
                 return "static"
-            elif storage == clang.StorageClass.PRIVATE_EXTERN:
+            elif hasattr(clang.StorageClass, 'PRIVATE_EXTERN') and storage == clang.StorageClass.PRIVATE_EXTERN:
                 return "private_extern"
             elif storage == clang.StorageClass.AUTO:
                 return "auto"
@@ -782,7 +790,8 @@ class EntityExtractor:
                     pass
                     
         except Exception as e:
-            print(f"提取模板参数失败: {e}")
+            logger = get_logger()
+            logger.error(f"提取失败: {e}")
         
         return template_params
     
@@ -862,7 +871,8 @@ class EntityExtractor:
                         exceptions = ''.join(exception_tokens)
                         return f"throw({exceptions})"
         except Exception as e:
-            print(f"提取异常规范失败: {e}")
+            logger = get_logger()
+            logger.error(f"提取失败: {e}")
         
         return ""
     
@@ -883,7 +893,8 @@ class EntityExtractor:
             
             return ""
         except Exception as e:
-            print(f"获取mangled name失败: {e}")
+            logger = get_logger()
+            logger.error(f"获取失败: {e}")
             return ""
     
     def _get_class_size(self, cursor) -> int:
@@ -936,7 +947,8 @@ class EntityExtractor:
                             vtable_info["virtual_methods"].append(method_info)
         
         except Exception as e:
-            print(f"提取虚表信息失败: {e}")
+            logger = get_logger()
+            logger.error(f"提取失败: {e}")
         
         return vtable_info
     
@@ -975,16 +987,13 @@ class EntityExtractor:
             
             # 遍历子游标查找属性
             for child in cursor.get_children():
-                if child.kind in [clang.CursorKind.ANNOTATE_ATTR, 
-                                 clang.CursorKind.ALIGNED_ATTR,
-                                 clang.CursorKind.PACKED_ATTR,
-                                 clang.CursorKind.PURE_ATTR,
-                                 clang.CursorKind.CONST_ATTR,
-                                 clang.CursorKind.NODEBUG_ATTR,
-                                 clang.CursorKind.NOTHROW_ATTR,
-                                 clang.CursorKind.RETURNS_NONNULL_ATTR,
-                                 clang.CursorKind.AVAILABILITY_ATTR,
-                                 clang.CursorKind.DEPRECATED_ATTR]:
+                # 只使用确实存在的属性类型
+                valid_attr_kinds = []
+                for attr_name in ['ANNOTATE_ATTR', 'ALIGNED_ATTR', 'PACKED_ATTR', 'PURE_ATTR', 'CONST_ATTR']:
+                    if hasattr(clang.CursorKind, attr_name):
+                        valid_attr_kinds.append(getattr(clang.CursorKind, attr_name))
+                
+                if child.kind in valid_attr_kinds:
                     attr_name = child.spelling or str(child.kind).split('.')[-1].lower().replace('_attr', '')
                     attributes.append(attr_name)
             
@@ -1064,7 +1073,8 @@ class EntityExtractor:
                         attributes.append(f"[[{attr_content}]]")
                         
         except Exception as e:
-            print(f"提取属性失败: {e}")
+            logger = get_logger()
+            logger.error(f"提取失败: {e}")
         
         return list(set(attributes))  # 去重
     
@@ -1173,10 +1183,12 @@ class EntityExtractor:
                         return '\n'.join(comments).strip()
                         
                 except Exception as e:
-                    print(f"读取源文件进行文档提取失败: {e}")
+                    logger = get_logger()
+                    logger.error(f"读取失败: {e}")
                     
         except Exception as e:
-            print(f"提取文档失败: {e}")
+            logger = get_logger()
+            logger.error(f"提取失败: {e}")
         
         return ""
     
@@ -1281,7 +1293,8 @@ class EntityExtractor:
                                 current_virtual = False
                                 
         except Exception as e:
-            print(f"提取继承信息失败: {e}")
+            logger = get_logger()
+            logger.error(f"提取失败: {e}")
         
         return inheritance_list
     
@@ -1321,7 +1334,8 @@ class EntityExtractor:
                         nested_types.append(nested_name)
                         
         except Exception as e:
-            print(f"提取嵌套类型失败: {e}")
+            logger = get_logger()
+            logger.error(f"提取失败: {e}")
         
         return nested_types
     
@@ -1373,7 +1387,8 @@ class EntityExtractor:
                         current_friend.append(token.spelling)
                         
         except Exception as e:
-            print(f"提取友元声明失败: {e}")
+            logger = get_logger()
+            logger.error(f"提取失败: {e}")
         
         return friend_declarations
     
@@ -1433,7 +1448,8 @@ class EntityExtractor:
                     constructors_info[constructor_type] = flags
                     
         except Exception as e:
-            print(f"提取构造函数信息失败: {e}")
+            logger = get_logger()
+            logger.error(f"提取失败: {e}")
         
         return constructors_info
     
@@ -1482,7 +1498,8 @@ class EntityExtractor:
                     break  # 只能有一个析构函数
                     
         except Exception as e:
-            print(f"提取析构函数信息失败: {e}")
+            logger = get_logger()
+            logger.error(f"提取失败: {e}")
         
         return destructor_info
     
@@ -1534,7 +1551,8 @@ class EntityExtractor:
                             aliases.append(alias_decl)
                             
         except Exception as e:
-            print(f"提取命名空间别名失败: {e}")
+            logger = get_logger()
+            logger.error(f"提取失败: {e}")
         
         return aliases
     
@@ -1584,7 +1602,8 @@ class EntityExtractor:
                         current_using.append(token.spelling)
                         
         except Exception as e:
-            print(f"提取using声明失败: {e}")
+            logger = get_logger()
+            logger.error(f"提取失败: {e}")
         
         return using_declarations
     
@@ -1876,7 +1895,8 @@ class EntityExtractor:
                 self.includes[file_id].append(include_info)
                 
         except Exception as e:
-            print(f"提取include失败: {e}")
+            logger = get_logger()
+            logger.error(f"提取失败: {e}")
     
     def _extract_typedef(self, cursor, current_file_path: str):
         """提取typedef信息"""
@@ -1903,7 +1923,8 @@ class EntityExtractor:
             self.typedefs[cursor.spelling] = typedef_info
             
         except Exception as e:
-            print(f"提取typedef失败 {cursor.spelling}: {e}")
+            logger = get_logger()
+            logger.error(f"提取失败 {cursor.spelling}: {e}")
     
     def _is_forward_declaration(self, cursor) -> bool:
         """检查是否为前向声明"""
@@ -1942,7 +1963,8 @@ class EntityExtractor:
             self.forward_declarations[file_id].append(forward_decl_info)
             
         except Exception as e:
-            print(f"提取前向声明失败 {cursor.spelling}: {e}")
+            logger = get_logger()
+            logger.error(f"提取失败 {cursor.spelling}: {e}")
     
     def _extract_macro_definition(self, cursor, current_file_path: str):
         """提取宏定义信息"""
@@ -1976,4 +1998,5 @@ class EntityExtractor:
             self.ast_macros[cursor.spelling] = macro_info
             
         except Exception as e:
-            print(f"提取宏定义失败 {cursor.spelling}: {e}") 
+            logger = get_logger()
+            logger.error(f"提取失败 {cursor.spelling}: {e}") 

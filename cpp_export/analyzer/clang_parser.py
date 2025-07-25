@@ -18,6 +18,7 @@ from dataclasses import dataclass
 import clang.cindex as clang
 from rich.console import Console
 from rich.progress import Progress, TaskID
+from .logger import get_logger
 
 @dataclass
 class DiagnosticInfo:
@@ -47,29 +48,28 @@ class ClangParser:
         self.index = None
         self.compile_commands: Dict[str, List[str]] = {}  # file -> compile args mapping
         self._current_directory = ""  # 用于解析rsp相对路径
+        self._working_directory = ""  # clang执行的工作目录
         self._initialize_index()
+    
+    def set_working_directory(self, working_dir: str):
+        """设置clang执行的工作目录"""
+        self._working_directory = working_dir
+        if self.console:
+            self.console.print(f"✓ 设置clang工作目录: {working_dir}", style="green")
     
     def _initialize_index(self):
         """初始化libclang索引"""
+        logger = get_logger()
         try:
             self.index = clang.Index.create()
             if self.console:
                 self.console.print("✓ libclang索引初始化成功", style="green")
+            logger.info("libclang索引初始化成功")
         except Exception as e:
             if self.console:
                 self.console.print(f"✗ libclang索引初始化失败: {e}", style="red")
+            logger.error(f"libclang索引初始化失败: {e}")
             raise
-    
-    def _get_default_compile_args(self) -> List[str]:
-        """获取默认编译参数（仅在没有compile_commands时使用）"""
-        return [
-            '-std=c++17',
-            '-Wall',
-            '-Wextra',
-            '-Wno-unused-parameter',
-            '-Wno-unused-variable',
-            '-x', 'c++',
-        ]
     
     def load_compile_commands(self, compile_commands_path: str) -> bool:
         """加载compile_commands.json文件"""
@@ -384,7 +384,7 @@ class ClangParser:
         from .logger import get_logger
         logger = get_logger()
         logger.warning(f"未找到编译参数，使用默认: {file_path}")
-        return self._get_default_compile_args()
+        return []
     
     def _normalize_path(self, path: str) -> str:
         """规范化路径 - 处理大小写、软链接等"""
@@ -401,18 +401,26 @@ class ClangParser:
             # 如果路径规范化失败，返回原路径
             return str(path)
     
-    def ensure_compile_commands(self, project_root: str) -> bool:
-        """确保compile_commands.json存在，如果不存在则尝试生成"""
-        compile_commands_path = Path(project_root) / "compile_commands.json"
+    def ensure_compile_commands(self, project_root: str, compile_commands_path: Optional[str] = None) -> bool:
+        """确保compile_commands.json存在，如果不存在则尝试生成
         
-        if compile_commands_path.exists():
-            return self.load_compile_commands(str(compile_commands_path))
+        Args:
+            project_root: 项目根目录
+            compile_commands_path: compile_commands.json的具体路径，如果为None则使用project_root下的
+        """
+        if compile_commands_path is None:
+            compile_commands_path = str(Path(project_root) / "compile_commands.json")
+        
+        compile_commands_file = Path(compile_commands_path)
+        
+        if compile_commands_file.exists():
+            return self.load_compile_commands(compile_commands_path)
         
         # 尝试生成compile_commands.json
         if self._is_unreal_project(project_root):
-            return self._generate_unreal_compile_commands(project_root)
+            return self._generate_unreal_compile_commands(project_root, compile_commands_path)
         elif self._is_cmake_project(project_root):
-            return self._generate_cmake_compile_commands(project_root)
+            return self._generate_cmake_compile_commands(project_root, compile_commands_path)
         
         if self.console:
             self.console.print("⚠ 未找到compile_commands.json，使用默认编译参数", style="yellow")
@@ -445,7 +453,7 @@ class ClangParser:
         
         return any((root_path / f).exists() for f in cmake_files)
     
-    def _generate_unreal_compile_commands(self, project_root: str) -> bool:
+    def _generate_unreal_compile_commands(self, project_root: str, compile_commands_path: Optional[str] = None) -> bool:
         """生成Unreal Engine的compile_commands.json"""
         try:
             # 查找.uproject文件
@@ -457,6 +465,9 @@ class ClangParser:
             
             if self.console:
                 self.console.print(f"正在为UE项目生成compile_commands.json: {uproject_file.name}", style="blue")
+            
+            # 设置工作目录为指定的clang工作目录
+            working_dir = self._working_directory if self._working_directory else project_root
             
             # Windows平台使用UnrealBuildTool
             if platform.system() == 'Windows':
@@ -476,12 +487,22 @@ class ClangParser:
                     "-Engine"
                 ]
             
-            result = subprocess.run(cmd, cwd=project_root, capture_output=True, text=True, timeout=300)
+            result = subprocess.run(cmd, cwd=working_dir, capture_output=True, text=True, timeout=300)
             
             if result.returncode == 0:
-                compile_commands_path = Path(project_root) / "compile_commands.json"
-                if compile_commands_path.exists():
-                    return self.load_compile_commands(str(compile_commands_path))
+                if compile_commands_path:
+                    target_path = Path(compile_commands_path)
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    # 从默认位置复制生成的文件
+                    default_path = Path(project_root) / "compile_commands.json"
+                    if default_path.exists():
+                        import shutil
+                        shutil.copy2(default_path, target_path)
+                        return self.load_compile_commands(str(target_path))
+                else:
+                    default_path = Path(project_root) / "compile_commands.json"
+                    if default_path.exists():
+                        return self.load_compile_commands(str(default_path))
             
         except Exception as e:
             if self.console:
@@ -489,7 +510,7 @@ class ClangParser:
         
         return False
     
-    def _generate_cmake_compile_commands(self, project_root: str) -> bool:
+    def _generate_cmake_compile_commands(self, project_root: str, compile_commands_path: Optional[str] = None) -> bool:
         """生成CMake的compile_commands.json"""
         try:
             if self.console:
@@ -499,18 +520,29 @@ class ClangParser:
             build_dir = Path(project_root) / "build"
             build_dir.mkdir(exist_ok=True)
             
+            # 设置工作目录
+            working_dir = self._working_directory if self._working_directory else str(build_dir)
+            
             cmd = ["cmake", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON", ".."]
-            result = subprocess.run(cmd, cwd=build_dir, capture_output=True, text=True, timeout=120)
+            result = subprocess.run(cmd, cwd=working_dir, capture_output=True, text=True, timeout=120)
             
             if result.returncode == 0:
-                compile_commands_path = build_dir / "compile_commands.json"
-                target_path = Path(project_root) / "compile_commands.json"
+                source_path = build_dir / "compile_commands.json"
                 
-                if compile_commands_path.exists():
-                    # 复制到项目根目录
-                    import shutil
-                    shutil.copy2(compile_commands_path, target_path)
-                    return self.load_compile_commands(str(target_path))
+                if compile_commands_path:
+                    target_path = Path(compile_commands_path)
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    if source_path.exists():
+                        import shutil
+                        shutil.copy2(source_path, target_path)
+                        return self.load_compile_commands(str(target_path))
+                else:
+                    target_path = Path(project_root) / "compile_commands.json"
+                    if source_path.exists():
+                        # 复制到项目根目录
+                        import shutil
+                        shutil.copy2(source_path, target_path)
+                        return self.load_compile_commands(str(target_path))
             
         except Exception as e:
             if self.console:
@@ -551,18 +583,31 @@ class ClangParser:
         
         try:
             # 使用文件特定的编译参数或默认参数
-            args = compile_args if compile_args is not None else self._get_default_compile_args()
+            args = compile_args
             
             # 创建翻译单元
             if not self.index:
                 raise RuntimeError("libclang索引未初始化")
+            
+            # 如果设置了工作目录，需要在解析前切换到工作目录
+            original_cwd = None
+            if self._working_directory and Path(self._working_directory).exists():
+                import os
+                original_cwd = os.getcwd()
+                os.chdir(self._working_directory)
                 
-            tu = self.index.parse(
-                file_path,
-                args=args,
-                options=clang.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD |
-                       clang.TranslationUnit.PARSE_INCOMPLETE
-            )
+            try:    
+                tu = self.index.parse(
+                    file_path,
+                    args=args,
+                    options=clang.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD |
+                           clang.TranslationUnit.PARSE_INCOMPLETE
+                )
+            finally:
+                # 恢复原始工作目录
+                if original_cwd:
+                    import os
+                    os.chdir(original_cwd)
             
             # 收集详细诊断信息
             diagnostics = []

@@ -92,7 +92,9 @@ class FileScanner:
                     file_path = Path(root) / filename
                     files.append(str(file_path.resolve()))
         except (OSError, PermissionError) as e:
-            print(f"警告: 无法访问目录 {directory}: {e}")
+            from .logger import get_logger
+            logger = get_logger()
+            logger.warning(f"无法访问目录 {directory}: {e}")
         
         return files
     

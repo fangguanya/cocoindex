@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from rich.console import Console
 from rich.progress import track, Progress
 
+from .logger import get_logger
 from .file_scanner import FileScanner, ScanResult
 from .clang_parser import ClangParser, ParsedFile
 from .entity_extractor import EntityExtractor
@@ -26,6 +27,8 @@ class AnalysisConfig:
     project_root: str  # 项目根目录，用于include搜索和文件ID映射
     scan_directory: str  # 实际扫描目录，可以是project_root的子目录
     output_path: str = "analysis_result.json"
+    compile_commands_path: Optional[str] = None  # compile_commands.json 的具体路径，如果为None则使用project_root下的
+    clang_working_directory: Optional[str] = None  # clang执行的工作目录，如果为None则使用project_root/Engine
     include_extensions: Set[str] = field(default_factory=lambda: {'.h', '.hpp', '.cpp', '.cc', '.cxx', '.c'})
     exclude_patterns: Set[str] = field(default_factory=lambda: {
         '*/Intermediate/*',  # UE中间文件
@@ -63,12 +66,16 @@ class CppAnalyzer:
         self.json_exporter = JsonExporter()
         self.complexity_analyzer = ComplexityAnalyzer()
     
-    def analyze(self, project_root: str, scan_directory: Optional[str] = None, **kwargs) -> AnalysisResult:
+    def analyze(self, project_root: str, scan_directory: Optional[str] = None, 
+                compile_commands_path: Optional[str] = None, 
+                clang_working_directory: Optional[str] = None, **kwargs) -> AnalysisResult:
         """分析C++项目 - 新的双路径接口
         
         Args:
             project_root: 项目根目录，用于include搜索和路径映射
             scan_directory: 扫描目录，默认与project_root相同
+            compile_commands_path: compile_commands.json的具体路径，默认为project_root下的
+            clang_working_directory: clang执行的工作目录，默认为project_root/Engine
             **kwargs: 其他配置参数
             
         Returns:
@@ -80,6 +87,8 @@ class CppAnalyzer:
         config = AnalysisConfig(
             project_root=project_root,
             scan_directory=scan_directory,
+            compile_commands_path=compile_commands_path,
+            clang_working_directory=clang_working_directory,
             **kwargs
         )
         
@@ -91,12 +100,13 @@ class CppAnalyzer:
     
     def _analyze_with_config(self, config: AnalysisConfig) -> AnalysisResult:
         """使用配置进行分析"""
+        logger = get_logger()
         start_time = time.time()
         
-        if config.verbose:
-            self.console.print(f"[bold blue]开始分析C++项目[/bold blue]")
-            self.console.print(f"项目根目录: {config.project_root}")
-            self.console.print(f"扫描目录: {config.scan_directory}")
+        # 记录到日志文件
+        logger.info("开始分析C++项目")
+        logger.info(f"项目根目录: {config.project_root}")
+        logger.info(f"扫描目录: {config.scan_directory}")
         
         try:
             # 1. 初始化解析器
@@ -155,15 +165,39 @@ class CppAnalyzer:
             )
     
     def _initialize_parser(self, config: AnalysisConfig):
-        """初始化解析器 - 直接使用compile_commands.json"""
+        """初始化解析器 - 支持指定的compile_commands.json路径和工作目录"""
         if config.use_compile_commands:
+            # 确定 compile_commands.json 的路径
+            if config.compile_commands_path:
+                compile_commands_path = config.compile_commands_path
+            else:
+                compile_commands_path = str(Path(config.project_root) / "compile_commands.json")
+            
+            # 确定 clang 的工作目录
+            if config.clang_working_directory:
+                clang_working_dir = config.clang_working_directory
+            else:
+                clang_working_dir = str(Path(config.project_root) / "Engine")
+            
+            # 设置 clang 的工作目录
+            self.clang_parser.set_working_directory(clang_working_dir)
+            
             # 尝试加载或生成compile_commands.json
             if config.generate_compile_commands:
-                self.clang_parser.ensure_compile_commands(config.project_root)
+                # 如果指定了具体路径，先检查是否存在
+                if Path(compile_commands_path).exists():
+                    self.clang_parser.load_compile_commands(compile_commands_path)
+                else:
+                    # 尝试生成到指定位置
+                    self.clang_parser.ensure_compile_commands(config.project_root, compile_commands_path)
             else:
-                compile_commands_path = Path(config.project_root) / "compile_commands.json"
-                if compile_commands_path.exists():
-                    self.clang_parser.load_compile_commands(str(compile_commands_path))
+                # 直接加载指定的文件
+                if Path(compile_commands_path).exists():
+                    self.clang_parser.load_compile_commands(compile_commands_path)
+                else:
+                    from .logger import get_logger
+                    logger = get_logger()
+                    logger.warning(f"指定的 compile_commands.json 文件不存在: {compile_commands_path}")
 
     
     def _scan_files(self, config: AnalysisConfig) -> ScanResult:
