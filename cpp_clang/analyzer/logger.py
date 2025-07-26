@@ -116,7 +116,7 @@ class CppAnalyzerLogger:
     
     def rsp_file_parsed(self, rsp_path: str, args_count: int):
         """记录RSP文件解析"""
-        self.debug(f"RSP文件解析: {rsp_path} ({args_count}个参数)")
+        self.info(f"RSP文件解析: {rsp_path} ({args_count}个参数)")
     
     def analysis_summary(self, stats: dict):
         """记录分析摘要"""

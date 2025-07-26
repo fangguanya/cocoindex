@@ -56,10 +56,12 @@ class CppAnalyzer:
         """
         start_time = time.time()
         self.console.print("[bold green]--- 开始 C++ 项目分析 (v2.3) ---[/bold green]")
+        self.logger.info("开始 C++ 项目分析 (v2.3)")
         
         try:
             # 1. 加载 compile_commands.json 作为分析的权威来源
             self.console.print("\n[bold]1. 加载 compile_commands.json...[/bold]")
+            self.logger.info("1. 加载 compile_commands.json...")
             parser = ClangParser(console=self.console)
             if not config.compile_commands_path or not Path(config.compile_commands_path).exists():
                 msg = f"必须提供有效的 compile_commands.json 路径。"
@@ -73,6 +75,7 @@ class CppAnalyzer:
                 return self._create_failure_result("Parsing", "compile_commands.json 中未找到任何文件记录。")
             
             self.console.print(f"-> 找到 {len(files_to_parse)} 个待分析文件。")
+            self.logger.info(f"找到 {len(files_to_parse)} 个待分析文件。")
 
             # 2. Clang解析
             self.console.print("\n[bold]2. 使用 Clang 解析文件...[/bold]")
@@ -81,13 +84,13 @@ class CppAnalyzer:
             if not successful_parses:
                  return self._create_failure_result("Parsing", "未能成功解析任何文件。")
             self.console.print(f"-> 成功解析 {len(successful_parses)} / {len(parsed_files)} 个文件。")
-
+            self.logger.info(f"成功解析 {len(successful_parses)} / {len(parsed_files)} 个文件。")
             # 3. 实体提取 (新版)
             self.console.print("\n[bold]3. 提取代码实体 (v2.3)...[/bold]")
             extractor = EntityExtractor(config.project_root)
             extracted_data = extractor.extract_from_files(successful_parses, config)
             self.console.print("-> 实体提取完成。")
-
+            self.logger.info("3. 实体提取完成。")
             # 4. JSON导出 (新版)
             self.console.print("\n[bold]4. 导出为 JSON (v2.3)...[/bold]")
             exporter = JsonExporter()
@@ -95,7 +98,7 @@ class CppAnalyzer:
             if not export_success:
                 return self._create_failure_result("Exporting", "JSON 导出过程失败。")
             self.console.print(f"-> 分析结果已保存到: {config.output_path}")
-
+            self.logger.info(f"分析结果已保存到: {config.output_path}")
             # 5. 完成
             statistics = self._generate_statistics(
                 total_files=len(files_to_parse),
@@ -105,8 +108,9 @@ class CppAnalyzer:
             )
             self.console.print("\n[bold green]✓ 分析成功完成！[/bold green]")
             self._display_statistics(statistics)
+            self.logger.info("分析成功完成！")
             return AnalysisResult(success=True, statistics=statistics, output_path=config.output_path)
-
+        
         except Exception as e:
             error_msg = f"分析过程中发生严重错误: {e}"
             self.logger.error(error_msg)
