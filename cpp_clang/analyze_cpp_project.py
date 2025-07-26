@@ -39,8 +39,8 @@ def main():
     SCAN_DIRECTORY = "D:/c7_i9_EngineDev/Client"
     
     # compile_commands.json 文件的具体路径
-    COMPILE_COMMANDS_PATH = "E:/mcp/codebase_index/cocoindex/cpp_clang/compile_commands.json"
-    #COMPILE_COMMANDS_PATH = "D:/c7_i9_EngineDev/ompile_commands.json"
+    #COMPILE_COMMANDS_PATH = "E:/mcp/codebase_index/cocoindex/cpp_clang/compile_commands.json"
+    COMPILE_COMMANDS_PATH = "D:/c7_i9_EngineDev/compile_commands.json"
     
     # 输出 JSON 文件路径
     OUTPUT_FILE = "cpp_analysis_result.json"
