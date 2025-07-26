@@ -715,18 +715,12 @@ class CallRelationshipAnalyzer:
         return possible_names 
 
     def _extract_call_qualified_name(self, call_node: Node) -> Optional[str]:
-        """从调用节点中提取限定名"""
+        """从调用节点中提取限定名 - 增强版：更好地处理复杂调用模式"""
         try:
             if call_node.type == 'call_expression':
                 function_node = call_node.child_by_field_name('function')
                 if function_node:
-                    function_name = self._get_text(function_node)
-                    # 如果已经包含::，直接返回
-                    if '::' in function_name:
-                        return function_name
-                    # 否则构建当前上下文的限定名
-                    qualifier = self._get_current_qualifier()
-                    return f"{qualifier}{function_name}" if qualifier else function_name
+                    return self._extract_function_name_from_node(function_node)
             
             elif call_node.type == 'field_expression':
                 field_name_node = call_node.child_by_field_name('field')
@@ -757,6 +751,65 @@ class CallRelationshipAnalyzer:
             return None
         except Exception as e:
             self.logger.warning(f"提取调用限定名失败: {e}")
+            return None
+    
+    def _extract_function_name_from_node(self, function_node: Node) -> Optional[str]:
+        """从函数节点中提取函数名，处理各种复杂情况"""
+        try:
+            # 情况1: 简单标识符 func()
+            if function_node.type == 'identifier':
+                return self._get_text(function_node)
+            
+            # 情况2: 限定标识符 namespace::func() 或 Class::func()
+            elif function_node.type == 'qualified_identifier':
+                full_name = self._get_text(function_node)
+                # 对于Super::func这种情况，需要特殊处理
+                if full_name.startswith('Super::'):
+                    # Super是UE中的特殊关键字，指向父类
+                    simple_name = full_name.replace('Super::', '')
+                    # 在当前类的上下文中查找，实际是父类的方法
+                    return simple_name  # 简化处理，直接返回函数名
+                return full_name
+            
+            # 情况3: 成员访问 obj.method() 或 obj->method()
+            elif function_node.type == 'field_expression':
+                field_node = function_node.child_by_field_name('field')
+                if field_node:
+                    method_name = self._get_text(field_node)
+                    # 获取对象部分
+                    object_node = function_node.child_by_field_name('argument')
+                    if object_node:
+                        object_name = self._get_text(object_node)
+                        # 对于已知的一些模式，简化处理
+                        if object_name in ['Super', 'this']:
+                            return method_name
+                        # 对于成员变量的方法调用，暂时返回方法名
+                        return method_name
+                    return method_name
+            
+            # 情况4: 模板函数调用 func<T>() 或 Cast<Type>()
+            elif function_node.type == 'template_function':
+                name_node = function_node.child_by_field_name('name')
+                if name_node:
+                    template_name = self._get_text(name_node)
+                    # 对于Cast<Type>这种模板函数，直接返回Cast
+                    return template_name
+                
+            # 情况5: 下标表达式作为函数调用（罕见）
+            elif function_node.type == 'subscript_expression':
+                return None  # 暂不处理
+            
+            # 其他情况：尝试直接获取文本
+            else:
+                text = self._get_text(function_node)
+                if text and '::' in text:
+                    return text
+                elif text:
+                    return text
+            
+            return None
+        except Exception as e:
+            self.logger.warning(f"从节点提取函数名失败: {e}")
             return None
 
     def _get_current_qualifier(self) -> str:

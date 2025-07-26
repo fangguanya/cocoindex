@@ -10,8 +10,9 @@ import os
 import fnmatch
 import re
 from pathlib import Path
-from typing import List, Set, Dict, Pattern
+from typing import List, Set, Dict, Pattern, Optional
 from dataclasses import dataclass
+from .file_filter import UnifiedFileFilter, create_unreal_filter
 
 @dataclass
 class ScanResult:
@@ -57,11 +58,13 @@ class FileScanner:
     }
     
     def __init__(self):
-        # 预处理排除模式以提高性能
-        self._excluded_dir_names: Set[str] = set()  # 纯目录名，O(1)查找
-        self._excluded_extensions: Set[str] = set()  # 文件扩展名
-        self._compiled_patterns: List[Pattern] = []  # 复杂模式的正则表达式
-        self._process_exclude_patterns()
+        # 使用统一的高效文件过滤器
+        self.file_filter = create_unreal_filter()
+        
+        # 保持向后兼容的属性（已弃用，建议使用file_filter）
+        self._excluded_dir_names: Set[str] = set()
+        self._excluded_extensions: Set[str] = set()
+        self._compiled_patterns: List[Pattern] = []
     
     def scan_directory(self, config) -> ScanResult:
         """扫描目录 - 支持双路径设计
@@ -86,58 +89,13 @@ class FileScanner:
         return ScanResult(files=files, file_mappings=file_mappings)
     
     def _process_exclude_patterns(self):
-        """预处理排除模式，提高匹配效率"""
-        for pattern in self.DEFAULT_EXCLUDE_PATTERNS:
-            # 处理目录名模式，例如：*/Intermediate/* -> Intermediate
-            if pattern.startswith('*/') and pattern.endswith('/*'):
-                dir_name = pattern[2:-2]  # 移除 */ 和 /*
-                self._excluded_dir_names.add(dir_name)
-            # 处理以目录名结尾的模式，例如：*/Intermediate -> Intermediate
-            elif pattern.startswith('*/') and not pattern.endswith('/*'):
-                dir_name = pattern[2:]  # 移除 */
-                self._excluded_dir_names.add(dir_name)
-            # 处理文件扩展名模式，例如：*.luac -> .luac
-            elif pattern.startswith('*.'):
-                ext = pattern[1:]  # 移除 *
-                self._excluded_extensions.add(ext)
-            # 处理隐藏文件模式：*/.*
-            elif pattern == '*/.*':
-                # 这个会在快速检查中特殊处理
-                pass
-            # 其他复杂模式编译为正则表达式
-            else:
-                try:
-                    # 将fnmatch模式转换为正则表达式
-                    regex_pattern = fnmatch.translate(pattern)
-                    compiled = re.compile(regex_pattern)
-                    self._compiled_patterns.append(compiled)
-                except re.error:
-                    # 如果正则表达式编译失败，跳过该模式
-                    pass
+        """已弃用：现在使用UnifiedFileFilter进行过滤"""
+        # 保留此方法以保持向后兼容性，但不执行任何操作
+        pass
     
     def _should_exclude_directory(self, dir_name: str, dir_path: str) -> bool:
-        """快速目录排除检查（高性能版本）"""
-        # 1. O(1) 检查隐藏目录
-        if dir_name.startswith('.'):
-            return True
-        
-        # 2. O(1) 检查预定义的目录名
-        if dir_name in self._excluded_dir_names:
-            return True
-        
-        # 3. 检查文件扩展名（虽然这里是目录，但可能有同名情况）
-        for ext in self._excluded_extensions:
-            if dir_name.endswith(ext):
-                return True
-        
-        # 4. 只有在必要时才进行复杂的正则匹配
-        if self._compiled_patterns:
-            normalized_path = dir_path.replace('\\', '/')
-            for pattern in self._compiled_patterns:
-                if pattern.match(normalized_path):
-                    return True
-        
-        return False
+        """使用统一过滤器检查目录是否应该被排除"""
+        return self.file_filter.should_exclude(dir_path)
     
     def _walk_directory(self, directory: str) -> List[str]:
         """递归遍历目录获取所有文件（优化版：在遍历期间应用排除模式）"""
@@ -206,9 +164,14 @@ class FileScanner:
         if path_obj.suffix.lower() not in config.include_extensions:
             return False
         
-        # 检查排除模式 - 使用配置中的排除模式
-        if config.exclude_patterns and self._should_exclude_file(file_path, config.exclude_patterns):
-            return False
+        # 检查排除模式 - 优先使用统一过滤器，向后兼容配置中的排除模式
+        if hasattr(config, 'exclude_patterns') and config.exclude_patterns:
+            if self._should_exclude_file(file_path, config.exclude_patterns):
+                return False
+        else:
+            # 使用统一过滤器
+            if self._should_exclude_file(file_path):
+                return False
         
         # 检查文件是否存在和可读
         if not path_obj.exists() or not path_obj.is_file():
@@ -222,16 +185,18 @@ class FileScanner:
         except (OSError, PermissionError):
             return False
     
-    def _should_exclude_file(self, file_path: str, patterns: Set[str]) -> bool:
-        """检查文件是否应被排除"""
-        # 标准化路径分隔符
-        normalized_path = file_path.replace('\\', '/')
+    def _should_exclude_file(self, file_path: str, patterns: Optional[Set[str]] = None) -> bool:
+        """使用统一过滤器检查文件是否应被排除"""
+        # 如果提供了patterns参数，使用传统模式（向后兼容）
+        if patterns is not None:
+            normalized_path = file_path.replace('\\', '/')
+            for pattern in patterns:
+                if fnmatch.fnmatch(normalized_path, pattern):
+                    return True
+            return False
         
-        for pattern in patterns:
-            if fnmatch.fnmatch(normalized_path, pattern):
-                return True
-        
-        return False
+        # 否则使用统一过滤器（推荐方式）
+        return self.file_filter.should_exclude(file_path)
     
     def _generate_file_mappings(self, files: List[str], project_root: str) -> Dict[str, str]:
         """生成文件ID映射 - 基于project_root"""
@@ -259,3 +224,19 @@ class FileScanner:
             return True
         except ValueError:
             return False 
+    
+    def get_filter_statistics(self) -> Dict:
+        """获取文件过滤器的统计信息"""
+        return self.file_filter.get_statistics()
+    
+    def clear_filter_cache(self):
+        """清理文件过滤器的缓存"""
+        self.file_filter.clear_cache()
+    
+    def add_exclude_pattern(self, pattern: str):
+        """动态添加排除模式"""
+        self.file_filter.add_exclude_pattern(pattern)
+    
+    def remove_exclude_pattern(self, pattern: str):
+        """移除排除模式"""
+        self.file_filter.remove_exclude_pattern(pattern)

@@ -33,6 +33,7 @@ from .data_structures import NodeRepository, Project
 from .entity_extractor import EntityExtractor  
 from .file_scanner import FileScanner
 from .logger import Logger
+from .file_filter import create_unreal_filter
 
 # ==============================================================================
 # 模块级单例优化
@@ -337,16 +338,24 @@ class ParallelCppAnalyzer:
         
         start_time = time.time()
         
-        # 1. 扫描文件
+        # 1. 扫描文件 - 使用统一过滤器
         self.logger.info("扫描项目文件...")
-        scanner = FileScanner()
-        scan_result = scanner.scan_directory(
-            str(self.project_path),
-            include_patterns=['*.cpp', '*.cc', '*.cxx', '*.c++', '*.h', '*.hpp', '*.hxx', '*.h++'],
-            exclude_patterns=['*/build/*', '*/dist/*', '*/.git/*', '*/node_modules/*']
-        )
         
-        files = [Path(f) for f in scan_result.files]
+        # 使用简单的文件扫描，然后应用过滤器
+        include_patterns = ['*.cpp', '*.cc', '*.cxx', '*.c++', '*.h', '*.hpp', '*.hxx', '*.h++']
+        all_files = []
+        
+        for pattern in include_patterns:
+            found_files = list(self.project_path.rglob(pattern))
+            all_files.extend(found_files)
+        
+        # 使用统一过滤器过滤文件
+        file_filter = create_unreal_filter()
+        files = file_filter.filter_files(all_files)
+        
+        self.logger.info(f"扫描到 {len(all_files)} 个文件，过滤后剩余 {len(files)} 个文件")
+        
+        # files 已经是 Path 对象列表，不需要转换
         self.analysis_stats['total_files'] = len(files)
         
         if not files:

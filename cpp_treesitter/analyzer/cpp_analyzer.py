@@ -29,6 +29,7 @@ from .entity_extractor import EntityExtractor
 from .call_relationship_analyzer import CallRelationshipAnalyzer
 from .file_manager import FileManager, get_file_manager
 from .template_analyzer import TemplateAnalyzer
+from .file_filter import UnifiedFileFilter, create_unreal_filter
 
 from pathlib import Path
 from typing import List, Dict, Any
@@ -81,7 +82,9 @@ class CppAnalyzer:
         
         # 文件扫描设置
         self.include_patterns = ['*.cpp', '*.cc', '*.cxx', '*.c++', '*.h', '*.hpp', '*.hxx', '*.h++']
-        self.exclude_patterns = ['*/build/*', '*/dist/*', '*/.git/*', '*/node_modules/*']
+        
+        # 使用高效的统一文件过滤器
+        self.file_filter = create_unreal_filter()
 
         # 新增：AST缓存机制
         self.ast_cache: Dict[str, Tuple[Any, str]] = {}  # file_path -> (tree, content)
@@ -165,7 +168,7 @@ class CppAnalyzer:
         
         self.logger.info(f"扫描项目路径: {self.project_path}")
         self.logger.info(f"包含模式: {self.include_patterns}")
-        self.logger.info(f"排除模式: {self.exclude_patterns}")
+        self.logger.info(f"排除模式: {self.file_filter.raw_patterns}")
         
         for i, pattern in enumerate(self.include_patterns):
             self.logger.info(f"正在扫描模式 {i+1}/{len(self.include_patterns)}: {pattern}")
@@ -173,14 +176,11 @@ class CppAnalyzer:
                 files = list(self.project_path.rglob(pattern))
                 self.logger.info(f"模式 {pattern} 找到 {len(files)} 个文件")
                 
-                # 过滤排除的文件
-                filtered_count = 0
-                for file_path in files:
-                    excluded = any(excluded in str(file_path) for excluded in self.exclude_patterns)
-                    if not excluded:
-                        cpp_files.append(file_path)
-                    else:
-                        filtered_count += 1
+                # 使用统一过滤器过滤文件
+                before_filter_count = len(files)
+                filtered_files = self.file_filter.filter_files(files)
+                cpp_files.extend(filtered_files)
+                filtered_count = before_filter_count - len(filtered_files)
                 
                 if filtered_count > 0:
                     self.logger.info(f"模式 {pattern} 过滤掉 {filtered_count} 个文件")
@@ -206,6 +206,12 @@ class CppAnalyzer:
             self.project.add_file(str(file_path))
         
         self.logger.info(f"文件扫描和注册完成，共 {len(cpp_files)} 个文件")
+        
+        # 输出过滤统计信息
+        filter_stats = self.file_filter.get_statistics()
+        self.logger.info(f"过滤统计: 检查了 {filter_stats['total_checks']} 个文件，排除了 {filter_stats['excluded_count']} 个")
+        self.logger.info(f"排除率: {filter_stats['exclusion_rate']:.1f}%")
+        
         return cpp_files
 
     def _register_files(self, cpp_files: List[Path]):
@@ -231,8 +237,9 @@ class CppAnalyzer:
         with Progress() as progress:
             task = progress.add_task("收集声明", total=len(cpp_files))
             
-            for file_path in cpp_files:
+            for i, file_path in enumerate(cpp_files):
                 try:
+                    self.logger.info(f"Phase 1: Processing declarations from {file_path}")
                     self._process_file_phase_one(file_path)
                     successful_files += 1
                 except Exception as e:
@@ -240,6 +247,10 @@ class CppAnalyzer:
                     failed_files += 1
                 
                 progress.advance(task)
+                
+                # 每处理100个文件输出一次进度到日志
+                if (i + 1) % 100 == 0:
+                    self.logger.info(f"第一阶段进度: {i + 1}/{len(cpp_files)} 个文件已处理")
         
         stats = self.repo.get_statistics()
         self.logger.info(f"第一阶段完成: 成功 {successful_files} 个文件，失败 {failed_files} 个文件")
@@ -255,8 +266,9 @@ class CppAnalyzer:
         with Progress() as progress:
             task = progress.add_task("处理定义", total=len(cpp_files))
             
-            for file_path in cpp_files:
+            for i, file_path in enumerate(cpp_files):
                 try:
+                    self.logger.info(f"Phase 2: Processing definitions and call relationships from {file_path}")
                     self._process_file_phase_two(file_path)
                     successful_files += 1
                 except Exception as e:
@@ -264,6 +276,10 @@ class CppAnalyzer:
                     failed_files += 1
                 
                 progress.advance(task)
+                
+                # 每处理50个文件输出一次进度到日志（第二阶段更频繁）
+                if (i + 1) % 50 == 0:
+                    self.logger.info(f"第二阶段进度: {i + 1}/{len(cpp_files)} 个文件已处理")
         
         # 新增：第二轮调用关系解析，处理待解析的调用
         self.logger.info("开始第二轮调用关系解析...")
@@ -366,26 +382,79 @@ class CppAnalyzer:
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         
-        self.logger.info(f"导出分析结果到: {output_path}")
+        self.logger.info("=" * 60)
+        self.logger.info("🚀 开始导出分析结果")
+        self.logger.info(f"📁 导出目录: {output_path}")
+        self.logger.info("=" * 60)
         
-        # 导出主分析结果
+        # 统计信息
+        stats = self.repo.get_statistics()
+        total_entities = stats['total_entities']
+        total_files = len(self.project.files)
+        
+        self.logger.info(f"📊 准备导出数据:")
+        self.logger.info(f"   - 总实体数: {total_entities}")
+        self.logger.info(f"   - 总文件数: {total_files}")
+        self.logger.info(f"   - 调用关系: {stats['call_relationships']}")
+        
+        # 1. 导出主分析结果
+        self.logger.info("📝 [1/4] 正在导出主分析结果...")
         exporter = JsonExporter(self.file_manager)
         main_output = output_path / "cpp_treesitter_analysis_result.json"
+        
+        import time
+        start_time = time.time()
         exporter.export_analysis_result(self.project, self.repo, str(main_output))
+        main_export_time = time.time() - start_time
         
-        # 导出全局nodes映射
+        file_size_mb = main_output.stat().st_size / (1024 * 1024)
+        self.logger.info(f"✅ 主分析结果导出完成: {file_size_mb:.2f}MB, 耗时: {main_export_time:.2f}秒")
+        
+        # 2. 导出全局nodes映射
+        self.logger.info("🔗 [2/4] 正在导出全局nodes映射...")
         nodes_output = output_path / "nodes.json"
-        exporter.export_nodes_json(self.repo, str(nodes_output))
         
-        # 导出文件映射
+        start_time = time.time()
+        exporter.export_nodes_json(self.repo, str(nodes_output))
+        nodes_export_time = time.time() - start_time
+        
+        file_size_mb = nodes_output.stat().st_size / (1024 * 1024)
+        self.logger.info(f"✅ 全局nodes映射导出完成: {file_size_mb:.2f}MB, 耗时: {nodes_export_time:.2f}秒")
+        
+        # 3. 导出文件映射
+        self.logger.info("📄 [3/4] 正在导出文件映射...")
         file_mapping_output = output_path / "file_mappings.json"
+        
+        start_time = time.time()
         with open(file_mapping_output, 'w', encoding='utf-8') as f:
             json.dump(self.file_manager.export_mapping_json(), f, indent=2, ensure_ascii=False)
+        file_mapping_time = time.time() - start_time
         
-        # 导出分析摘要
+        file_size_mb = file_mapping_output.stat().st_size / (1024 * 1024)
+        self.logger.info(f"✅ 文件映射导出完成: {file_size_mb:.2f}MB, 耗时: {file_mapping_time:.2f}秒")
+        
+        # 4. 导出分析摘要
+        self.logger.info("📋 [4/4] 正在导出分析摘要...")
         summary_output = output_path / "analysis_summary.json"
+        
+        start_time = time.time()
         with open(summary_output, 'w', encoding='utf-8') as f:
             json.dump(self.get_analysis_summary(), f, indent=2, ensure_ascii=False)
+        summary_time = time.time() - start_time
+        
+        file_size_mb = summary_output.stat().st_size / (1024 * 1024)
+        self.logger.info(f"✅ 分析摘要导出完成: {file_size_mb:.2f}MB, 耗时: {summary_time:.2f}秒")
+        
+        # 总结
+        total_export_time = main_export_time + nodes_export_time + file_mapping_time + summary_time
+        total_size_mb = sum(f.stat().st_size for f in [main_output, nodes_output, file_mapping_output, summary_output]) / (1024 * 1024)
+        
+        self.logger.info("=" * 60)
+        self.logger.info("🎉 导出完成!")
+        self.logger.info(f"📊 导出统计:")
+        self.logger.info(f"   - 总导出时间: {total_export_time:.2f}秒")
+        self.logger.info(f"   - 总文件大小: {total_size_mb:.2f}MB")
+        self.logger.info(f"   - 平均导出速度: {total_entities / total_export_time:.0f} 实体/秒")
         
         self.logger.info(f"导出完成:")
         self.logger.info(f"  - 主分析结果: {main_output}")

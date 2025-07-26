@@ -1209,21 +1209,47 @@ class NodeRepository:
         return None
 
     def resolve_function_call(self, called_name: str, context_namespace: str = "", context_class: str = "") -> Optional[str]:
-        """解析函数调用，返回被调用函数的USR ID"""
+        """解析函数调用，返回被调用函数的USR ID - 增强版：更好地处理复杂调用"""
+        # 去除可能的多余空格
+        called_name = called_name.strip()
+        
         # 构建可能的qualified names
         possible_names = [
             called_name,  # 直接名称
-            f"{context_namespace}::{called_name}" if context_namespace else called_name,
-            f"{context_class}::{called_name}" if context_class else called_name,
-            f"{context_namespace}::{context_class}::{called_name}" if context_namespace and context_class else called_name
         ]
         
+        # 添加上下文相关的名称
+        if context_namespace:
+            possible_names.append(f"{context_namespace}::{called_name}")
+        if context_class:
+            possible_names.append(f"{context_class}::{called_name}")
+        if context_namespace and context_class:
+            possible_names.append(f"{context_namespace}::{context_class}::{called_name}")
+        
+        # 如果是简单函数名，也尝试与所有现有函数的简单名称匹配
+        if '::' not in called_name:
+            # 查找所有同名函数
+            matching_functions = []
+            for usr, entity in self.nodes.items():
+                if (hasattr(entity, 'type') and entity.type == 'function' and 
+                    hasattr(entity, 'name') and entity.name == called_name):
+                    matching_functions.append(entity)
+            
+            if matching_functions:
+                # 优先返回定义
+                for func in matching_functions:
+                    if hasattr(func, 'is_definition') and func.is_definition:
+                        return func.usr
+                # 如果没有定义，返回第一个
+                return matching_functions[0].usr
+        
+        # 使用qualified_name索引查找
         for name in possible_names:
             functions = self.find_by_qualified_name(name, 'function')
             if functions:
                 # 优先返回定义而不是声明
                 for func in functions:
-                    if func.is_definition:
+                    if hasattr(func, 'is_definition') and func.is_definition:
                         return func.usr
                 # 如果没有定义，返回第一个声明
                 return functions[0].usr
