@@ -52,6 +52,16 @@ class ClangParser:
         self._working_directory = ""  # clang执行的工作目录（保留向后兼容）
         self._initialize_index()
     
+    def _get_ue_constexpr_args(self) -> List[str]:
+        """获取UE5.4 constexpr支持的专用编译参数 - 简化版本"""
+        return [
+            # 核心constexpr支持 - 这些是最关键的参数
+            '-fconstexpr-steps=5000000',      # 大幅增加constexpr计算步数
+            '-fconstexpr-depth=2048',         # 增加constexpr递归深度
+            
+            "-Wno-invalid-constexpr",   # 奇怪了，，关闭constexpr的编译错误先...add by fg
+        ]
+    
     def set_working_directory(self, working_dir: str):
         """设置clang执行的工作目录"""
         self._working_directory = working_dir
@@ -242,22 +252,171 @@ class ClangParser:
             else:
                 continue
             
-            # 调试：显示原始参数
-            if self.console and file_path.endswith('KGCurveUtil.gen.cpp'):
-                self.console.print(f"🔍 原始编译参数 ({len(args)} 个): {args[:10]}...", style="dim")
-            
             # 处理和清理参数
             processed_args = self._process_compile_args(args)
             
-            # 调试：显示处理后参数
-            if self.console and file_path.endswith('KGCurveUtil.gen.cpp'):
-                self.console.print(f"🔧 处理后参数 ({len(processed_args)} 个): {processed_args[:10]}...", style="dim")
-            # 使用规范化路径作为键
             normalized_file_path = self._normalize_path(file_path)
             file_commands[normalized_file_path] = {"args": processed_args, "directory": directory}
         
         return file_commands
     
+    def _convert_msvc_to_clang(self, arg: str) -> Optional[str]:
+        """将MSVC参数转换为clang参数
+        
+        基于官方文档和实际测试的MSVC到clang参数映射表
+        """
+        
+        # 标准转换表 - 基于官方文档验证
+        conversions = {
+            # C++ 标准
+            '/std:c++20': '-std=c++20',
+            '/std:c++17': '-std=c++17', 
+            '/std:c++14': '-std=c++14',
+            '/std:c++11': '-std=c++11',
+            
+            # 警告级别
+            '/W0': '-w',
+            '/W1': '-Wall',
+            '/W2': '-Wall',
+            '/W3': '-Wall',
+            '/W4': '-Wall -Wextra',
+            '/Wall': '-Wall -Wextra -Wpedantic',
+            '/WX': '-Werror',
+            
+            # 优化
+            '/O1': '-Os',      # 优化大小
+            '/O2': '-O2',      # 优化速度
+            '/Od': '-O0',      # 禁用优化
+            '/Ox': '-O3',      # 最大优化
+            '/Os': '-Os',      # 优化大小
+            '/Ot': '-O2',      # 优化速度
+            
+            # 异常处理
+            '/EHsc': '-fexceptions',
+            '/EHs': '-fexceptions',
+            '/EHc': '-fexceptions',
+            '/EHa': '-fexceptions',  # 异步异常
+            
+            # RTTI
+            '/GR': '',           # 启用RTTI（clang默认启用）
+            '/GR-': '-fno-rtti', # 禁用RTTI
+            
+            # 调试信息
+            '/Zi': '-g',
+            '/Z7': '-g',
+            '/ZI': '-g',
+            
+            # 代码生成
+            '/TC': '-x c',       # 强制C模式
+            '/TP': '-x c++',     # 强制C++模式
+            '/Gd': '',           # __cdecl调用约定（默认）
+            '/Gr': '',           # __fastcall调用约定
+            '/Gz': '',           # __stdcall调用约定
+            
+            # 运行时库（clang-cl会自动处理）
+            '/MT': '',           # 静态链接
+            '/MTd': '',          # 静态链接调试版
+            '/MD': '',           # 动态链接
+            '/MDd': '',          # 动态链接调试版
+            
+            # 编译器行为
+            '/permissive-': '-pedantic',
+            '/nologo': '',       # 不显示版权信息
+            '/bigobj': '',       # 大对象支持（clang不需要）
+            
+            # 特殊标志
+            '/volatile:iso': '',      # ISO volatile语义
+            '/volatile:ms': '',       # MS volatile语义
+            '/Zc:wchar_t': '',        # wchar_t是内置类型
+            '/Zc:wchar_t-': '',       # wchar_t不是内置类型
+            '/Zc:forScope': '',       # for循环作用域
+            '/Zc:inline': '',         # 内联函数处理
+        }
+        
+        # 直接转换
+        if arg in conversions:
+            result = conversions[arg]
+            return result if result else None
+        
+        # 模式匹配转换
+        
+        # 禁用特定警告 /wd4996 -> -Wno-deprecated-declarations
+        if arg.startswith('/wd'):
+            warning_id = arg[3:]
+            warning_mappings = {
+                '4996': '-Wno-deprecated-declarations',
+                '4100': '-Wno-unused-parameter',
+                '4101': '-Wno-unused-variable',
+                '4189': '-Wno-unused-variable',
+                '4244': '-Wno-conversion',
+                '4267': '-Wno-conversion',
+                '4305': '-Wno-literal-conversion',
+                '4309': '-Wno-constant-conversion',
+                '4456': '-Wno-shadow',
+                '4457': '-Wno-shadow',
+                '4458': '-Wno-shadow',
+                '4459': '-Wno-shadow',
+            }
+            return warning_mappings.get(warning_id)
+        
+        # 预编译头参数（跳过，libclang不需要）
+        if arg.startswith(('/Yc', '/Yu', '/Fp')):
+            return None
+            
+        # 编译器一致性开关（大多数跳过）
+        if arg.startswith('/Zc:'):
+            # 少数几个重要的保留 - 增加constexpr相关参数
+            important_zc = {
+                '/Zc:__cplusplus': '',  # 正确的__cplusplus值
+                '/Zc:sizedDealloc': '',  # C++14 sized deallocation
+                '/Zc:constexpr': '',     # MSVC constexpr支持（UE核心参数已涵盖）
+                '/Zc:strictStrings': '', # 严格字符串字面量处理
+                '/Zc:implicitNoexcept': '', # 隐式noexcept
+                '/Zc:lambda': '',       # C++11 lambda表达式
+                '/Zc:auto': '',         # C++11 auto类型推导
+                '/Zc:inline': '',       # 内联函数处理
+                '/Zc:wchar_t': '',      # wchar_t类型处理
+            }
+            return important_zc.get(arg)
+            
+        # 链接器相关参数（直接跳过）
+        if arg.startswith(('/link', '/ENTRY:', '/SUBSYSTEM:', '/MACHINE:', '/LIBPATH:')):
+            return None
+            
+        # C++20模块相关参数（clang可能不完全支持）
+        if arg.startswith(('/module:', '/interface', '/internalPartition')):
+            return None
+            
+        # 其他优化参数
+        if arg.startswith('/O') and len(arg) > 2:
+            other_opts = {
+                '/Ob0': '',     # 禁用内联
+                '/Ob1': '',     # 只内联标记为inline的函数
+                '/Ob2': '',     # 内联合适的函数
+                '/Oi': '',      # 生成内置函数
+                '/Oy': '',      # 省略帧指针
+                '/Oy-': '-fno-omit-frame-pointer',
+            }
+            return other_opts.get(arg)
+            
+        # 控制流保护等安全特性
+        if arg.startswith('/guard:'):
+            return None  # clang有自己的控制流保护实现
+            
+        # 其他MSVC特定参数，跳过
+        msvc_specific_prefixes = [
+            '/await', '/experimental:', '/kernel', '/homeparams',
+            '/Qfast_transcendentals', '/QIfist', '/Qimprecise_fwaits',
+            '/Qpar', '/Qsafe_fp_loads', '/Qvec-report'
+        ]
+        
+        for prefix in msvc_specific_prefixes:
+            if arg.startswith(prefix):
+                return None
+        
+        # 未知参数，返回None表示跳过
+        return None
+
     def _process_compile_args(self, raw_args: List[str]) -> List[str]:
         """处理和清理编译参数"""
         # 使用递归方法展开所有@rsp文件（包括嵌套的）
@@ -266,6 +425,16 @@ class ClangParser:
         processed_args = []
         skip_next = False
         seen_includes = set()
+        
+        # 添加UE5.4专用的constexpr支持参数
+        processed_args.extend(self._get_ue_constexpr_args())
+        
+        # 特殊处理：为UE constexpr问题添加额外的数学函数支持
+        processed_args.extend([
+            '-D__builtin_ctz=__builtin_ctz',  # 确保内置函数可用
+            '-fno-builtin',                   # 禁用某些内置函数优化
+            '-fno-strict-aliasing',           # 放宽别名规则
+        ])
         
         for i, arg in enumerate(expanded_args):
             if skip_next:
@@ -294,7 +463,7 @@ class ClangParser:
             if arg in ['-I', '/I'] and i + 1 < len(expanded_args):
                 include_path = expanded_args[i + 1]
                 if include_path not in seen_includes:
-                    processed_args.extend(['-I', include_path])
+                    processed_args.append('-I' + include_path)
                     seen_includes.add(include_path)
                 skip_next = True
             elif arg.startswith(('-I', '/I')) and len(arg) > 2:
@@ -305,30 +474,39 @@ class ClangParser:
             # 处理宏定义 - 改进的过滤逻辑
             elif arg.startswith(('-D', '/D')):
                 macro_def = arg[2:]
-                # 跳过一些可能有问题的宏定义
-                if any(skip_pattern in macro_def for skip_pattern in ['WIN32_LEAN_AND_MEAN', 'NOMINMAX']):
-                    # 仍然保留这些常用的Windows宏
-                    processed_args.append('-D' + macro_def)
-                elif '()' in macro_def and '=' not in macro_def:
-                    # 修正无效的宏定义语法 -DUCLASS() -> -DUCLASS=
-                    macro_name = macro_def.replace('()', '')
-                    if macro_name in ['UCLASS', 'USTRUCT', 'UENUM', 'UFUNCTION', 'UPROPERTY', 'GENERATED_BODY', 'GENERATED_UCLASS_BODY']:
-                        processed_args.append(f'-D{macro_name}=')
-                    else:
-                        processed_args.append(f'-D{macro_name}=')
-                else:
-                    processed_args.append('-D' + macro_def)
-            # 处理MSVC外部include路径 /external:I
+                processed_macro = self._process_macro_definition(macro_def)
+                if processed_macro:
+                    processed_args.append('-D' + processed_macro)
+            # 处理独立的宏定义值（当/D后面跟着单独的参数时）
+            elif i > 0 and expanded_args[i-1] in ['-D', '/D']:
+                processed_macro = self._process_macro_definition(arg)
+                if processed_macro:
+                    processed_args.append('-D' + processed_macro)
+                # 注意：这种情况下不需要skip_next，因为当前参数已经被处理了
+            # 处理MSVC外部include路径 /external:I -> -isystem (更准确的映射)
             elif arg in ['/external:I'] and i + 1 < len(expanded_args):
                 include_path = expanded_args[i + 1]
                 if include_path not in seen_includes:
-                    processed_args.extend(['-I', include_path])
+                    processed_args.extend(['-isystem', include_path])
                     seen_includes.add(include_path)
                 skip_next = True
             elif arg.startswith('/external:I') and len(arg) > 11:
                 include_path = arg[11:]
                 if include_path not in seen_includes:
-                    processed_args.append('-I' + include_path)
+                    processed_args.extend(['-isystem', include_path])
+                    seen_includes.add(include_path)
+            # 处理MSVC系统include路径 /imsvc -> -isystem (更准确的映射)
+            elif arg in ['/imsvc'] and i + 1 < len(expanded_args):
+                include_path = expanded_args[i + 1]
+                if include_path not in seen_includes:
+                    processed_args.extend(['-isystem', include_path])
+                    seen_includes.add(include_path)
+                skip_next = True
+            elif arg.startswith('/imsvc') and len(arg) > 6:
+                # 处理 /imsvc"路径" 或 /imsvc路径 格式
+                include_path = arg[6:].strip('"\'')
+                if include_path and include_path not in seen_includes:
+                    processed_args.extend(['-isystem', include_path])
                     seen_includes.add(include_path)
             # 处理MSVC强制包含文件 /FI
             elif arg in ['/FI'] and i + 1 < len(expanded_args):
@@ -340,40 +518,47 @@ class ClangParser:
                 processed_args.append('-include' + force_include)
             # 标准化MSVC参数为clang参数
             elif arg.startswith('/'):
-                if arg == '/EHsc':
-                    processed_args.append('-fexceptions')
-                elif arg.startswith('/std:'):
-                    std_version = arg[5:]
-                    if std_version == 'c++17':
-                        processed_args.append('-std=c++17')
-                    elif std_version == 'c++14':
-                        processed_args.append('-std=c++14')
-                    elif std_version == 'c++20':
-                        processed_args.append('-std=c++20')
-                elif arg == '/Wall':
-                    processed_args.append('-Wall')
-                elif arg == '/W4':
-                    processed_args.append('-Wall')
-                elif arg == '/W3':
-                    processed_args.append('-Wall')
-                elif arg.startswith('/wd'):
-                    # 禁用特定警告 /wd4996 -> -Wno-deprecated-declarations
-                    warning_id = arg[3:]
-                    if warning_id == '4996':
-                        processed_args.append('-Wno-deprecated-declarations')
-                    # 可以根据需要添加更多警告映射
-                elif arg == '/permissive-':
-                    # MSVC严格模式，Clang默认就比较严格
-                    processed_args.append('-pedantic')
-                elif arg.startswith('/external:'):
-                    # 跳过其他external相关参数
-                    continue
-                # 跳过其他MSVC特定参数
+                converted = self._convert_msvc_to_clang(arg)
+                if converted:
+                    # 处理可能包含多个参数的转换结果
+                    if ' ' in converted:
+                        processed_args.extend(converted.split())
+                    else:
+                        processed_args.append(converted)
+                # 如果converted为None，则跳过该参数
                 continue
             else:
                 processed_args.append(arg)
         
         return processed_args
+    
+    def _process_macro_definition(self, macro_def: str) -> Optional[str]:
+        """处理宏定义，修复常见的语法问题"""
+        # 跳过一些可能有问题的宏定义，但保留常用的Windows宏
+        if any(skip_pattern in macro_def for skip_pattern in ['WIN32_LEAN_AND_MEAN', 'NOMINMAX']):
+            return macro_def
+        
+        # 修正无效的宏定义语法 UCLASS() -> UCLASS=
+        if '()' in macro_def and '=' not in macro_def:
+            macro_name = macro_def.replace('()', '')
+            # UE特定宏的处理
+            if macro_name in ['UCLASS', 'USTRUCT', 'UENUM', 'UFUNCTION', 'UPROPERTY', 
+                             'GENERATED_BODY', 'GENERATED_UCLASS_BODY', 'GENERATED_USTRUCT_BODY']:
+                return f'{macro_name}='
+            else:
+                return f'{macro_name}='
+        
+        # 处理一些可能导致解析问题的宏
+        if macro_def in ['UNICODE', '_UNICODE']:
+            return macro_def
+        
+        # 跳过一些可能有问题的MSVC特定宏
+        problematic_macros = ['_MSC_VER', '_WIN32', '_WIN64']
+        if any(problematic in macro_def for problematic in problematic_macros):
+            # 这些宏通常会自动定义，跳过可能重复的定义
+            return None
+        
+        return macro_def
     
     def _get_file_compile_args(self, file_path: str) -> List[str]:
         """获取文件特定的编译参数"""
@@ -456,8 +641,7 @@ class ClangParser:
                 tu = self.index.parse(
                     file_path,
                     args=args,
-                    options=clang.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD |
-                           clang.TranslationUnit.PARSE_INCOMPLETE
+                    options=clang.TranslationUnit.PARSE_NONE
                 )
             finally:
                 # 恢复原始工作目录

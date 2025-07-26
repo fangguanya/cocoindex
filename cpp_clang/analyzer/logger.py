@@ -12,7 +12,7 @@ from typing import Optional
 class CppAnalyzerLogger:
     """C++分析器专用日志管理器"""
     
-    def __init__(self, log_file: Optional[str] = None, console_level: str = "INFO", file_level: str = "DEBUG"):
+    def __init__(self, log_file: Optional[str] = None, console_level: str = "INFO", file_level: str = "INFO"):
         """
         初始化日志管理器
         
@@ -137,12 +137,6 @@ def get_logger() -> CppAnalyzerLogger:
     global _global_logger
     if _global_logger is None:
         _global_logger = CppAnalyzerLogger()
-    return _global_logger
-
-def init_logger(log_file: Optional[str] = None, console_level: str = "INFO", file_level: str = "DEBUG") -> CppAnalyzerLogger:
-    """初始化全局日志实例"""
-    global _global_logger
-    _global_logger = CppAnalyzerLogger(log_file, console_level, file_level)
     return _global_logger
 
 def set_quiet_mode():

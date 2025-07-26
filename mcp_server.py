@@ -26,7 +26,7 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'python'))
 
 import cocoindex
-from cocoindex import flow, lib, setting
+from cocoindex import flow, lib, setting, setup
 from cocoindex.cli import (
     _load_user_app, _get_app_ref_from_specifier
 )
@@ -37,7 +37,7 @@ from fastmcp import FastMCP
 # 添加数据库相关导入
 from psycopg_pool import ConnectionPool
 from pgvector.psycopg import register_vector
-from psycopg import sql
+from psycopg import sql, errors as psycopg_errors
 
 # 全局变量用于跟踪进度
 processing_stats = {
@@ -51,7 +51,7 @@ stats_lock = threading.Lock()
 class ProgressMonitor:
     """监控cocoindex处理进度的类"""
     
-    def __init__(self, db_url: str, table_name: str = "CodeEmbedding__code_embeddings"):
+    def __init__(self, db_url: str, table_name: str):
         self.db_url = db_url
         self.table_name = table_name
         self.running = False
@@ -72,14 +72,20 @@ class ProgressMonitor:
         self.running = False
         if self.thread:
             self.thread.join()
-            
+             
     def _monitor(self):
         """监控进程的主循环"""
         try:
             while self.running:
                 try:
-                    # 连接数据库检查记录数
-                    with ConnectionPool(self.db_url, open=True) as pool:
+                    # 使用优化的连接池配置连接数据库检查记录数
+                    with ConnectionPool(
+                        self.db_url, 
+                        open=True,
+                        max_size=20,  # 监控器使用较小的连接池
+                        min_size=2,
+                        timeout=30.0
+                    ) as pool:
                         with pool.connection() as conn:
                             with conn.cursor() as cur:
                                 # 检查总记录数
@@ -109,13 +115,28 @@ class ProgressMonitor:
                                               f"速度: {speed:.1f} 块/秒 | 运行时间: {elapsed:.1f}秒")
                                         self.last_count = total_count
                                         self.start_time = time.time()  # 重置计时器
+                                except psycopg_errors.UndefinedTable:
+                                    # 表尚不存在，静默等待（这是正常情况）
+                                    pass
                                 except Exception as inner_e:
-                                    if "does not exist" not in str(inner_e):
+                                    import traceback
+                                    error_str = str(inner_e).lower()
+                                    if 'pool timed out' in error_str or 'connection' in error_str:
+                                        print(f"⚠️  数据库连接超时，正在重试...")
+                                    else:
                                         print(f"⚠️  查询错误: {inner_e}")
                     
                 except Exception as e:
-                    # 如果表还不存在，静默等待
-                    if "does not exist" not in str(e):
+                    # 处理不同类型的错误
+                    error_str = str(e).lower()
+                    if "does not exist" in error_str or "undefined" in error_str:
+                        # 表不存在，静默等待
+                        pass
+                    elif "pool timed out" in error_str or "connection" in error_str:
+                        print(f"⚠️  监控连接超时: {e}")
+                    elif "couldn't get a connection" in error_str:
+                        print(f"⚠️  监控器无法获取数据库连接，连接池可能已满")
+                    else:
                         print(f"⚠️  监控错误: {e}")
                 
                 # 每5秒检查一次
@@ -132,6 +153,61 @@ def reset_progress_stats():
         processing_stats["chunks_processed"] = 0
         processing_stats["embeddings_created"] = 0
         processing_stats["current_file"] = ""
+
+
+def parse_cocoindex_stats(stats_str: str) -> Dict[str, int]:
+    """解析cocoindex返回的统计字符串"""
+    result = {
+        "total_files": 0,
+        "failed_files": 0,
+        "no_change_files": 0,
+        "success_files": 0,
+        "failed_rate": 0.0
+    }
+    
+    try:
+        # 解析类似 "files: 86505 source rows FAILED; 7274 source rows NO CHANGE" 的字符串
+        stats_lower = str(stats_str).lower()
+        
+        # 提取失败数量
+        import re
+        failed_match = re.search(r'(\d+)\s+source\s+rows\s+failed', stats_lower)
+        if failed_match:
+            result["failed_files"] = int(failed_match.group(1))
+        
+        # 提取无变化数量
+        no_change_match = re.search(r'(\d+)\s+source\s+rows\s+no\s+change', stats_lower)
+        if no_change_match:
+            result["no_change_files"] = int(no_change_match.group(1))
+        
+        # 计算总文件数和成功数
+        result["total_files"] = result["failed_files"] + result["no_change_files"]
+        result["success_files"] = result["no_change_files"]  # NO CHANGE通常表示已成功处理过
+        
+        # 计算失败率
+        if result["total_files"] > 0:
+            result["failed_rate"] = result["failed_files"] / result["total_files"]
+        
+        return result
+    except Exception as e:
+        print(f"❌ 解析统计信息失败: {e}")
+        return result
+
+
+def get_connection_pool_stats(pool) -> Dict[str, Any]:
+    """获取连接池统计信息"""
+    try:
+        if hasattr(pool, '_pool'):
+            return {
+                "pool_size": getattr(pool._pool, 'size', 'unknown'),
+                "available_connections": getattr(pool._pool, '_nconns_open', 'unknown'),
+                "waiting_requests": getattr(pool._pool, '_nconns_waiting', 'unknown'),
+                "max_size": getattr(pool, '_max_size', 'unknown'),
+                "min_size": getattr(pool, '_min_size', 'unknown')
+            }
+    except Exception:
+        pass
+    return {"status": "stats_unavailable"}
 
 
 def extract_extension(filename: str) -> str:
@@ -236,8 +312,13 @@ def code_embedding_flow(
             )
 
     print("💾 正在导出到PostgreSQL数据库...")
+    
+    # 从环境变量获取表名，与服务器配置保持一致
+    table_name = os.environ.get("COCOINDEX_DATABASE_TABLE", "c7_client_code_embeddings")
+    print(f"✅ 将导出到表: {table_name}")
+
     code_embeddings.export(
-        "code_embeddings",
+        table_name,
         cocoindex.targets.Postgres(),
         primary_key_fields=["filename", "location"],
         vector_indexes=[
@@ -253,9 +334,9 @@ def code_embedding_flow(
 class ImprovedCodeSearch:
     """改进的代码搜索引擎"""
     
-    def __init__(self, db_url: str):
+    def __init__(self, db_url: str, table_name: str):
         self.db_url = db_url
-        self.table_name = "codeembedding__code_embeddings"
+        self.table_name = table_name
         
         # 初始化CocoIndex
         settings = setting.Settings.from_env()
@@ -417,7 +498,7 @@ class ImprovedCodeSearch:
 class CocoIndexMcpServer:
     """MCP Server for CocoIndex code analysis using FastMCP."""
     
-    def __init__(self, flow_name: str = "gmzz", host: str = "127.0.0.1", port: int = 2010):
+    def __init__(self, flow_name: str, host: str, port: int, db_url: str, table_name: str):
         self.flow_name = flow_name
         self.host = host
         self.port = port
@@ -425,6 +506,8 @@ class CocoIndexMcpServer:
         self._initialized = False
         self.db_pool: Optional[ConnectionPool] = None
         self.search_engine: Optional[ImprovedCodeSearch] = None
+        self.db_url = db_url
+        self.table_name = table_name
         
         self.mcp_server = FastMCP(            
             name="CocoIndex"
@@ -444,11 +527,34 @@ class CocoIndexMcpServer:
             lib.init(settings)
             
             # 初始化数据库连接池
-            db_url = os.getenv("COCOINDEX_DATABASE_URL")
-            if db_url:
-                self.db_pool = ConnectionPool(db_url, open=True)
-                self.search_engine = ImprovedCodeSearch(db_url)
-                self.logger.info("Database connection pool and search engine initialized")
+            if self.db_url:
+                # 使用大幅增强的连接池配置以应对高并发索引需求
+                self.logger.info("🔧 正在配置数据库连接池...")
+                self.db_pool = ConnectionPool(
+                    self.db_url, 
+                    open=True,
+                    max_size=100,         # 大幅增加最大连接数，支持超高并发
+                    min_size=20,          # 增加最小连接数，减少连接创建延迟
+                    timeout=300.0,        # 大幅增加获取连接超时时间（5分钟）
+                    max_waiting=200,      # 增加最大排队请求数
+                    max_lifetime=7200.0,  # 连接最大生存时间（2小时）
+                    max_idle=1800.0       # 连接最大空闲时间（30分钟）
+                )
+                self.search_engine = ImprovedCodeSearch(self.db_url, self.table_name)
+                self.logger.info("✅ 数据库连接池初始化完成")
+                self.logger.info(f"🔧 连接池配置: max_size=100, min_size=20, timeout=300s, max_waiting=200")
+                self.logger.info(f"🔧 连接管理: max_lifetime=7200s, max_idle=1800s")
+                
+                # 测试连接池
+                try:
+                    with self.db_pool.connection() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute("SELECT version()")
+                            version = cur.fetchone()
+                            self.logger.info(f"🔗 数据库连接测试成功: {version[0] if version else 'Unknown'}")
+                except Exception as e:
+                    self.logger.error(f"❌ 数据库连接测试失败: {e}")
+                    raise
             else:
                 self.logger.warning("COCOINDEX_DATABASE_URL not set, database queries will not work")
             
@@ -469,80 +575,196 @@ class CocoIndexMcpServer:
             self.logger.error(f"Failed to initialize MCP server: {e}")
             raise
 
+    def _programmatic_setup_flows(self, flow_names: List[str]):
+        """以编程方式执行flow setup，等同于 `cocoindex setup`"""
+        try:
+            target_flows = [flow.flow_by_name(name) for name in flow_names]
+            if not target_flows:
+                self.logger.info("没有找到需要 setup 的 flow。")
+                return
+
+            self.logger.info(f"为 {', '.join(flow_names)} 创建 setup bundle...")
+            setup_bundle = flow.make_setup_bundle(target_flows)
+
+            description, is_up_to_date = setup_bundle.describe()
+            self.logger.info("Flow setup 描述:\n" + description)
+
+            if is_up_to_date:
+                self.logger.info("✅ Flow setup 已经是最新的。")
+                return
+
+            self.logger.info("应用 flow setup 变更...")
+            setup_bundle.apply(report_to_stdout=False) # 在后台静默应用
+            self.logger.info("✅ Flow setup 变更应用成功。")
+
+        except Exception as e:
+            self.logger.error(f"❌ 以编程方式执行 flow setup 失败: {e}")
+            import traceback
+            self.logger.error(f"详细错误: {traceback.format_exc()}")
+            raise # 重新抛出异常，因为这是一个关键步骤
+
     async def _auto_initialize_flow(self):
         """自动初始化代码嵌入流程"""
         try:
             self.logger.info("🚀 开始自动初始化代码嵌入流程...")
             
+            # 强制更新Flow setup，等同于运行 `cocoindex setup`
+            self.logger.info("🔧 检查并更新 flow setup...")
+            try:
+                flow_to_setup = code_embedding_flow.name
+                if flow_to_setup in flow.flow_names():
+                    self._programmatic_setup_flows([flow_to_setup])
+                    self.logger.info(f"✅ Flow '{flow_to_setup}' setup 检查和更新完成。")
+                else:
+                    self.logger.warning(f"未找到 '{flow_to_setup}' flow，跳过 setup。")
+            except Exception as e:
+                self.logger.error(f"❌ Flow setup 失败，索引流程无法继续。")
+                return
+
             # 重置进度统计
             reset_progress_stats()
             
             # 启动进度监控
-            db_url = os.getenv("COCOINDEX_DATABASE_URL")
             monitor = None
-            if db_url:
-                monitor = ProgressMonitor(db_url, "codeembedding__code_embeddings")
+            if self.db_url:
+                monitor = ProgressMonitor(self.db_url, self.table_name)
                 monitor.start()
                 self.logger.info("📊 进度监控已启动")
             
             # 检查是否已经有数据
             if self.db_pool:
                 try:
+                    self.logger.info("🔍 检查数据库中是否已有现有数据...")
                     with self.db_pool.connection() as conn:
                         with conn.cursor() as cur:
-                            table_name = "codeembedding__code_embeddings"
+                            # 首先检查表是否存在
                             cur.execute(
                                 "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = %s)",
-                                (table_name,)
+                                (self.table_name,)
                             )
                             table_exists = cur.fetchone()
+                            self.logger.info(f"📋 表 '{self.table_name}' 存在性检查: {table_exists[0] if table_exists else False}")
                             
                             if table_exists and table_exists[0]:
-                                cur.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(table_name)))
+                                cur.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(self.table_name)))
                                 count_result = cur.fetchone()
                                 existing_count = count_result[0] if count_result else 0
+                                
+                                self.logger.info(f"📊 现有记录数: {existing_count}")
                                 
                                 if existing_count > 0:
                                     self.logger.info(f"📁 数据库中已有 {existing_count} 条记录，跳过重新索引")
                                     if monitor:
                                         monitor.stop()
                                     return
+                                else:
+                                    self.logger.info("📝 表存在但无数据，将进行全新索引")
+                            else:
+                                self.logger.info("📋 表不存在，将执行flow创建表并索引数据")
                 except Exception as e:
-                    self.logger.debug(f"检查现有数据时出错: {e}")
+                    self.logger.warning(f"⚠️  检查现有数据时出错: {e}")
+                    # 如果检查失败，继续执行flow，让它创建表
+                    self.logger.info("🔄 继续执行flow以创建表和索引数据")
             
             self.logger.info("⏳ 正在处理文件，这可能需要一些时间...")
             
             try:
+                # 记录执行前的连接池状态
+                if self.db_pool:
+                    pool_stats_before = get_connection_pool_stats(self.db_pool)
+                    self.logger.info(f"🔧 Flow执行前连接池状态: {pool_stats_before}")
+                
+                self.logger.info("🚀 开始执行cocoindex flow...")
+                start_time = time.time()
+                
                 # 更新流程
                 stats = code_embedding_flow.update()
+                
+                execution_time = time.time() - start_time
+                self.logger.info(f"⏱️  Flow执行完成，耗时: {execution_time:.2f}秒")
+                
+                # 记录执行后的连接池状态
+                if self.db_pool:
+                    pool_stats_after = get_connection_pool_stats(self.db_pool)
+                    self.logger.info(f"🔧 Flow执行后连接池状态: {pool_stats_after}")
+                
+                # 详细解析统计结果
+                self.logger.info(f"📊 原始处理统计: {stats}")
+                parsed_stats = parse_cocoindex_stats(str(stats))
+                self.logger.info(f"📊 解析后的统计信息:")
+                self.logger.info(f"  - 总文件数: {parsed_stats['total_files']}")
+                self.logger.info(f"  - 失败文件数: {parsed_stats['failed_files']}")
+                self.logger.info(f"  - 无变化文件数: {parsed_stats['no_change_files']}")
+                self.logger.info(f"  - 成功文件数: {parsed_stats['success_files']}")
+                self.logger.info(f"  - 失败率: {parsed_stats['failed_rate']:.2%}")
+                
+                # 根据失败率判断流程是否真正成功
+                failure_threshold = 0.5  # 50%失败率阈值
+                if parsed_stats['failed_rate'] > failure_threshold:
+                    error_msg = f"❌ Flow处理失败率过高: {parsed_stats['failed_rate']:.2%} > {failure_threshold:.2%}"
+                    self.logger.error(error_msg)
+                    self.logger.error(f"  失败文件: {parsed_stats['failed_files']}/{parsed_stats['total_files']}")
+                    self.logger.error("  主要原因可能是数据库连接池超时，请检查连接池配置或数据库性能")
+                    
+                    # 停止进度监控
+                    if monitor:
+                        monitor.stop()
+                    
+                    # 不抛出异常，但记录为失败状态
+                    self.logger.warning("⚠️  虽然flow报告完成，但实际处理失败率过高，继续启动服务器但数据可能不完整")
+                    return
                 
                 # 停止进度监控
                 if monitor:
                     monitor.stop()
                 
                 self.logger.info("✅ 代码嵌入流程初始化成功！")
-                self.logger.info(f"📊 处理统计: {stats}")
+                
+                # 等待一小段时间确保数据库操作完成
+                self.logger.info("⏳ 等待数据库操作完成...")
+                time.sleep(3)
                 
                 # 显示最终统计
                 if self.db_pool:
-                    with self.db_pool.connection() as conn:
-                        with conn.cursor() as cur:
-                            table_name = "codeembedding__code_embeddings"
-                            cur.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(table_name)))
-                            total_count = cur.fetchone()
-                            count = total_count[0] if total_count else 0
-                            
-                            cur.execute(sql.SQL("SELECT COUNT(DISTINCT filename) FROM {}").format(sql.Identifier(table_name)))
-                            file_count_result = cur.fetchone()
-                            file_count = file_count_result[0] if file_count_result else 0
-                            
-                            self.logger.info(f"✅ 数据库中共有 {count} 条代码块记录")
-                            self.logger.info(f"📁 处理了 {file_count} 个不同的文件")
+                    try:
+                        with self.db_pool.connection() as conn:
+                            with conn.cursor() as cur:
+                                cur.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(self.table_name)))
+                                total_count = cur.fetchone()
+                                count = total_count[0] if total_count else 0
+                                
+                                cur.execute(sql.SQL("SELECT COUNT(DISTINCT filename) FROM {}").format(sql.Identifier(self.table_name)))
+                                file_count_result = cur.fetchone()
+                                file_count = file_count_result[0] if file_count_result else 0
+                                
+                                self.logger.info(f"✅ 数据库验证: 共有 {count} 条代码块记录")
+                                self.logger.info(f"📁 数据库验证: 处理了 {file_count} 个不同的文件")
+                                
+                                if count == 0:
+                                    self.logger.error("❌ 警告: 数据库中没有找到任何记录，表可能创建失败")
+                                elif count < parsed_stats['success_files'] * 100:  # 假设每个文件平均100个代码块
+                                    self.logger.warning(f"⚠️  警告: 数据库记录数({count})可能少于预期")
+                    except Exception as e:
+                        self.logger.error(f"❌ 数据库验证失败: {e}")
+                        # 这可能是因为表还没有创建，这是一个严重问题
+                        self.logger.error("  表可能未成功创建，请检查cocoindex处理过程中的错误")
                 
             except Exception as e:
                 if monitor:
                     monitor.stop()
+                import traceback
                 self.logger.error(f"❌ 代码嵌入流程初始化失败: {e}")
+                self.logger.error(f"详细错误堆栈: {traceback.format_exc()}")
+                
+                # 如果是连接相关的错误，提供更具体的建议
+                error_str = str(e).lower()
+                if 'pool timed out' in error_str or 'connection' in error_str:
+                    self.logger.error("🔧 建议解决方案:")
+                    self.logger.error("  1. 增加PostgreSQL的max_connections设置")
+                    self.logger.error("  2. 检查PostgreSQL服务器性能")
+                    self.logger.error("  3. 考虑减少cocoindex的并发度（如果可配置）")
+                    self.logger.error("  4. 检查网络延迟和稳定性")
+                
                 # 不抛出异常，让服务器继续运行
                 
         except Exception as e:
@@ -710,19 +932,17 @@ class CocoIndexMcpServer:
                 with self.db_pool.connection() as conn:
                     with conn.cursor() as cur:
                         # 获取正确的表名
-                        table_name = "codeembedding__code_embeddings"
-                        
                         try:
-                            cur.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(table_name)))
+                            cur.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(self.table_name)))
                             total_count = cur.fetchone()
                             count = total_count[0] if total_count else 0
                             
-                            cur.execute(sql.SQL("SELECT COUNT(DISTINCT filename) FROM {}").format(sql.Identifier(table_name)))
+                            cur.execute(sql.SQL("SELECT COUNT(DISTINCT filename) FROM {}").format(sql.Identifier(self.table_name)))
                             file_count_result = cur.fetchone()
                             file_count = file_count_result[0] if file_count_result else 0
                             
                             result = {
-                                "table_name": table_name,
+                                "table_name": self.table_name,
                                 "total_records": count,
                                 "unique_files": file_count,
                                 "table_exists": True
@@ -739,7 +959,7 @@ class CocoIndexMcpServer:
                         except Exception as e:
                             if "does not exist" in str(e):
                                 result = {
-                                    "table_name": table_name,
+                                    "table_name": self.table_name,
                                     "table_exists": False,
                                     "message": "表不存在，请先运行初始化流程"
                                 }
@@ -913,15 +1133,21 @@ def main_sync():
     root_logger.addHandler(console_handler)
     
     # 设置环境变量
-    if not os.environ.get("COCOINDEX_DATABASE_URL"):
-        os.environ["COCOINDEX_DATABASE_URL"] = "postgresql://cocoindex:cocoindex@localhost/cocoindex"
+    db_url = os.environ.get("COCOINDEX_DATABASE_URL")
+    if not db_url:
+        # 设置基本的数据库URL，连接池参数将在创建ConnectionPool时直接配置
+        db_url = "postgresql://cocoindex:cocoindex@localhost/cocoindex"
+        os.environ["COCOINDEX_DATABASE_URL"] = db_url
+        logging.info(f"COCOINDEX_DATABASE_URL 未设置, 使用默认值: {db_url}")
     
     try:
         # 创建MCP服务器
         server = CocoIndexMcpServer(
             flow_name=args.flow,
             host=args.host,
-            port=args.port
+            port=args.port,
+            db_url=db_url,
+            table_name=os.environ.get("COCOINDEX_DATABASE_TABLE", "c7_client_code_embeddings")
         )
         
         if args.test:
@@ -954,7 +1180,8 @@ def main_sync():
     except KeyboardInterrupt:
         logging.info("🛑 服务器被用户停止")
     except Exception as e:
-        logging.error(f"❌ 服务器错误: {e}")
+        import traceback
+        logging.error(f"❌ 服务器错误: {e}, {traceback.format_exc()}")
         sys.exit(1)
 
 

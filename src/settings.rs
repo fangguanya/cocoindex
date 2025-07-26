@@ -5,6 +5,7 @@ pub struct DatabaseConnectionSpec {
     pub url: String,
     pub user: Option<String>,
     pub password: Option<String>,
+    pub max_pool_size: Option<u32>,
 }
 
 #[derive(Deserialize, Debug, Default)]
@@ -46,6 +47,7 @@ mod tests {
         assert_eq!(db.url, "postgresql://localhost:5432/test");
         assert_eq!(db.user, Some("testuser".to_string()));
         assert_eq!(db.password, Some("testpass".to_string()));
+        assert_eq!(db.max_pool_size, None);
         assert_eq!(settings.app_namespace, "test_app");
     }
 
@@ -75,7 +77,8 @@ mod tests {
     fn test_settings_deserialize_database_without_user_password() {
         let json = r#"{
             "database": {
-                "url": "postgresql://localhost:5432/test"
+                "url": "postgresql://localhost:5432/test",
+                "max_pool_size": 50
             }
         }"#;
 
@@ -86,6 +89,7 @@ mod tests {
         assert_eq!(db.url, "postgresql://localhost:5432/test");
         assert_eq!(db.user, None);
         assert_eq!(db.password, None);
+        assert_eq!(db.max_pool_size, Some(50));
         assert_eq!(settings.app_namespace, "");
     }
 
@@ -102,5 +106,6 @@ mod tests {
         assert_eq!(db_spec.url, "postgresql://localhost:5432/test");
         assert_eq!(db_spec.user, Some("testuser".to_string()));
         assert_eq!(db_spec.password, Some("testpass".to_string()));
+        assert_eq!(db_spec.max_pool_size, None);
     }
 }

@@ -16,11 +16,12 @@ import sys
 import time
 from pathlib import Path
 
-# 添加 analyzer 模块到路径
-sys.path.insert(0, str(Path(__file__).parent))
+# 将项目根目录添加到 sys.path
+# 这使得我们可以使用绝对路径导入，如 from cpp_clang.analyzer import ...
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from rich.console import Console
-from analyzer.cpp_analyzer import CppAnalyzer
+from cpp_clang.analyzer.cpp_analyzer import CppAnalyzer, AnalysisConfig
 
 def main():
     """主函数 - 执行 C++ 项目分析"""
@@ -34,98 +35,81 @@ def main():
     # 项目根目录（用于 include 搜索和路径映射）
     PROJECT_ROOT = "D:/c7_i9_EngineDev/Engine"
     
-    # 要分析的代码目录
+    # 要分析的代码目录 (注意：在新流程中，此参数仅用于语义，分析范围由 compile_commands 决定)
     SCAN_DIRECTORY = "D:/c7_i9_EngineDev/Client"
     
     # compile_commands.json 文件的具体路径
-    COMPILE_COMMANDS_PATH = "E:/mcp/codebase_index/cocoindex/cpp_export/compile_commands.json"
-    
-    # clang 执行的工作目录（现在会自动使用compile_commands.json中每个文件的directory字段）
-    # CLANG_WORKING_DIR = "D:/c7_i9_EngineDev/Engine"  # 不再需要，已自动从compile_commands.json获取
+    COMPILE_COMMANDS_PATH = "E:/mcp/codebase_index/cocoindex/cpp_clang/compile_commands.json"
+    #COMPILE_COMMANDS_PATH = "D:/c7_i9_EngineDev/ompile_commands.json"
     
     # 输出 JSON 文件路径
     OUTPUT_FILE = "cpp_analysis_result.json"
     
     # 其他选项
-    VERBOSE = True  # 是否显示详细输出
+    VERBOSE = False  # 是否显示详细输出
     MAX_FILES = None  # 限制处理的文件数量，None 表示不限制
     
     # ========== 配置结束 ==========
     
     console.print("\n[bold blue]分析配置:[/bold blue]")
     console.print(f"项目根目录: {PROJECT_ROOT}")
-    console.print(f"扫描目录: {SCAN_DIRECTORY}")
+    console.print(f"扫描目录 (参考): {SCAN_DIRECTORY}")
     console.print(f"编译命令文件: {COMPILE_COMMANDS_PATH}")
-    console.print(f"clang工作目录: 自动从compile_commands.json获取")
     console.print(f"输出文件: {OUTPUT_FILE}")
     
     # 检查路径是否存在
-    paths_to_check = [
-        ("项目根目录", PROJECT_ROOT),
-        ("扫描目录", SCAN_DIRECTORY),
-    ]
-    
-    for name, path in paths_to_check:
-        if not Path(path).exists():
-            console.print(f"[red]警告: {name} 不存在: {path}[/red]")
-            console.print("[yellow]请修改脚本中的路径配置[/yellow]")
-            console.print("[yellow]如果这是演示运行，程序会继续执行[/yellow]")
-    
-    if Path(COMPILE_COMMANDS_PATH).exists():
-        console.print(f"[green]✓ 找到编译命令文件[/green]")
-    else:
-        console.print(f"[yellow]! 编译命令文件不存在，将尝试自动生成[/yellow]")
+    if not Path(PROJECT_ROOT).exists():
+        console.print(f"[red]警告: 项目根目录不存在: {PROJECT_ROOT}[/red]")
+    if not Path(COMPILE_COMMANDS_PATH).exists():
+        console.print(f"[red]错误: compile_commands.json 不存在: {COMPILE_COMMANDS_PATH}[/red]")
+        return 1
     
     try:
         # 创建分析器
         console.print("\n[bold blue]初始化分析器...[/bold blue]")
         analyzer = CppAnalyzer(console=console)
         
-        # 执行分析
-        console.print("\n[bold blue]开始分析...[/bold blue]")
-        start_time = time.time()
-        
-        result = analyzer.analyze(
+        # 创建配置对象
+        config = AnalysisConfig(
             project_root=PROJECT_ROOT,
             scan_directory=SCAN_DIRECTORY,
             compile_commands_path=COMPILE_COMMANDS_PATH,
-            # clang_working_directory 不再需要，会自动从compile_commands.json获取
             output_path=OUTPUT_FILE,
             verbose=VERBOSE,
             max_files=MAX_FILES
         )
-        
-        analysis_time = time.time() - start_time
+
+        # 执行分析
+        console.print("\n[bold blue]开始分析...[/bold blue]")
+        result = analyzer.analyze(config)
         
         # 显示结果
         console.print(f"\n{'='*60}")
-        if result.success:
+        if result.success and result.output_path:
             console.print("[bold green]✓ 分析完成！[/bold green]")
             
             # 显示统计信息
             stats = result.statistics
             console.print(f"\n[bold blue]分析统计:[/bold blue]")
-            console.print(f"总文件数: {stats.get('total_files', 0)}")
-            console.print(f"成功解析: {stats.get('successful_files', 0)}")
-            console.print(f"解析失败: {stats.get('failed_files', 0)}")
+            console.print(f"源文件数 (from compile_commands): {stats.get('total_files_in_compile_commands', 0)}")
+            console.print(f"成功解析: {stats.get('successful_parsed_files', 0)} / {stats.get('total_parsed_files', 0)}")
             console.print(f"提取函数: {stats.get('total_functions', 0)}")
             console.print(f"提取类: {stats.get('total_classes', 0)}")
-            console.print(f"提取命名空间: {stats.get('total_namespaces', 0)}")
-            console.print(f"分析用时: {analysis_time:.2f}秒")
+            console.print(f"分析用时: {stats.get('analysis_time_sec', 0):.2f}秒")
             
             # 检查输出文件
-            if Path(OUTPUT_FILE).exists():
-                file_size = Path(OUTPUT_FILE).stat().st_size
-                console.print(f"\n[green]✓ 结果已保存到: {OUTPUT_FILE}[/green]")
+            if Path(result.output_path).exists():
+                file_size = Path(result.output_path).stat().st_size
+                console.print(f"\n[green]✓ 结果已保存到: {result.output_path}[/green]")
                 console.print(f"文件大小: {file_size:,} 字节")
             else:
                 console.print(f"[yellow]! 输出文件未生成[/yellow]")
         else:
             console.print("[bold red]✗ 分析失败[/bold red]")
-            if 'error' in result.statistics:
-                console.print(f"错误: {result.statistics['error']}")
-            if 'reason' in result.statistics:
-                console.print(f"原因: {result.statistics['reason']}")
+            stats = result.statistics
+            if 'stage' in stats and 'reason' in stats:
+                console.print(f"失败阶段: {stats['stage']}")
+                console.print(f"原因: {stats['reason']}")
     
     except KeyboardInterrupt:
         console.print("\n[yellow]分析被用户中断[/yellow]")
@@ -133,6 +117,8 @@ def main():
     
     except Exception as e:
         console.print(f"\n[red]分析过程中发生错误: {str(e)}[/red]")
+        import traceback
+        console.print(traceback.format_exc())
         return 1
     
     console.print(f"\n{'='*60}")

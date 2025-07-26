@@ -175,7 +175,12 @@ impl DbPools {
                 if let Some(password) = &conn_spec.password {
                     pg_options = pg_options.password(password);
                 }
-                let pool = PgPool::connect_with(pg_options)
+                
+                let max_pool_size = conn_spec.max_pool_size.unwrap_or(50); // 默认50
+
+                let pool = sqlx::postgres::PgPoolOptions::new()
+                    .max_connections(max_pool_size)
+                    .connect_with(pg_options)
                     .await
                     .context("Failed to connect to database")?;
                 anyhow::Ok(pool)
