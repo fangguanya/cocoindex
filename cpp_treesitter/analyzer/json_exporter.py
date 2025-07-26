@@ -155,7 +155,10 @@ class JsonExporter:
         if consistency_issues["statistics"]["total_invalid_references"] > 0:
             logger.warning(f"发现 {consistency_issues['statistics']['total_invalid_references']} 个无效引用")
         
+        logger.info("🏗️  开始构建分析结果数据结构...")
+        
         # 构建符合v2.4规范的完整结构
+        logger.info("📋 构建基础信息...")
         analysis_result = {
             "version": self.SCHEMA_VERSION,  # 使用统一版本
             "language": "cpp", 
@@ -166,44 +169,102 @@ class JsonExporter:
                 "validated_call_graph": True,
                 "total_entities": len(repo.nodes)
             },
-            "entities": {
-                "functions": self._build_functions_entities(repo),
-                "classes": self._build_classes_entities(repo),
-                "namespaces": self._build_namespaces_entities(repo),
-                "templates": self._build_templates_entities(),
-                "operators": self._build_operators_entities(repo),  
-                "call_relations": self._build_call_relations(repo),
-                "inheritance_relations": self._build_inheritance_relations(repo),
-                "type_inference_info": self._build_type_inference_info(repo)
-            },
-            "metadata": self._build_metadata_v24(project, repo),
-            "config": self._build_config_v24(project),
-            "project_call_graph": {
-                "project_info": {
-                    "name": project.name,
-                    "total_files": len(project.files),
-                    "total_functions": len(project.functions),
-                    "total_classes": len(project.classes),
-                    "total_namespaces": len(project.namespaces)
-                },
-                "modules": self._build_modules_info(project, repo),
-                "global_call_graph": validated_calls_to,  # 使用校验后的数据
-                "reverse_call_graph": validated_called_by   # 使用校验后的数据
-            },
-            "oop_analysis": {
-                "classes": self._build_classes_analysis(repo),
-                "inheritance_graph": self._build_inheritance_graph(repo),
-                "method_resolution_orders": {}  # 简化处理
-            },
-            "cpp_analysis": {
-                "namespaces": self._build_namespaces_analysis(repo),
-                "templates": {},  # 简化处理
-                "preprocessor": {}  # 简化处理
-            },
-            "summary": self._build_summary(project, repo)
+            "entities": {},  # 先创建空的entities
+            "metadata": {},
+            "config": {},
+            "project_call_graph": {},
+            "oop_analysis": {},
+            "cpp_analysis": {},
+            "summary": {}
         }
-
+        
+        logger.info("🔧 构建函数实体...")
+        analysis_result["entities"]["functions"] = self._build_functions_entities(repo)
+        logger.info(f"✅ 函数实体构建完成，数量: {len(analysis_result['entities']['functions'])}")
+        
+        logger.info("🏛️  构建类实体...")
+        analysis_result["entities"]["classes"] = self._build_classes_entities(repo)
+        logger.info(f"✅ 类实体构建完成，数量: {len(analysis_result['entities']['classes'])}")
+        
+        logger.info("🗂️  构建命名空间实体...")
+        analysis_result["entities"]["namespaces"] = self._build_namespaces_entities(repo)
+        logger.info(f"✅ 命名空间实体构建完成，数量: {len(analysis_result['entities']['namespaces'])}")
+        
+        logger.info("📄 构建模板实体...")
+        analysis_result["entities"]["templates"] = self._build_templates_entities()
+        logger.info("✅ 模板实体构建完成")
+        
+        logger.info("⚙️  构建操作符实体...")
+        analysis_result["entities"]["operators"] = self._build_operators_entities(repo)
+        logger.info("✅ 操作符实体构建完成")
+        
+        logger.info("🔗 构建调用关系...")
+        analysis_result["entities"]["call_relations"] = self._build_call_relations(repo)
+        logger.info(f"✅ 调用关系构建完成，数量: {len(analysis_result['entities']['call_relations'])}")
+        
+        logger.info("🏗️  构建继承关系...")
+        analysis_result["entities"]["inheritance_relations"] = self._build_inheritance_relations(repo)
+        logger.info("✅ 继承关系构建完成")
+        
+        logger.info("🧠 构建类型推理信息...")
+        analysis_result["entities"]["type_inference_info"] = self._build_type_inference_info(repo)
+        logger.info("✅ 类型推理信息构建完成")
+        
+        logger.info("📊 构建元数据...")
+        analysis_result["metadata"] = self._build_metadata_v24(project, repo)
+        logger.info("✅ 元数据构建完成")
+        
+        logger.info("⚙️  构建配置信息...")
+        analysis_result["config"] = self._build_config_v24(project)
+        logger.info("✅ 配置信息构建完成")
+        
+        logger.info("🌐 构建项目调用图...")
+        logger.info("  - 构建项目信息...")
+        project_info = {
+            "name": project.name,
+            "total_files": len(project.files),
+            "total_functions": len(project.functions),
+            "total_classes": len(project.classes),
+            "total_namespaces": len(project.namespaces)
+        }
+        logger.info("  ✅ 项目信息构建完成")
+        
+        logger.info("  - 构建模块信息...")
+        modules_info = self._build_modules_info(project, repo)
+        logger.info(f"  ✅ 模块信息构建完成，数量: {len(modules_info)}")
+        
+        logger.info("  - 添加全局调用图（这可能需要较长时间）...")
+        analysis_result["project_call_graph"] = {
+            "project_info": project_info,
+            "modules": modules_info,
+            "global_call_graph": validated_calls_to,  # 使用校验后的数据
+            "reverse_call_graph": validated_called_by   # 使用校验后的数据
+        }
+        logger.info(f"  ✅ 项目调用图构建完成，calls_to: {len(validated_calls_to)}, called_by: {len(validated_called_by)}")
+        
+        logger.info("🏛️  构建OOP分析...")
+        analysis_result["oop_analysis"] = {
+            "classes": self._build_classes_analysis(repo),
+            "inheritance_graph": self._build_inheritance_graph(repo),
+            "method_resolution_orders": {}  # 简化处理
+        }
+        logger.info("✅ OOP分析构建完成")
+        
+        logger.info("🔧 构建C++分析...")
+        analysis_result["cpp_analysis"] = {
+            "namespaces": self._build_namespaces_analysis(repo),
+            "templates": {},  # 简化处理
+            "preprocessor": {}  # 简化处理
+        }
+        logger.info("✅ C++分析构建完成")
+        
+        logger.info("📋 构建摘要...")
+        analysis_result["summary"] = self._build_summary(project, repo)
+        logger.info("✅ 摘要构建完成")
+        
+        logger.info("💾 开始写入JSON文件...")
         self._write_json(analysis_result, output_path)
+        logger.info("✅ JSON文件写入完成")
 
     def export_nodes_json(self, repo: NodeRepository, output_path: str):
         """
@@ -545,10 +606,44 @@ class JsonExporter:
 
     def _write_json(self, data: Dict, output_path: str):
         """将字典写入JSON文件"""
+        from .logger import Logger
+        logger = Logger.get_logger()
+        
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, cls=CustomJsonEncoder, indent=2, ensure_ascii=False) 
+        
+        # 计算数据大小统计
+        logger.info(f"💾 准备写入JSON到: {path}")
+        if 'entities' in data:
+            entities = data['entities']
+            logger.info(f"   - 函数数量: {len(entities.get('functions', {}))}")
+            logger.info(f"   - 类数量: {len(entities.get('classes', {}))}")
+            logger.info(f"   - 命名空间数量: {len(entities.get('namespaces', {}))}")
+            logger.info(f"   - 调用关系数量: {len(entities.get('call_relations', {}))}")
+        
+        if 'project_call_graph' in data:
+            pcg = data['project_call_graph']
+            if 'global_call_graph' in pcg:
+                logger.info(f"   - 全局调用图条目: {len(pcg['global_call_graph'])}")
+            if 'reverse_call_graph' in pcg:
+                logger.info(f"   - 反向调用图条目: {len(pcg['reverse_call_graph'])}")
+        
+        logger.info("🔄 开始JSON序列化...")
+        import time
+        start_time = time.time()
+        
+        try:
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, cls=CustomJsonEncoder, indent=2, ensure_ascii=False)
+            
+            serialize_time = time.time() - start_time
+            file_size_mb = path.stat().st_size / (1024 * 1024)
+            logger.info(f"✅ JSON序列化完成: {file_size_mb:.2f}MB, 耗时: {serialize_time:.2f}秒")
+            
+        except Exception as e:
+            serialize_time = time.time() - start_time
+            logger.error(f"❌ JSON序列化失败 (耗时: {serialize_time:.2f}秒): {e}")
+            raise
 
     def _build_functions_entities(self, repo: NodeRepository) -> Dict[str, Any]:
         """构建 entities.functions 映射 - 修复关键缺失功能"""

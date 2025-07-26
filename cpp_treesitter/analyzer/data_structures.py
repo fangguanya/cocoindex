@@ -1212,6 +1212,8 @@ class NodeRepository:
         """解析函数调用，返回被调用函数的USR ID - 增强版：更好地处理复杂调用"""
         # 去除可能的多余空格
         called_name = called_name.strip()
+        if not called_name:
+            return None
         
         # 构建可能的qualified names
         possible_names = [
@@ -1226,7 +1228,18 @@ class NodeRepository:
         if context_namespace and context_class:
             possible_names.append(f"{context_namespace}::{context_class}::{called_name}")
         
-        # 如果是简单函数名，也尝试与所有现有函数的简单名称匹配
+        # 使用qualified_name索引优先查找
+        for name in possible_names:
+            functions = self.find_by_qualified_name(name, 'function')
+            if functions:
+                # 优先返回定义而不是声明
+                for func in functions:
+                    if hasattr(func, 'is_definition') and func.is_definition:
+                        return func.usr
+                # 如果没有定义，返回第一个声明
+                return functions[0].usr
+        
+        # 如果qualified索引查找失败，进行简单名称匹配（适合debug脚本中的成功案例）
         if '::' not in called_name:
             # 查找所有同名函数
             matching_functions = []
@@ -1243,16 +1256,12 @@ class NodeRepository:
                 # 如果没有定义，返回第一个
                 return matching_functions[0].usr
         
-        # 使用qualified_name索引查找
-        for name in possible_names:
-            functions = self.find_by_qualified_name(name, 'function')
-            if functions:
-                # 优先返回定义而不是声明
-                for func in functions:
-                    if hasattr(func, 'is_definition') and func.is_definition:
-                        return func.usr
-                # 如果没有定义，返回第一个声明
-                return functions[0].usr
+        # 最后的策略：对于qualified name，尝试提取简单名称并匹配
+        if '::' in called_name:
+            simple_name = called_name.split('::')[-1]
+            if simple_name and simple_name != called_name:
+                # 递归调用，但只使用简单名称
+                return self.resolve_function_call(simple_name, context_namespace, context_class)
         
         return None
 
@@ -1315,10 +1324,15 @@ class NodeRepository:
     def get_statistics(self) -> Dict[str, Any]:
         """获取存储库统计信息"""
         with self._lock.read_lock():
+            # 计算实际的调用关系总数，而不是有调用关系的函数数量
+            total_call_relationships = 0
+            for caller, callees in self.call_relationships['calls_to'].items():
+                total_call_relationships += len(callees)
+            
             stats = {
                 'total_entities': len(self.nodes),
                 'by_type': {},
-                'call_relationships': len(self.call_relationships['calls_to']),
+                'call_relationships': total_call_relationships,  # 修复：计算实际调用关系总数
                 'files_analyzed': len(self.file_index),
                 'lock_performance': self._lock.get_lock_statistics()  # 添加锁性能统计
             }

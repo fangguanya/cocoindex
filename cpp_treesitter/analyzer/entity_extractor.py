@@ -312,11 +312,15 @@ class EntityExtractor:
             # 修复：通过CallRelationshipAnalyzer分析调用关系，确保双向关系正确建立
             body_node = node.child_by_field_name('body')
             if body_node:
+                self.logger.info(f"🔍 开始分析函数 {qualified_name} 的调用关系")
                 # 使用调用分析器分析函数调用，它会自动建立双向关系
                 calls_to = self.call_analyzer.analyze_function_calls(node, usr, self.file_content)
                 # 注意：calls_to和called_by已经在analyze_function_calls过程中通过add_call_relationship建立
                 # 这里只需要确保function_obj的calls_to列表是最新的
                 function_obj.calls_to = calls_to
+                self.logger.info(f"✅ 函数 {qualified_name} 调用关系分析完成，发现 {len(calls_to)} 个调用")
+            else:
+                self.logger.warning(f"⚠️ 函数 {qualified_name} 没有函数体，跳过调用关系分析")
                 
                 # 设置函数体内容
                 if not function_obj.code_content:

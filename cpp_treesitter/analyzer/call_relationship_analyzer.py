@@ -198,6 +198,8 @@ class CallRelationshipAnalyzer:
         """分析单个函数调用，返回被调用函数的USR ID - 增强版带重载决议"""
         try:
             callee_usr = None
+            self.logger.info(f"📞 分析调用节点类型: {call_node.type} (caller: {caller_usr_id[:20]}...)")
+            
             if call_node.type == 'call_expression':
                 callee_usr = self._analyze_direct_call_enhanced(call_node, caller_usr_id)
             elif call_node.type == 'field_expression':
@@ -208,12 +210,14 @@ class CallRelationshipAnalyzer:
                 callee_usr = self._analyze_constructor_call_enhanced(call_node, caller_usr_id)
             elif call_node.type == 'delete_expression':
                 callee_usr = self._analyze_destructor_call(call_node, caller_usr_id)
+            else:
+                self.logger.warning(f"⚠️ 未处理的调用节点类型: {call_node.type}")
             
             # 修复：立即建立调用关系，确保calls_to和called_by同步
             if callee_usr:
+                self.logger.info(f"🔗 建立调用关系: {caller_usr_id[:20]}... -> {callee_usr[:20]}...")
                 self.repo.add_call_relationship(caller_usr_id, callee_usr)
                 self.resolved_calls_count += 1
-                self.logger.debug(f"建立调用关系: {caller_usr_id} -> {callee_usr}")
                 return callee_usr
             else:
                 # 如果无法立即解析，添加到待解析队列
@@ -221,7 +225,9 @@ class CallRelationshipAnalyzer:
                 if function_name:
                     self.pending_calls.append((caller_usr_id, function_name, call_node, self.file_content))
                     self.pending_calls_count += 1
-                    self.logger.debug(f"添加待解析调用: {caller_usr_id} -> {function_name}")
+                    self.logger.info(f"📋 添加待解析调用: {function_name}")
+                else:
+                    self.logger.warning(f"⚠️ 无法提取函数名")
                 
             return callee_usr
         except Exception as e:
@@ -411,10 +417,18 @@ class CallRelationshipAnalyzer:
         if not function_node:
             return None
         
-        function_name = self._get_text(function_node)
+        # 使用增强的函数名提取方法
+        function_name = self._extract_function_name_from_node(function_node)
+        if not function_name:
+            # 回退到原始方法
+            function_name = self._get_text(function_node)
+        
+        # 添加调试日志
+        self.logger.info(f"🔍 分析直接函数调用: {function_name} (caller: {caller_usr_id[:20]}...)")
         
         # 构建可能的qualified names
         possible_names = self._build_possible_qualified_names(function_name)
+        self.logger.debug(f"可能的qualified names: {possible_names}")
         
         # 查找所有候选函数
         candidates = []
@@ -422,16 +436,35 @@ class CallRelationshipAnalyzer:
             functions = self.repo.find_by_qualified_name(name, 'function')
             candidates.extend(functions)
         
+        if candidates:
+            self.logger.debug(f"通过qualified名称找到 {len(candidates)} 个候选")
+        
+        # 如果没有找到候选且是简单名称，尝试简单名称匹配（类似debug脚本中的逻辑）
+        if not candidates and '::' not in function_name:
+            self.logger.info(f"尝试简单名称匹配: {function_name}")
+            for usr, entity in self.repo.nodes.items():
+                if (hasattr(entity, 'type') and entity.type == 'function' and 
+                    hasattr(entity, 'name') and entity.name == function_name):
+                    candidates.append(entity)
+                    self.logger.info(f"简单名称匹配成功: {entity.name}")
+        
         if not candidates:
+            self.logger.warning(f"未找到函数 {function_name} 的候选")
             return None
         
         # 如果只有一个候选，直接返回
         if len(candidates) == 1:
+            self.logger.info(f"✅ 解析成功: {function_name} -> {candidates[0].usr[:20]}...")
             return candidates[0].usr
         
         # 多个候选：进行重载决议
         best_match = self._resolve_overloaded_call(call_node, candidates)
-        return best_match.usr if best_match else candidates[0].usr
+        if best_match:
+            self.logger.info(f"✅ 重载决议成功: {function_name} -> {best_match.usr[:20]}...")
+            return best_match.usr
+        else:
+            self.logger.info(f"✅ 重载决议失败，使用第一个候选: {function_name} -> {candidates[0].usr[:20]}...")
+            return candidates[0].usr
 
     def _analyze_member_call_enhanced(self, field_node: Node, caller_usr_id: str) -> Optional[str]:
         """分析成员函数调用 - 增强版"""
@@ -754,7 +787,7 @@ class CallRelationshipAnalyzer:
             return None
     
     def _extract_function_name_from_node(self, function_node: Node) -> Optional[str]:
-        """从函数节点中提取函数名，处理各种复杂情况"""
+        """从函数节点中提取函数名，处理各种复杂情况 - 增强版支持UE特有模式"""
         try:
             # 情况1: 简单标识符 func()
             if function_node.type == 'identifier':
@@ -783,6 +816,10 @@ class CallRelationshipAnalyzer:
                         # 对于已知的一些模式，简化处理
                         if object_name in ['Super', 'this']:
                             return method_name
+                        # 处理UE常见的调用模式
+                        elif object_name.endswith('Engine') or object_name.startswith('Editor'):
+                            # 对于Engine相关的调用，返回方法名让简单匹配处理
+                            return method_name
                         # 对于成员变量的方法调用，暂时返回方法名
                         return method_name
                     return method_name
@@ -792,20 +829,38 @@ class CallRelationshipAnalyzer:
                 name_node = function_node.child_by_field_name('name')
                 if name_node:
                     template_name = self._get_text(name_node)
-                    # 对于Cast<Type>这种模板函数，直接返回Cast
+                    # 对于UE常见的模板函数，直接返回函数名
+                    if template_name in ['Cast', 'CastChecked', 'NewObject', 'CreateDefaultSubobject']:
+                        return template_name
                     return template_name
+            
+            # 情况5: 带圆括号的表达式 (function)()
+            elif function_node.type == 'parenthesized_expression':
+                # 递归处理圆括号内的表达式
+                inner_node = None
+                for child in function_node.children:
+                    if child.type != '(' and child.type != ')':
+                        inner_node = child
+                        break
+                if inner_node:
+                    return self._extract_function_name_from_node(inner_node)
                 
-            # 情况5: 下标表达式作为函数调用（罕见）
+            # 情况6: 下标表达式作为函数调用（罕见）
             elif function_node.type == 'subscript_expression':
                 return None  # 暂不处理
             
             # 其他情况：尝试直接获取文本
             else:
                 text = self._get_text(function_node)
-                if text and '::' in text:
-                    return text
-                elif text:
-                    return text
+                if text:
+                    # 清理可能的多余字符
+                    text = text.strip()
+                    # 如果包含限定符，直接返回
+                    if '::' in text:
+                        return text
+                    # 否则返回简单名称
+                    elif text and text.isidentifier():
+                        return text
             
             return None
         except Exception as e:
