@@ -16,6 +16,119 @@ from typing import Dict, List, Optional, Any, Tuple, Union
 import re
 import uuid
 import hashlib
+import os
+import threading
+from threading import RLock, Lock
+from contextlib import contextmanager
+
+# ==============================================================================
+# 线程安全支持
+# ==============================================================================
+
+class ReadWriteLock:
+    """写优先的读写锁实现，防止writer饥饿"""
+    def __init__(self):
+        self._read_ready = threading.Condition(threading.RLock())
+        self._readers = 0
+        self._writers_waiting = 0  # 等待的写线程数
+        self._writer_active = False  # 是否有活跃的写线程
+        
+        # 性能监控
+        self._read_acquisitions = 0
+        self._write_acquisitions = 0
+        self._write_wait_time_total = 0.0
+        self._stats_lock = threading.Lock()
+
+    @contextmanager
+    def read_lock(self):
+        """获取读锁的上下文管理器"""
+        self.acquire_read()
+        try:
+            yield
+        finally:
+            self.release_read()
+
+    @contextmanager
+    def write_lock(self):
+        """获取写锁的上下文管理器"""
+        self.acquire_write()
+        try:
+            yield
+        finally:
+            self.release_write()
+
+    def acquire_read(self):
+        """获取读锁 - 写优先策略"""
+        import time
+        start_time = time.time()
+        
+        with self._read_ready:
+            # 写优先：如果有写线程等待或活跃，读线程需要等待
+            while self._writers_waiting > 0 or self._writer_active:
+                self._read_ready.wait()
+            
+            self._readers += 1
+            
+        # 更新统计
+        with self._stats_lock:
+            self._read_acquisitions += 1
+
+    def release_read(self):
+        """释放读锁"""
+        with self._read_ready:
+            self._readers -= 1
+            # 如果没有读线程了，通知等待的写线程
+            if self._readers == 0:
+                self._read_ready.notify_all()
+
+    def acquire_write(self):
+        """获取写锁 - 写优先策略"""
+        import time
+        start_time = time.time()
+        
+        with self._read_ready:
+            # 标记有写线程等待
+            self._writers_waiting += 1
+            
+            try:
+                # 等待所有读线程完成且没有活跃的写线程
+                while self._readers > 0 or self._writer_active:
+                    self._read_ready.wait()
+                
+                # 获得写锁
+                self._writer_active = True
+                
+            finally:
+                # 无论是否获得锁，都要减少等待计数
+                self._writers_waiting -= 1
+        
+        # 更新统计
+        wait_time = time.time() - start_time
+        with self._stats_lock:
+            self._write_acquisitions += 1
+            self._write_wait_time_total += wait_time
+
+    def release_write(self):
+        """释放写锁"""
+        with self._read_ready:
+            self._writer_active = False
+            # 通知所有等待的线程（读线程和写线程）
+            self._read_ready.notify_all()
+    
+    def get_lock_statistics(self) -> Dict[str, Any]:
+        """获取锁使用统计信息"""
+        with self._stats_lock:
+            avg_write_wait = (self._write_wait_time_total / max(self._write_acquisitions, 1)) * 1000  # 毫秒
+            
+            return {
+                "read_acquisitions": self._read_acquisitions,
+                "write_acquisitions": self._write_acquisitions,
+                "average_write_wait_ms": round(avg_write_wait, 2),
+                "total_write_wait_time": round(self._write_wait_time_total, 3),
+                "current_readers": self._readers,
+                "writers_waiting": self._writers_waiting,
+                "writer_active": self._writer_active
+            }
 
 # ==============================================================================
 # 状态位掩码定义 (与 json_format.md 一致)
@@ -63,7 +176,7 @@ class SpecialMethodStatusFlags:
     SPECIAL_IS_DEFAULTED        = 1 << 3
 
 # ==============================================================================
-# 核心数据结构
+# 统一的核心数据结构（基于Entity体系）
 # ==============================================================================
 
 @dataclass
@@ -72,13 +185,6 @@ class Location:
     file_id: str
     line: int
     column: int
-
-@dataclass
-class Parameter:
-    """函数参数"""
-    name: str
-    type: str  # 简化后的类型名
-    default_value: Optional[str] = None
 
 @dataclass
 class ResolvedDefinitionLocation:
@@ -107,142 +213,6 @@ class CallInfo:
     type: str = "direct"  # e.g., direct, virtual_call
     resolved_definition_file_id: Optional[str] = None
     cpp_call_info: CppCallInfo = field(default_factory=CppCallInfo)
-
-@dataclass
-class CppExtensions:
-    """函数/方法 C++ 扩展字段"""
-    qualified_name: str
-    namespace: str = ""
-    function_status_flags: int = 0
-    access_specifier: str = "public"
-    storage_class: str = "none"
-    calling_convention: str = "default"
-    return_type: str = "void"
-    parameter_types: Dict[str, str] = field(default_factory=dict)
-    template_parameters: List[Dict[str, Any]] = field(default_factory=list)
-    exception_specification: str = ""
-    attributes: List[str] = field(default_factory=list)
-    mangled_name: str = ""
-    usr: Optional[str] = None # USR作为内部关联和调试使用
-    # 新增：保留签名键值用于向后兼容
-    signature_key: str = ""
-
-@dataclass
-class Function:
-    """函数/方法实体 (符合 json_format.md v2.4 - USR ID支持)"""
-    # 顶层字段
-    name: str
-    signature: str  # 完整函数签名
-    usr_id: str  # 新增：USR ID作为唯一标识
-    definition_file_id: Optional[str] = None
-    declaration_file_id: Optional[str] = None
-    start_line: int = 0
-    end_line: int = 0
-    is_local: bool = False
-    parameters: List[Parameter] = field(default_factory=list)
-    
-    # 新增：函数体代码内容
-    code_content: str = ""
-    
-    # 新增：声明vs定义的处理
-    declaration_locations: List[Location] = field(default_factory=list)
-    definition_location: Optional[Location] = None
-    is_declaration: bool = False
-    is_definition: bool = False
-    
-    # 修改：调用关系使用USR ID列表
-    calls_to: List[str] = field(default_factory=list)  # USR ID列表
-    called_by: List[str] = field(default_factory=list)  # USR ID列表
-    call_details: List[CallInfo] = field(default_factory=list)  # 详细调用信息
-    
-    # C++ 扩展
-    cpp_extensions: CppExtensions = field(default_factory=CppExtensions)
-
-@dataclass
-class InheritanceInfo:
-    """继承信息"""
-    base_class_usr_id: str # 基类的USR ID
-    access_specifier: str = "public"
-    is_virtual: bool = False
-
-@dataclass
-class SpecialMethodInfo:
-    """构造/析构函数信息"""
-    special_method_status_flags: int = 0
-    access: str = "public"
-
-@dataclass
-class CppOopExtensions:
-    """类/结构体 C++ OOP 扩展字段"""
-    qualified_name: str
-    namespace: str = ""
-    type: str = "class"  # class or struct
-    class_status_flags: int = 0
-    inheritance_list: List[InheritanceInfo] = field(default_factory=list)
-    template_parameters: List[Dict[str, Any]] = field(default_factory=list)
-    template_specialization_args: List[str] = field(default_factory=list)
-    nested_types: List[str] = field(default_factory=list)
-    friend_declarations: List[str] = field(default_factory=list)
-    size_in_bytes: int = 0
-    alignment: int = 0
-    virtual_table_info: Dict[str, Any] = field(default_factory=dict)
-    constructors: Dict[str, SpecialMethodInfo] = field(default_factory=dict)
-    destructor: Optional[SpecialMethodInfo] = None
-    usr: Optional[str] = None # USR作为内部关联和调试使用
-    # 新增：保留签名键值用于向后兼容
-    signature_key: str = ""
-
-@dataclass
-class Class:
-    """类/结构体实体 (符合 json_format.md v2.4 - USR ID支持)"""
-    name: str
-    qualified_name: str
-    usr_id: str  # 新增：USR ID作为唯一标识
-    definition_file_id: Optional[str] = None
-    declaration_file_id: Optional[str] = None
-    line: int = 0
-    
-    # 新增：声明vs定义的处理
-    declaration_locations: List[Location] = field(default_factory=list)
-    definition_location: Optional[Location] = None
-    is_declaration: bool = False
-    is_definition: bool = False
-    
-    parent_classes: List[str] = field(default_factory=list) # 基类的USR ID
-    is_abstract: bool = False # 将从 status_flags 解析
-    is_mixin: bool = False
-    documentation: str = ""
-    methods: List[str] = field(default_factory=list) # 方法的USR ID
-    fields: Dict[str, Any] = field(default_factory=dict)
-    cpp_oop_extensions: CppOopExtensions = field(default_factory=CppOopExtensions)
-
-@dataclass
-class Namespace:
-    """命名空间实体"""
-    name: str
-    qualified_name: str
-    usr_id: str  # 新增：USR ID作为唯一标识
-    definition_file_id: str
-    line: int
-    
-    # 新增：声明vs定义的处理（命名空间可能在多个文件中）
-    declaration_locations: List[Location] = field(default_factory=list)
-    definition_location: Optional[Location] = None
-    
-    is_anonymous: bool = False
-    is_inline: bool = False
-    parent_namespace: str = "global"
-    nested_namespaces: List[str] = field(default_factory=list)  # USR ID列表
-    classes: List[str] = field(default_factory=list)  # USR ID列表
-    functions: List[str] = field(default_factory=list)  # USR ID列表
-    variables: List[str] = field(default_factory=list)  # USR ID列表
-    aliases: Dict[str, str] = field(default_factory=dict)
-    using_declarations: List[str] = field(default_factory=list)
-    usr: Optional[str] = None # USR作为内部关联和调试使用
-
-# ==============================================================================
-# 新增：全局节点系统
-# ==============================================================================
 
 @dataclass
 class Entity:
@@ -282,10 +252,29 @@ class Function(Entity):
     access_specifier: str = "default"
     parent_class: Optional[str] = None # USR of parent class
     code_content: str = ""  # 函数体源代码
+    call_details: List[CallInfo] = field(default_factory=list)  # 详细调用信息
+    
+    # 新增：声明vs定义的处理
+    declaration_locations: List[Location] = field(default_factory=list)
+    definition_location: Optional[Location] = None
+    is_declaration: bool = False
 
     def __post_init__(self):
         super().__post_init__()
         self.type = 'function'
+
+@dataclass
+class InheritanceInfo:
+    """继承信息"""
+    base_class_usr_id: str # 基类的USR ID
+    access_specifier: str = "public"
+    is_virtual: bool = False
+
+@dataclass
+class SpecialMethodInfo:
+    """构造/析构函数信息"""
+    special_method_status_flags: int = 0
+    access: str = "public"
 
 @dataclass
 class Class(Entity):
@@ -298,6 +287,23 @@ class Class(Entity):
     is_abstract: bool = False
     is_template: bool = False
     parent_namespace: Optional[str] = None # USR of parent namespace
+    
+    # 新增：声明vs定义的处理
+    declaration_locations: List[Location] = field(default_factory=list)
+    definition_location: Optional[Location] = None
+    is_declaration: bool = False
+    
+    # C++ OOP 扩展信息
+    inheritance_list: List[InheritanceInfo] = field(default_factory=list)
+    template_parameters: List[Dict[str, Any]] = field(default_factory=list)
+    template_specialization_args: List[str] = field(default_factory=list)
+    nested_types: List[str] = field(default_factory=list)
+    friend_declarations: List[str] = field(default_factory=list)
+    size_in_bytes: int = 0
+    alignment: int = 0
+    virtual_table_info: Dict[str, Any] = field(default_factory=dict)
+    constructors: Dict[str, SpecialMethodInfo] = field(default_factory=dict)
+    destructor: Optional[SpecialMethodInfo] = None
 
     def __post_init__(self):
         super().__post_init__()
@@ -308,6 +314,19 @@ class Namespace(Entity):
     """表示一个C++命名空间"""
     parent_namespace: Optional[str] = None # USR of parent
     children: List[str] = field(default_factory=list) # USRs of children namespaces, classes, functions
+    
+    # 新增：声明vs定义的处理（命名空间可能在多个文件中）
+    declaration_locations: List[Location] = field(default_factory=list)
+    definition_location: Optional[Location] = None
+    
+    is_anonymous: bool = False
+    is_inline: bool = False
+    nested_namespaces: List[str] = field(default_factory=list)  # USR ID列表
+    classes: List[str] = field(default_factory=list)  # USR ID列表
+    functions: List[str] = field(default_factory=list)  # USR ID列表
+    variables: List[str] = field(default_factory=list)  # USR ID列表
+    aliases: Dict[str, str] = field(default_factory=dict)
+    using_declarations: List[str] = field(default_factory=list)
     
     def __post_init__(self):
         super().__post_init__()
@@ -386,70 +405,544 @@ class NodeRepository:
     """一个用于存储和管理所有代码实体的全局存储库"""
     _instance = None
 
+    def __init__(self):
+        self.nodes: Dict[str, Entity] = {}
+        self.qualified_name_index: Dict[str, List[str]] = {}  # qualified_name -> [usr_ids]
+        self.file_index: Dict[str, List[str]] = {}  # file_path -> [usr_ids]
+        self.call_relationships: Dict[str, Dict[str, List[str]]] = {
+            'calls_to': {},    # caller_usr -> [callee_usrs]
+            'called_by': {}    # callee_usr -> [caller_usrs]
+        }
+        self._lock = ReadWriteLock()  # 使用读写锁
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(NodeRepository, cls).__new__(cls)
-            cls._instance.nodes: Dict[str, Entity] = {}
-            cls._instance.qualified_name_index: Dict[str, List[str]] = {}  # qualified_name -> [usr_ids]
-            cls._instance.file_index: Dict[str, List[str]] = {}  # file_path -> [usr_ids]
-            cls._instance.call_relationships: Dict[str, Dict[str, List[str]]] = {
-                'calls_to': {},    # caller_usr -> [callee_usrs]
-                'called_by': {}    # callee_usr -> [caller_usrs]
-            }
         return cls._instance
 
-    def generate_usr(self, entity_type: str, qualified_name: str, signature: str = None, file_path: str = "") -> str:
+    def generate_usr(self, entity_type: str, qualified_name: str, signature: Optional[str] = None, file_path: str = "", template_params: List[str] = None) -> str:
         """
-        生成全局唯一的USR ID
+        生成全局唯一的USR ID - 修复版：移除file_hash确保跨文件唯一性
         
         格式规范：
-        - 函数: c:@F@<qualified_name>@<signature_hash>
-        - 类/结构: c:@S@<qualified_name>
+        - 函数: c:@F@<qualified_name>@<normalized_signature>@<template_info>
+        - 类/结构: c:@S@<qualified_name>@<template_info>
         - 命名空间: c:@N@<qualified_name>
-        - 变量: c:@V@<qualified_name>
+        - 变量: c:@V@<qualified_name>@<scope_info>
         - 枚举: c:@E@<qualified_name>
+        
+        Args:
+            entity_type: 实体类型
+            qualified_name: 限定名
+            signature: 函数签名（仅函数需要）
+            file_path: 文件路径（仅用于静态函数区分，不影响USR唯一性）
+            template_params: 模板参数列表
         """
-        if entity_type == 'function':
-            # 为函数生成基于签名的USR
-            if signature:
-                # 标准化签名以确保一致性
-                normalized_sig = self._normalize_signature(signature)
-                sig_hash = hashlib.md5(normalized_sig.encode('utf-8')).hexdigest()[:8]
-                return f"c:@F@{qualified_name}@{sig_hash}"
+        
+        with self._lock.read_lock(): # 使用读锁
+            if entity_type == 'function':
+                # 函数USR: c:@F@namespace::func@(int,double)@template<T,U>
+                normalized_sig = self._normalize_function_signature_enhanced(signature) if signature else "()"
+                template_info = self._encode_template_params(template_params) if template_params else ""
+                
+                # 对于静态函数，在signature中加入文件标识而不是USR中
+                if self._is_static_function_context(qualified_name, file_path):
+                    file_id = self._get_file_identifier(file_path)
+                    normalized_sig = f"{normalized_sig}@{file_id}"
+                
+                usr_parts = [
+                    qualified_name,
+                    normalized_sig,
+                    template_info
+                ]
+                base_usr = f"c:@F@{'@'.join(filter(None, usr_parts))}"
+                
+            elif entity_type in ['class', 'struct']:
+                # 类USR: c:@S@namespace::class@template<T>
+                template_info = self._encode_template_params(template_params) if template_params else ""
+                
+                usr_parts = [
+                    qualified_name,
+                    template_info
+                ]
+                base_usr = f"c:@S@{'@'.join(filter(None, usr_parts))}"
+                
+            elif entity_type == 'namespace':
+                # 命名空间USR: c:@N@namespace
+                base_usr = f"c:@N@{qualified_name}"
+                
+            elif entity_type == 'variable':
+                # 变量USR: c:@V@qualified_name@scope_info（如果需要区分作用域）
+                scope_info = self._get_variable_scope_info(qualified_name, file_path)
+                if scope_info:
+                    base_usr = f"c:@V@{qualified_name}@{scope_info}"
+                else:
+                    base_usr = f"c:@V@{qualified_name}"
+                
+            elif entity_type == 'enum':
+                # 枚举USR: c:@E@qualified_name
+                base_usr = f"c:@E@{qualified_name}"
+                
             else:
-                # 没有签名的情况，使用文件路径作为区分
-                file_hash = hashlib.md5(file_path.encode('utf-8')).hexdigest()[:8]
-                return f"c:@F@{qualified_name}@{file_hash}"
-        elif entity_type in ['class', 'struct']:
-            return f"c:@S@{qualified_name}"
-        elif entity_type == 'namespace':
-            return f"c:@N@{qualified_name}"
-        elif entity_type == 'variable':
-            return f"c:@V@{qualified_name}"
-        elif entity_type == 'enum':
-            return f"c:@E@{qualified_name}"
-        else:
-            # 备用方案：基于路径和名称的唯一标识
-            path_hash = hashlib.md5(f"{file_path}::{qualified_name}".encode('utf-8')).hexdigest()[:8]
-            return f"c:@U@{qualified_name}@{path_hash}"
+                # 备用方案：通用USR格式
+                content_hash = hashlib.md5(f"{qualified_name}::{entity_type}".encode('utf-8')).hexdigest()[:8]
+                base_usr = f"c:@U@{qualified_name}@{content_hash}"
 
-    def _normalize_signature(self, signature: str) -> str:
-        """标准化函数签名以确保USR一致性"""
+        # 检查USR冲突并解决
+        return self._resolve_usr_conflict(base_usr, entity_type, qualified_name, file_path)
+
+    def _is_static_function_context(self, qualified_name: str, file_path: str) -> bool:
+        """检查是否是需要文件区分的静态函数上下文 - 增强版"""
+        # 1. 检查是否是文件级静态函数（不在类或命名空间中）
+        if not qualified_name or '::' not in qualified_name:
+            return True
+        
+        # 2. 检查是否是匿名命名空间中的函数
+        if qualified_name.startswith('::') or '(anonymous)' in qualified_name:
+            return True
+        
+        # 3. 检查是否是已知的静态函数模式（更精确的模式匹配）
+        function_name = qualified_name.split('::')[-1]
+        
+        # 静态函数命名模式（可配置）
+        static_patterns = [
+            r'^.*_static$',      # 以_static结尾
+            r'^static_.*',       # 以static_开头
+            r'^.*_impl$',        # 内部实现函数
+            r'^.*_helper$',      # 辅助函数
+            r'^.*_internal$',    # 内部函数
+            r'^__.*__$',         # 双下划线包围（通常是内部函数）
+            r'^_.*_$',           # 单下划线包围
+            r'^.*_detail$',      # 实现细节函数
+            r'^.*_private$',     # 私有函数
+            r'^get_.*_instance$', # 单例模式的获取函数
+        ]
+        
+        for pattern in static_patterns:
+            if re.match(pattern, function_name):
+                return True
+        
+        # 4. 检查是否是模板特化（模板特化通常需要文件区分）
+        if '<' in qualified_name and '>' in qualified_name:
+            return True
+        
+        # 5. 检查是否包含某些关键词（通常表明是文件级函数）
+        internal_keywords = ['detail', 'impl', 'internal', 'anonymous', 'local']
+        qualified_lower = qualified_name.lower()
+        for keyword in internal_keywords:
+            if keyword in qualified_lower:
+                return True
+        
+        return False
+
+    def _get_file_identifier(self, file_path: str) -> str:
+        """获取文件标识符（用于静态函数区分） - 增强版"""
+        if not file_path:
+            return "unknown"
+        
+        # 使用更稳定的文件标识符生成方法
+        filename = os.path.basename(file_path)
+        name_without_ext = os.path.splitext(filename)[0]
+        
+        # 生成6位hash后缀，更好的唯一性保证
+        file_hash = hashlib.md5(file_path.encode('utf-8')).hexdigest()[:6]
+        
+        # 清理文件名，移除非法字符
+        clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', name_without_ext)
+        
+        if len(clean_name) <= 6:
+            # 文件名足够短，使用文件名+hash
+            return f"{clean_name}_{file_hash}"
+        else:
+            # 文件名太长，使用前6个字符+hash
+            prefix = clean_name[:6]
+            return f"{prefix}_{file_hash}"
+
+    def _get_variable_scope_info(self, qualified_name: str, file_path: str) -> str:
+        """获取变量作用域信息（如果需要区分同名变量） - 增强版"""
+        # 1. 对于全局变量，需要文件区分
+        if not qualified_name or '::' not in qualified_name:
+            return self._get_file_identifier(file_path)
+        
+        # 2. 对于static成员变量，也可能需要区分
+        if 'static' in qualified_name.lower():
+            return self._get_file_identifier(file_path)
+        
+        # 3. 对于匿名命名空间中的变量
+        if '(anonymous)' in qualified_name:
+            return self._get_file_identifier(file_path)
+        
+        # 4. 对于模板变量（C++14 variable templates）
+        if '<' in qualified_name and '>' in qualified_name:
+            return self._get_file_identifier(file_path)
+        
+        # 5. 对于内部变量（根据命名模式判断）
+        internal_patterns = [
+            r'.*_internal$', r'.*_impl$', r'.*_detail$', 
+            r'.*_private$', r'.*_local$'
+        ]
+        
+        for pattern in internal_patterns:
+            if re.match(pattern, qualified_name.split('::')[-1]):
+                return self._get_file_identifier(file_path)
+        
+        return ""
+
+    def _resolve_usr_conflict(self, base_usr: str, entity_type: str, qualified_name: str, file_path: str = "") -> str:
+        """解决USR冲突"""
+        # 检查是否已存在
+        if base_usr not in self.nodes:
+            return base_usr
+        
+        existing_entity = self.nodes[base_usr]
+        
+        # 如果是同一类型且qualified_name相同，这可能是合法的声明/定义对
+        if (existing_entity.type == entity_type and 
+            existing_entity.qualified_name == qualified_name):
+            return base_usr  # 允许合并
+        
+        # 检查是否是ODR违规（One Definition Rule）
+        if entity_type in ['function', 'class', 'variable']:
+            # 记录ODR违规警告
+            from .logger import Logger
+            logger = Logger.get_logger()
+            logger.warning(f"潜在ODR违规: {qualified_name} 在多处定义 - {file_path}")
+        
+        # 生成冲突解决后缀
+        conflict_suffix = 1
+        while f"{base_usr}@ODR{conflict_suffix}" in self.nodes:
+            conflict_suffix += 1
+        
+        return f"{base_usr}@ODR{conflict_suffix}"
+
+    def _normalize_function_signature_enhanced(self, signature: str) -> str:
+        """
+        增强版函数签名标准化 - 支持现代C++特性
+        
+        Args:
+            signature: 原始函数签名
+            
+        Returns:
+            标准化后的签名
+        """
+        if not signature:
+            return "()"
+        
+        # 提取参数列表
+        match = re.search(r'\((.*?)\)', signature)
+        if not match:
+            return "()"
+        
+        params_str = match.group(1).strip()
+        if not params_str:
+            return "()"
+        
+        # 解析参数，支持复杂类型
+        params = self._parse_parameter_list(params_str)
+        
+        # 标准化每个参数类型
+        normalized_params = []
+        for param in params:
+            normalized_type = self._normalize_type_name_enhanced(param)
+            normalized_params.append(normalized_type)
+        
+        return f"({','.join(normalized_params)})"
+
+    def _parse_parameter_list(self, params_str: str) -> List[str]:
+        """
+        解析参数列表，正确处理嵌套的模板和函数指针
+        
+        Args:
+            params_str: 参数列表字符串
+            
+        Returns:
+            参数类型列表
+        """
+        params = []
+        current_param = ""
+        depth = 0
+        in_string = False
+        
+        i = 0
+        while i < len(params_str):
+            char = params_str[i]
+            
+            # 处理字符串字面量
+            if char in ['"', "'"]:
+                in_string = not in_string
+                current_param += char
+            
+            elif not in_string:
+                # 处理括号和模板参数
+                if char in '(<[':
+                    depth += 1
+                    current_param += char
+                elif char in ')>]':
+                    depth -= 1
+                    current_param += char
+                elif char == ',' and depth == 0:
+                    # 找到参数分隔符
+                    if current_param.strip():
+                        param_type = self._extract_parameter_type_enhanced(current_param.strip())
+                        params.append(param_type)
+                    current_param = ""
+                else:
+                    current_param += char
+            else:
+                current_param += char
+            
+            i += 1
+        
+        # 处理最后一个参数
+        if current_param.strip():
+            param_type = self._extract_parameter_type_enhanced(current_param.strip())
+            params.append(param_type)
+        
+        return params
+
+    def _extract_parameter_type_enhanced(self, param_str: str) -> str:
+        """
+        从参数声明中提取类型 - 增强版
+        
+        Args:
+            param_str: 参数声明字符串
+            
+        Returns:
+            参数类型
+        """
+        # 移除默认值
+        if '=' in param_str:
+            param_str = param_str.split('=')[0].strip()
+        
+        # 处理函数指针类型：int (*func)(int, double)
+        if '(*' in param_str and ')' in param_str:
+            return param_str  # 保持函数指针完整声明
+        
+        # 处理引用和指针的参数名移除
+        # 例：const std::string& name -> const std::string&
+        
+        # 首先标准化空格
+        param_str = re.sub(r'\s+', ' ', param_str.strip())
+        
+        # 识别类型修饰符
+        type_keywords = ['const', 'volatile', 'mutable', 'static', 'extern', 'inline', 'virtual']
+        pointer_ref_pattern = r'[*&]+'
+        
+        # 分解参数为token
+        tokens = param_str.split()
+        
+        # 从右侧开始移除参数名
+        # 最右侧的标识符通常是参数名（除非它是类型的一部分）
+        result_tokens = []
+        i = len(tokens) - 1
+        
+        while i >= 0:
+            token = tokens[i]
+            
+            # 如果token是类型修饰符或包含特殊字符，保留
+            if (token in type_keywords or 
+                re.search(pointer_ref_pattern, token) or
+                '::' in token or 
+                '<' in token or '>' in token or
+                '[' in token or ']' in token or
+                '(' in token or ')' in token):
+                result_tokens.insert(0, token)
+            
+            # 如果是简单标识符且是第一次遇到，可能是参数名
+            elif i == len(tokens) - 1 and token.isidentifier():
+                # 跳过参数名
+                pass
+            else:
+                result_tokens.insert(0, token)
+            
+            i -= 1
+        
+        return ' '.join(result_tokens)
+
+    def _normalize_type_name_enhanced(self, type_name: str) -> str:
+        """
+        增强版类型名称标准化
+        
+        Args:
+            type_name: 原始类型名
+            
+        Returns:
+            标准化后的类型名
+        """
+        if not type_name:
+            return "void"
+        
         # 移除多余空格
-        normalized = re.sub(r'\s+', ' ', signature.strip())
-        # 移除参数名称，只保留类型
-        normalized = re.sub(r'\b\w+\s*(?=[,)])', '', normalized)
+        type_name = re.sub(r'\s+', ' ', type_name.strip())
+        
         # 标准化const位置
-        normalized = re.sub(r'\s*const\s*', ' const ', normalized)
-        return normalized.strip()
+        type_name = re.sub(r'\bconst\s+', 'const ', type_name)
+        type_name = re.sub(r'\s+const\b', ' const', type_name)
+        
+        # 标准化指针和引用
+        type_name = re.sub(r'\s*\*\s*', '*', type_name)
+        type_name = re.sub(r'\s*&\s*', '&', type_name)
+        
+        # 标准化模板参数空格
+        type_name = re.sub(r'<\s+', '<', type_name)
+        type_name = re.sub(r'\s+>', '>', type_name)
+        type_name = re.sub(r',\s+', ',', type_name)
+        
+        # 标准化命名空间分隔符
+        type_name = re.sub(r'\s*::\s*', '::', type_name)
+        
+        return type_name.strip()
+
+    def _encode_template_params(self, template_params: List[str]) -> str:
+        """
+        编码模板参数为USR组件
+        
+        Args:
+            template_params: 模板参数列表
+            
+        Returns:
+            编码后的模板参数字符串
+        """
+        if not template_params:
+            return ""
+        
+        # 标准化每个模板参数
+        normalized_params = []
+        for param in template_params:
+            normalized = self._normalize_type_name_enhanced(param)
+            normalized_params.append(normalized)
+        
+        # 生成紧凑的模板签名
+        template_sig = f"template<{','.join(normalized_params)}>"
+        
+        # 对模板签名进行哈希以保持USR长度合理
+        template_hash = hashlib.md5(template_sig.encode('utf-8')).hexdigest()[:12]
+        
+        return f"tpl_{template_hash}"
+
+    def generate_signature_key(self, entity_type: str, qualified_name: str, 
+                             signature: Optional[str] = None, 
+                             template_params: List[str] = None,
+                             file_id: str = "") -> str:
+        """
+        生成符合v2.3规范的签名键值
+        
+        格式：{returnType}_{functionName}_{paramType1}_{paramType2}_..._{fileId}
+        
+        Args:
+            entity_type: 实体类型
+            qualified_name: 限定名
+            signature: 函数签名
+            template_params: 模板参数
+            file_id: 文件ID
+            
+        Returns:
+            签名键值字符串
+        """
+        if entity_type == 'function' and signature:
+            return self._generate_function_signature_key(qualified_name, signature, file_id)
+        elif entity_type in ['class', 'struct']:
+            return self._generate_class_signature_key(qualified_name, file_id, template_params)
+        else:
+            # 其他类型使用简化格式
+            clean_name = self._simplify_type_for_key(qualified_name)
+            return f"{clean_name}_{file_id}" if file_id else clean_name
+
+    def _generate_function_signature_key(self, qualified_name: str, signature: str, file_id: str) -> str:
+        """生成函数签名键值"""
+        # 解析函数名和返回类型
+        func_name = qualified_name.split("::")[-1]  # 获取函数名
+        
+        # 从签名中提取返回类型（简化处理）
+        return_type = "void"  # 默认返回类型
+        
+        # 解析参数类型
+        match = re.search(r'\((.*?)\)', signature)
+        param_types = []
+        if match:
+            params_str = match.group(1).strip()
+            if params_str:
+                params = self._parse_parameter_list(params_str)
+                param_types = [self._simplify_type_for_key(p) for p in params]
+        
+        # 构建签名键值
+        key_parts = [
+            self._simplify_type_for_key(return_type),
+            func_name
+        ]
+        key_parts.extend(param_types)
+        
+        if file_id:
+            key_parts.append(file_id)
+        
+        return '_'.join(key_parts)
+
+    def _generate_class_signature_key(self, qualified_name: str, file_id: str, template_params: List[str] = None) -> str:
+        """生成类签名键值"""
+        clean_name = self._simplify_type_for_key(qualified_name)
+        
+        if template_params:
+            template_str = '_'.join([self._simplify_type_for_key(p) for p in template_params])
+            key_parts = [clean_name, template_str]
+        else:
+            key_parts = [clean_name]
+        
+        if file_id:
+            key_parts.append(file_id)
+        
+        return '_'.join(key_parts)
+
+    def _simplify_type_for_key(self, type_name: str) -> str:
+        """简化类型名用于键值生成"""
+        if not isinstance(type_name, str):
+            type_name = str(type_name)
+        
+        # 移除空格和特殊字符
+        simplified = re.sub(r'\s+', '', type_name)
+        simplified = simplified.replace('::', '')
+        simplified = simplified.replace('<', '')
+        simplified = simplified.replace('>', '')
+        simplified = simplified.replace('*', 'Ptr')
+        simplified = simplified.replace('&', 'Ref')
+        simplified = simplified.replace(',', '')
+        simplified = simplified.replace('(', '')
+        simplified = simplified.replace(')', '')
+        simplified = simplified.replace('[', '')
+        simplified = simplified.replace(']', '')
+        
+        # 处理常见类型缩写
+        type_mapping = {
+            'const': 'const',
+            'unsigned': 'u',
+            'long': 'l',
+            'short': 's',
+            'char': 'c',
+            'int': 'i',
+            'float': 'f',
+            'double': 'd',
+            'bool': 'b',
+            'void': 'v',
+            'string': 'str',
+            'vector': 'vec',
+            'map': 'map',
+            'set': 'set',
+            'list': 'list'
+        }
+        
+        # 应用类型映射
+        for original, abbreviated in type_mapping.items():
+            simplified = simplified.replace(original, abbreviated)
+        
+        return simplified if simplified else "unknown"
 
     def register_entity(self, entity: Entity) -> str:
         """注册实体并返回USR ID"""
         if not entity.usr:
+            signature = getattr(entity, 'signature', None)
             entity.usr = self.generate_usr(
                 entity.type, 
                 entity.qualified_name, 
-                getattr(entity, 'signature', None),
+                signature,
                 entity.file_path
             )
         
@@ -457,40 +950,229 @@ class NodeRepository:
         return entity.usr
 
     def add_node(self, node: Entity):
-        """添加一个新节点。如果已存在，则尝试合并信息。"""
+        """添加一个新节点。如果已存在，则尝试合并信息。修复版：防止重要信息丢失。"""
         if not node.usr:
             # 在没有有效USR的情况下无法添加
             return
 
-        existing_node = self.nodes.get(node.usr)
-        if existing_node:
-            # 如果新节点是定义，而旧节点是声明，则用新节点替换
-            if node.is_definition and not existing_node.is_definition:
-                # 在替换之前，保留必要的信息，比如调用者
-                if isinstance(node, Function) and isinstance(existing_node, Function):
-                    node.called_by = list(set(node.called_by + existing_node.called_by))
-                
-                # 更新声明ID列表
-                node.declaration_ids = list(set(node.declaration_ids + existing_node.declaration_ids + [existing_node.id]))
-                if existing_node.definition_id:
-                     node.declaration_ids.append(existing_node.definition_id)
-                
+        with self._lock.write_lock(): # 使用写锁
+            existing_node = self.nodes.get(node.usr)
+            if existing_node:
+                # 修复：增强合并逻辑，保护重要信息不丢失
+                merged_node = self._smart_merge_nodes(existing_node, node)
+                self.nodes[node.usr] = merged_node
+            else:
                 self.nodes[node.usr] = node
             
-            # 如果两者都是声明，可以合并一些信息
-            elif not node.is_definition and not existing_node.is_definition:
-                existing_node.declaration_ids.append(node.id)
-            
-            # 如果旧节点是定义，新节点是声明
-            elif existing_node.is_definition and not node.is_definition:
-                existing_node.declaration_ids.append(node.id)
-                # 不需要替换，但可以记录这个声明的位置
+            # 更新索引
+            self._update_indexes(self.nodes[node.usr])
 
+    def _smart_merge_nodes(self, existing_node: Entity, new_node: Entity) -> Entity:
+        """智能合并两个节点，保护重要信息不丢失 - 增强版字段级合并"""
+        # 确定主节点（优先选择定义）
+        if new_node.is_definition and not existing_node.is_definition:
+            primary_node = new_node
+            secondary_node = existing_node
+        elif existing_node.is_definition and not new_node.is_definition:
+            primary_node = existing_node  
+            secondary_node = new_node
         else:
-            self.nodes[node.usr] = node
-            
-        # 更新索引
-        self._update_indexes(node)
+            # 如果都是定义或都是声明，优先选择内容更丰富的节点
+            primary_node = new_node if self._node_content_score(new_node) >= self._node_content_score(existing_node) else existing_node
+            secondary_node = existing_node if primary_node == new_node else new_node
+
+        # 函数特有信息的字段级智能合并
+        if isinstance(primary_node, Function) and isinstance(secondary_node, Function):
+            self._merge_function_fields(primary_node, secondary_node)
+        
+        # 类特有信息的字段级智能合并
+        elif isinstance(primary_node, Class) and isinstance(secondary_node, Class):
+            self._merge_class_fields(primary_node, secondary_node)
+
+        # 命名空间特有信息的字段级智能合并
+        elif isinstance(primary_node, Namespace) and isinstance(secondary_node, Namespace):
+            self._merge_namespace_fields(primary_node, secondary_node)
+
+        # 合并通用Entity信息
+        self._merge_entity_common_fields(primary_node, secondary_node)
+
+        return primary_node
+    
+    def _merge_function_fields(self, primary: Function, secondary: Function):
+        """函数字段的智能合并"""
+        # 合并调用关系（去重）
+        primary.calls_to = list(set(primary.calls_to + secondary.calls_to))
+        primary.called_by = list(set(primary.called_by + secondary.called_by))
+        
+        # 合并调用详情（基于唯一键去重）
+        if hasattr(primary, 'call_details') and hasattr(secondary, 'call_details'):
+            existing_details = {(cd.to_usr_id, cd.line, cd.column) for cd in primary.call_details}
+            for call_detail in secondary.call_details:
+                key = (call_detail.to_usr_id, call_detail.line, call_detail.column)
+                if key not in existing_details:
+                    primary.call_details.append(call_detail)
+        
+        # 智能合并参数信息（选择更详细的）
+        if not primary.parameters and secondary.parameters:
+            primary.parameters = secondary.parameters
+        elif secondary.parameters and len(secondary.parameters) > len(primary.parameters or []):
+            # 如果secondary的参数更详细，使用secondary的
+            primary.parameters = secondary.parameters
+        elif (primary.parameters and secondary.parameters and 
+              len(primary.parameters) == len(secondary.parameters)):
+            # 参数数量相同时，合并参数信息（选择非空的字段）
+            for i, (p_param, s_param) in enumerate(zip(primary.parameters, secondary.parameters)):
+                if not p_param.get('name') and s_param.get('name'):
+                    primary.parameters[i]['name'] = s_param['name']
+                if not p_param.get('type') and s_param.get('type'):
+                    primary.parameters[i]['type'] = s_param['type']
+        
+        # 智能合并返回类型（优先非空且更具体的）
+        if not primary.return_type and secondary.return_type:
+            primary.return_type = secondary.return_type
+        elif secondary.return_type and len(secondary.return_type) > len(primary.return_type or ""):
+            # 如果secondary的返回类型更具体，使用secondary的
+            primary.return_type = secondary.return_type
+        
+        # 智能合并函数体内容（优先完整定义）
+        if secondary.is_definition and secondary.code_content and not primary.code_content:
+            primary.code_content = secondary.code_content
+        elif secondary.code_content and len(secondary.code_content) > len(primary.code_content or ""):
+            # 如果secondary的函数体更完整，使用secondary的
+            primary.code_content = secondary.code_content
+        
+        # 保护复杂度信息（选择更大的值）
+        if hasattr(secondary, 'complexity') and secondary.complexity > getattr(primary, 'complexity', 0):
+            primary.complexity = secondary.complexity
+        
+        # 合并函数修饰符（OR逻辑）
+        modifier_fields = ['is_virtual', 'is_pure_virtual', 'is_override', 'is_final', 'is_static', 'is_const']
+        for field in modifier_fields:
+            if hasattr(secondary, field) and getattr(secondary, field, False):
+                setattr(primary, field, True)
+    
+    def _merge_class_fields(self, primary: Class, secondary: Class):
+        """类字段的智能合并"""
+        # 合并方法列表（去重）
+        primary.methods = list(set(primary.methods + secondary.methods))
+        
+        # 合并字段列表（去重）
+        if hasattr(primary, 'fields') and hasattr(secondary, 'fields'):
+            primary_fields = getattr(primary, 'fields', []) or []
+            secondary_fields = getattr(secondary, 'fields', []) or []
+            primary.fields = list(set(primary_fields + secondary_fields))
+        
+        # 合并继承关系（去重）
+        primary.base_classes = list(set(primary.base_classes + secondary.base_classes))
+        primary.derived_classes = list(set(primary.derived_classes + secondary.derived_classes))
+        
+        # 合并模板信息
+        if hasattr(secondary, 'template_parameters') and getattr(secondary, 'template_parameters'):
+            if not getattr(primary, 'template_parameters', None):
+                primary.template_parameters = secondary.template_parameters
+        
+        # 合并类修饰符（OR逻辑）
+        class_modifier_fields = ['is_abstract', 'is_template']
+        for field in class_modifier_fields:
+            if hasattr(secondary, field) and getattr(secondary, field, False):
+                setattr(primary, field, True)
+    
+    def _merge_namespace_fields(self, primary: Namespace, secondary: Namespace):
+        """命名空间字段的智能合并"""
+        # 合并子实体列表（去重）
+        if hasattr(primary, 'children') and hasattr(secondary, 'children'):
+            primary_children = getattr(primary, 'children', []) or []
+            secondary_children = getattr(secondary, 'children', []) or []
+            primary.children = list(set(primary_children + secondary_children))
+        
+        # 合并嵌套元素（去重）
+        nested_fields = ['nested_namespaces', 'classes', 'functions', 'variables']
+        for field in nested_fields:
+            if hasattr(primary, field) and hasattr(secondary, field):
+                primary_list = getattr(primary, field, []) or []
+                secondary_list = getattr(secondary, field, []) or []
+                setattr(primary, field, list(set(primary_list + secondary_list)))
+        
+        # 合并别名字典
+        if hasattr(secondary, 'aliases') and getattr(secondary, 'aliases'):
+            if not getattr(primary, 'aliases', None):
+                primary.aliases = {}
+            primary.aliases.update(secondary.aliases)
+        
+        # 合并using声明（去重）
+        if hasattr(primary, 'using_declarations') and hasattr(secondary, 'using_declarations'):
+            primary_using = getattr(primary, 'using_declarations', []) or []
+            secondary_using = getattr(secondary, 'using_declarations', []) or []
+            primary.using_declarations = list(set(primary_using + secondary_using))
+    
+    def _merge_entity_common_fields(self, primary: Entity, secondary: Entity):
+        """合并Entity通用字段"""
+        # 合并声明ID列表（去重）
+        primary.declaration_ids = list(set(
+            primary.declaration_ids + 
+            secondary.declaration_ids + 
+            [secondary.id]
+        ))
+        
+        # 智能合并定义ID信息
+        if secondary.definition_id:
+            if not primary.definition_id:
+                primary.definition_id = secondary.definition_id
+            else:
+                # 如果都有定义ID，添加到声明列表中
+                primary.declaration_ids.append(secondary.definition_id)
+
+        # 合并位置信息（只在Function、Class、Namespace等子类中处理，它们有这些属性）
+        if hasattr(primary, 'declaration_locations') and hasattr(secondary, 'declaration_locations'):
+            primary.declaration_locations.extend(secondary.declaration_locations)
+        
+        if (not getattr(primary, 'definition_location', None) and 
+            hasattr(secondary, 'definition_location') and 
+            getattr(secondary, 'definition_location', None)):
+            primary.definition_location = secondary.definition_location
+        
+        # 合并声明/定义标志（只在有这些属性的子类中处理）
+        if hasattr(primary, 'is_declaration') and hasattr(secondary, 'is_declaration'):
+            primary.is_declaration = primary.is_declaration or secondary.is_declaration
+        if hasattr(primary, 'is_definition') and hasattr(secondary, 'is_definition'):
+            primary.is_definition = primary.is_definition or secondary.is_definition
+
+    def _node_content_score(self, node: Entity) -> int:
+        """计算节点内容丰富程度评分，用于合并时选择主节点"""
+        score = 0
+        
+        # 基础评分
+        if node.is_definition:
+            score += 100
+        
+        # 函数特有评分
+        if isinstance(node, Function):
+            if getattr(node, 'code_content', ''):
+                score += 50
+            if getattr(node, 'calls_to', []):
+                score += len(node.calls_to) * 2
+            if getattr(node, 'parameters', []):
+                score += len(node.parameters) * 3
+            if getattr(node, 'return_type', ''):
+                score += 10
+            if getattr(node, 'complexity', 0) > 0:
+                score += 20
+        
+        # 类特有评分
+        elif isinstance(node, Class):
+            if getattr(node, 'methods', []):
+                score += len(node.methods) * 5
+            if getattr(node, 'fields', []):
+                score += len(getattr(node, 'fields', [])) * 3
+            if getattr(node, 'base_classes', []):
+                score += len(node.base_classes) * 8
+        
+        # 命名空间特有评分
+        elif isinstance(node, Namespace):
+            if hasattr(node, 'children') and getattr(node, 'children', []):
+                score += len(node.children) * 2
+        
+        return score
 
     def _update_indexes(self, node: Entity):
         """更新各种索引以支持快速查找"""
@@ -508,13 +1190,14 @@ class NodeRepository:
 
     def find_by_qualified_name(self, qualified_name: str, entity_type: str = None) -> List[Entity]:
         """通过qualified_name查找实体"""
-        usr_ids = self.qualified_name_index.get(qualified_name, [])
-        entities = [self.nodes[usr_id] for usr_id in usr_ids if usr_id in self.nodes]
-        
-        if entity_type:
-            entities = [e for e in entities if e.type == entity_type]
-        
-        return entities
+        with self._lock.read_lock():
+            usr_ids = self.qualified_name_index.get(qualified_name, [])
+            entities = [self.nodes[usr_id] for usr_id in usr_ids if usr_id in self.nodes]
+            
+            if entity_type:
+                entities = [e for e in entities if e.type == entity_type]
+            
+            return entities
 
     def find_by_signature(self, signature: str) -> Optional[Entity]:
         """通过函数签名查找函数"""
@@ -549,67 +1232,79 @@ class NodeRepository:
 
     def add_call_relationship(self, caller_usr: str, callee_usr: str):
         """添加函数调用关系"""
-        # 更新calls_to关系
-        if caller_usr not in self.call_relationships['calls_to']:
-            self.call_relationships['calls_to'][caller_usr] = []
-        if callee_usr not in self.call_relationships['calls_to'][caller_usr]:
-            self.call_relationships['calls_to'][caller_usr].append(callee_usr)
-        
-        # 更新called_by关系
-        if callee_usr not in self.call_relationships['called_by']:
-            self.call_relationships['called_by'][callee_usr] = []
-        if caller_usr not in self.call_relationships['called_by'][callee_usr]:
-            self.call_relationships['called_by'][callee_usr].append(caller_usr)
-        
-        # 同步更新实体对象中的关系
-        caller = self.get_node(caller_usr)
-        callee = self.get_node(callee_usr)
-        
-        if isinstance(caller, Function):
-            if callee_usr not in caller.calls_to:
-                caller.calls_to.append(callee_usr)
-        
-        if isinstance(callee, Function):
-            if caller_usr not in callee.called_by:
-                callee.called_by.append(caller_usr)
+        with self._lock.write_lock():
+            # 更新calls_to关系
+            if caller_usr not in self.call_relationships['calls_to']:
+                self.call_relationships['calls_to'][caller_usr] = []
+            if callee_usr not in self.call_relationships['calls_to'][caller_usr]:
+                self.call_relationships['calls_to'][caller_usr].append(callee_usr)
+            
+            # 更新called_by关系
+            if callee_usr not in self.call_relationships['called_by']:
+                self.call_relationships['called_by'][callee_usr] = []
+            if caller_usr not in self.call_relationships['called_by'][callee_usr]:
+                self.call_relationships['called_by'][callee_usr].append(caller_usr)
+            
+            # 同步更新实体对象中的关系
+            caller = self.nodes.get(caller_usr)
+            callee = self.nodes.get(callee_usr)
+            
+            if isinstance(caller, Function):
+                if callee_usr not in caller.calls_to:
+                    caller.calls_to.append(callee_usr)
+            
+            if isinstance(callee, Function):
+                if caller_usr not in callee.called_by:
+                    callee.called_by.append(caller_usr)
 
     def get_node(self, usr: str) -> Optional[Entity]:
         """通过USR获取一个节点"""
-        return self.nodes.get(usr)
+        with self._lock.read_lock():
+            return self.nodes.get(usr)
 
     def get_all_nodes(self) -> List[Entity]:
         """获取所有节点"""
-        return list(self.nodes.values())
+        with self._lock.read_lock():
+            return list(self.nodes.values())
 
     def get_nodes_by_type(self, entity_type: str) -> List[Entity]:
         """获取指定类型的所有节点"""
-        return [node for node in self.nodes.values() if node.type == entity_type]
+        with self._lock.read_lock():
+            return [node for node in self.nodes.values() if node.type == entity_type]
 
     def get_nodes_by_file(self, file_path: str) -> List[Entity]:
         """获取指定文件中的所有节点"""
-        usr_ids = self.file_index.get(file_path, [])
-        return [self.nodes[usr_id] for usr_id in usr_ids if usr_id in self.nodes]
+        with self._lock.read_lock():
+            usr_ids = self.file_index.get(file_path, [])
+            return [self.nodes[usr_id] for usr_id in usr_ids if usr_id in self.nodes]
 
     def clear(self):
         """清空存储库"""
-        self.nodes.clear()
-        self.qualified_name_index.clear()
-        self.file_index.clear()
-        self.call_relationships = {'calls_to': {}, 'called_by': {}}
+        with self._lock.write_lock():
+            self.nodes.clear()
+            self.qualified_name_index.clear()
+            self.file_index.clear()
+            self.call_relationships = {'calls_to': {}, 'called_by': {}}
 
     def get_statistics(self) -> Dict[str, Any]:
         """获取存储库统计信息"""
-        stats = {
-            'total_entities': len(self.nodes),
-            'by_type': {},
-            'call_relationships': len(self.call_relationships['calls_to']),
-            'files_analyzed': len(self.file_index)
-        }
-        
-        for entity in self.nodes.values():
-            stats['by_type'][entity.type] = stats['by_type'].get(entity.type, 0) + 1
-        
-        return stats
+        with self._lock.read_lock():
+            stats = {
+                'total_entities': len(self.nodes),
+                'by_type': {},
+                'call_relationships': len(self.call_relationships['calls_to']),
+                'files_analyzed': len(self.file_index),
+                'lock_performance': self._lock.get_lock_statistics()  # 添加锁性能统计
+            }
+            
+            for entity in self.nodes.values():
+                stats['by_type'][entity.type] = stats['by_type'].get(entity.type, 0) + 1
+            
+            return stats
+    
+    def get_lock_statistics(self) -> Dict[str, Any]:
+        """获取详细的锁使用统计信息"""
+        return self._lock.get_lock_statistics()
 
 # ==============================================================================
 # 新增：向后兼容性支持

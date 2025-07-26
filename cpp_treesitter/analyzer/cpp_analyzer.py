@@ -7,6 +7,7 @@ Tree-sitter C++ Analyzer Main Module
 3. 增强版实体提取器
 4. 双JSON输出（主分析结果 + 全局nodes映射）
 5. 完整的json_format.md规范支持
+6. 文件ID映射系统 (v2.3新增)
 
 支持函数体文本提取功能和调用关系分析。
 """
@@ -14,7 +15,7 @@ Tree-sitter C++ Analyzer Main Module
 import time
 import json
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Set
+from typing import List, Dict, Any, Optional, Set, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -26,6 +27,8 @@ from .file_scanner import FileScanner, ScanResult
 from .json_exporter import JsonExporter
 from .entity_extractor import EntityExtractor
 from .call_relationship_analyzer import CallRelationshipAnalyzer
+from .file_manager import FileManager, get_file_manager
+from .template_analyzer import TemplateAnalyzer
 
 from pathlib import Path
 from typing import List, Dict, Any
@@ -43,7 +46,9 @@ except Exception as e:
     Logger.get_logger().warning(f"无法加载预编译的C++语言库: {e}")
     try:
         import tree_sitter_cpp
-        CPP_LANGUAGE = tree_sitter_cpp.language()
+        import tree_sitter
+        # 将PyCapsule包装成Language对象
+        CPP_LANGUAGE = tree_sitter.Language(tree_sitter_cpp.language())
     except ImportError:
         Logger.get_logger().error("请安装 tree-sitter-cpp: pip install tree-sitter-cpp")
         raise
@@ -56,13 +61,20 @@ class CppAnalyzer:
         self.logger = Logger.get_logger()
         
         # 初始化tree-sitter解析器
-        self.parser = Parser()
-        self.parser.set_language(CPP_LANGUAGE)
+        # 新版tree-sitter API: 在构造时直接传入language
+        self.parser = Parser(CPP_LANGUAGE)
         
         # 初始化全局组件
         self.repo = NodeRepository()
         self.repo.clear()  # 确保从一个干净的状态开始
         self.call_analyzer = CallRelationshipAnalyzer(self.repo)
+        
+        # 初始化文件管理器
+        self.file_manager = get_file_manager()
+        self.file_manager.clear()  # 重置文件管理器
+        
+        # 初始化模板分析器
+        self.template_analyzer = TemplateAnalyzer(self.repo)
         
         # 初始化项目结构
         self.project = Project(name=self.project_name)
@@ -70,6 +82,11 @@ class CppAnalyzer:
         # 文件扫描设置
         self.include_patterns = ['*.cpp', '*.cc', '*.cxx', '*.c++', '*.h', '*.hpp', '*.hxx', '*.h++']
         self.exclude_patterns = ['*/build/*', '*/dist/*', '*/.git/*', '*/node_modules/*']
+
+        # 新增：AST缓存机制
+        self.ast_cache: Dict[str, Tuple[Any, str]] = {}  # file_path -> (tree, content)
+        self.cache_hits = 0
+        self.cache_misses = 0
 
     def analyze(self) -> Project:
         """
@@ -90,12 +107,18 @@ class CppAnalyzer:
         
         try:
             # 扫描C++文件
+            self.logger.info("开始扫描C++源文件...")
             cpp_files = self._scan_cpp_files()
+            self.logger.info("文件扫描完成")
+            
             if not cpp_files:
                 self.logger.warning("未找到任何C++源文件")
                 return self.project
             
             self.logger.info(f"发现 {len(cpp_files)} 个C++文件")
+            
+            # 注册所有文件到文件管理器
+            self._register_files(cpp_files)
             
             # 第一阶段：收集声明
             self._phase_one_collect_declarations(cpp_files)
@@ -108,6 +131,8 @@ class CppAnalyzer:
             
             # 统计信息
             stats = self.repo.get_statistics()
+            file_stats = self.file_manager.get_statistics()
+            
             self.logger.info("=" * 60)
             self.logger.info("分析完成!")
             self.logger.info(f"总耗时: {time.time() - start_time:.2f} 秒")
@@ -116,6 +141,16 @@ class CppAnalyzer:
             self.logger.info(f"  - 类: {stats['by_type'].get('class', 0)}")
             self.logger.info(f"  - 命名空间: {stats['by_type'].get('namespace', 0)}")
             self.logger.info(f"调用关系: {stats['call_relationships']}")
+            self.logger.info(f"文件映射: {file_stats['total_files']} 个文件")
+            
+            # 新增：AST缓存性能统计
+            total_cache_operations = self.cache_hits + self.cache_misses
+            if total_cache_operations > 0:
+                cache_hit_rate = (self.cache_hits / total_cache_operations) * 100
+                self.logger.info(f"AST缓存性能: 命中率 {cache_hit_rate:.1f}% ({self.cache_hits}/{total_cache_operations})")
+                estimated_time_saved = self.cache_hits * 0.1  # 假设每次解析节省100ms
+                self.logger.info(f"预估节省时间: {estimated_time_saved:.2f} 秒")
+            
             self.logger.info("=" * 60)
             
             return self.project
@@ -128,21 +163,63 @@ class CppAnalyzer:
         """扫描C++源文件"""
         cpp_files = []
         
-        for pattern in self.include_patterns:
-            files = list(self.project_path.rglob(pattern))
-            # 过滤排除的文件
-            for file_path in files:
-                if not any(excluded in str(file_path) for excluded in self.exclude_patterns):
-                    cpp_files.append(file_path)
+        self.logger.info(f"扫描项目路径: {self.project_path}")
+        self.logger.info(f"包含模式: {self.include_patterns}")
+        self.logger.info(f"排除模式: {self.exclude_patterns}")
+        
+        for i, pattern in enumerate(self.include_patterns):
+            self.logger.info(f"正在扫描模式 {i+1}/{len(self.include_patterns)}: {pattern}")
+            try:
+                files = list(self.project_path.rglob(pattern))
+                self.logger.info(f"模式 {pattern} 找到 {len(files)} 个文件")
+                
+                # 过滤排除的文件
+                filtered_count = 0
+                for file_path in files:
+                    excluded = any(excluded in str(file_path) for excluded in self.exclude_patterns)
+                    if not excluded:
+                        cpp_files.append(file_path)
+                    else:
+                        filtered_count += 1
+                
+                if filtered_count > 0:
+                    self.logger.info(f"模式 {pattern} 过滤掉 {filtered_count} 个文件")
+                    
+            except Exception as e:
+                self.logger.error(f"扫描模式 {pattern} 时出错: {e}")
+        
+        self.logger.info(f"扫描完成，初步找到 {len(cpp_files)} 个文件")
         
         # 去重和排序
+        original_count = len(cpp_files)
         cpp_files = sorted(list(set(cpp_files)))
+        deduplicated_count = len(cpp_files)
+        
+        if original_count != deduplicated_count:
+            self.logger.info(f"去重: {original_count} -> {deduplicated_count} 个文件")
         
         # 记录文件到项目
-        for file_path in cpp_files:
+        self.logger.info("将文件添加到项目结构...")
+        for i, file_path in enumerate(cpp_files):
+            if i % 1000 == 0 and i > 0:  # 每1000个文件输出一次进度
+                self.logger.info(f"已添加 {i}/{len(cpp_files)} 个文件到项目")
             self.project.add_file(str(file_path))
         
+        self.logger.info(f"文件扫描和注册完成，共 {len(cpp_files)} 个文件")
         return cpp_files
+
+    def _register_files(self, cpp_files: List[Path]):
+        """注册所有文件到文件管理器"""
+        self.logger.info("注册文件到文件管理器...")
+        
+        file_paths = [str(file_path) for file_path in cpp_files]
+        mappings = self.file_manager.register_files(file_paths)
+        
+        self.logger.info(f"注册了 {len(mappings)} 个文件，生成文件ID映射")
+        
+        # 验证映射完整性
+        if not self.file_manager.validate_mappings():
+            self.logger.warning("文件映射验证失败！")
 
     def _phase_one_collect_declarations(self, cpp_files: List[Path]):
         """第一阶段：收集所有声明"""
@@ -188,37 +265,68 @@ class CppAnalyzer:
                 
                 progress.advance(task)
         
+        # 新增：第二轮调用关系解析，处理待解析的调用
+        self.logger.info("开始第二轮调用关系解析...")
+        pending_stats = self.call_analyzer.resolve_pending_calls()
+        
         stats = self.repo.get_statistics()
         self.logger.info(f"第二阶段完成: 成功 {successful_files} 个文件，失败 {failed_files} 个文件")
         self.logger.info(f"建立了 {stats['call_relationships']} 个调用关系")
+        self.logger.info(f"第二轮解析: 新解析 {pending_stats['resolved']} 个调用，剩余 {pending_stats['still_pending']} 个待解析")
 
     def _process_file_phase_one(self, file_path: Path):
         """第一阶段处理单个文件"""
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read()
+        # 获取文件ID
+        file_id = self.file_manager.get_file_id(str(file_path))
+        if not file_id:
+            self.logger.warning(f"文件 {file_path} 未注册到文件管理器")
+            file_id = self.file_manager.get_or_create_file_id(str(file_path))
         
-        # 解析AST
-        tree = self.parser.parse(content.encode('utf-8'))
+        # 检查缓存
+        file_path_str = str(file_path)
+        if file_path_str in self.ast_cache:
+            self.cache_hits += 1
+            tree, content = self.ast_cache[file_path_str]
+        else:
+            self.cache_misses += 1
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            tree = self.parser.parse(content.encode('utf-8'))
+            self.ast_cache[file_path_str] = (tree, content)
+        
         if not tree or not tree.root_node:
             self.logger.warning(f"无法解析文件: {file_path}")
             return
         
         # 创建实体提取器并执行第一阶段
-        extractor = EntityExtractor(str(file_path), content, self.repo)
+        extractor = EntityExtractor(str(file_path), content, self.repo, file_id)
         extractor.phase_one_collect_declarations(tree.root_node)
 
     def _process_file_phase_two(self, file_path: Path):
         """第二阶段处理单个文件"""
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read()
+        # 获取文件ID
+        file_id = self.file_manager.get_file_id(str(file_path))
+        if not file_id:
+            self.logger.warning(f"文件 {file_path} 未注册到文件管理器")
+            file_id = self.file_manager.get_or_create_file_id(str(file_path))
         
-        # 解析AST
-        tree = self.parser.parse(content.encode('utf-8'))
+        # 检查缓存
+        file_path_str = str(file_path)
+        if file_path_str in self.ast_cache:
+            self.cache_hits += 1
+            tree, content = self.ast_cache[file_path_str]
+        else:
+            self.cache_misses += 1
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            tree = self.parser.parse(content.encode('utf-8'))
+            self.ast_cache[file_path_str] = (tree, content)
+        
         if not tree or not tree.root_node:
             return
         
         # 创建实体提取器并执行第二阶段
-        extractor = EntityExtractor(str(file_path), content, self.repo)
+        extractor = EntityExtractor(str(file_path), content, self.repo, file_id)
         extractor.phase_two_process_definitions(tree.root_node)
 
     def _build_project_structure(self):
@@ -237,6 +345,7 @@ class CppAnalyzer:
     def get_analysis_summary(self) -> Dict[str, Any]:
         """获取分析摘要信息"""
         stats = self.repo.get_statistics()
+        file_stats = self.file_manager.get_statistics()
         
         return {
             "project_name": self.project_name,
@@ -247,8 +356,9 @@ class CppAnalyzer:
             "entities_by_type": stats['by_type'],
             "call_relationships": stats['call_relationships'],
             "files_analyzed": stats['files_analyzed'],
+            "file_mappings": file_stats,
             "parser_type": "tree-sitter",
-            "version": "2.4"
+            "version": "2.3"
         }
 
     def export_results(self, output_dir: str):
@@ -259,13 +369,18 @@ class CppAnalyzer:
         self.logger.info(f"导出分析结果到: {output_path}")
         
         # 导出主分析结果
-        exporter = JsonExporter()
+        exporter = JsonExporter(self.file_manager)
         main_output = output_path / "cpp_treesitter_analysis_result.json"
         exporter.export_analysis_result(self.project, self.repo, str(main_output))
         
         # 导出全局nodes映射
         nodes_output = output_path / "nodes.json"
         exporter.export_nodes_json(self.repo, str(nodes_output))
+        
+        # 导出文件映射
+        file_mapping_output = output_path / "file_mappings.json"
+        with open(file_mapping_output, 'w', encoding='utf-8') as f:
+            json.dump(self.file_manager.export_mapping_json(), f, indent=2, ensure_ascii=False)
         
         # 导出分析摘要
         summary_output = output_path / "analysis_summary.json"
@@ -275,6 +390,7 @@ class CppAnalyzer:
         self.logger.info(f"导出完成:")
         self.logger.info(f"  - 主分析结果: {main_output}")
         self.logger.info(f"  - 全局节点映射: {nodes_output}")
+        self.logger.info(f"  - 文件映射: {file_mapping_output}")
         self.logger.info(f"  - 分析摘要: {summary_output}")
 
     def analyze_and_export(self, output_dir: str = "analysis_results") -> Project:
@@ -282,3 +398,21 @@ class CppAnalyzer:
         project = self.analyze()
         self.export_results(output_dir)
         return project 
+
+    def clear_ast_cache(self):
+        """清理AST缓存以释放内存"""
+        cache_size = len(self.ast_cache)
+        self.ast_cache.clear()
+        self.logger.info(f"已清理AST缓存，释放了 {cache_size} 个缓存项")
+
+    def get_cache_statistics(self) -> Dict[str, Any]:
+        """获取缓存统计信息"""
+        total_operations = self.cache_hits + self.cache_misses
+        return {
+            "cache_hits": self.cache_hits,
+            "cache_misses": self.cache_misses,
+            "total_operations": total_operations,
+            "hit_rate": (self.cache_hits / total_operations * 100) if total_operations > 0 else 0,
+            "cached_files": len(self.ast_cache),
+            "estimated_time_saved_seconds": self.cache_hits * 0.1
+        } 
