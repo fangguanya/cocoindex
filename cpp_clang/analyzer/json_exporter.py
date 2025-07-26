@@ -52,12 +52,25 @@ class JsonExporter:
         try:
             self.logger.info("开始导出 JSON (v2.4 - USR ID支持)...")
 
-            # 1. 准备主要的 JSON 数据
+            # 1. 处理类中的methods，确保包含完整的方法内容
+            enhanced_classes = self._enhance_class_methods(
+                extracted_data.get('classes', {}), 
+                extracted_data.get('functions', {})
+            )
+
+            # 2. 准备主要的 JSON 数据 - 使用用户要求的全局结构
             json_data = {
                 "version": self.FORMAT_VERSION,
                 "language": "cpp",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "file_mappings": extracted_data.get('file_mappings', {}),
+                
+                # 全局定义：使用USR ID作为key，完整内容作为value
+                "functions": extracted_data.get('functions', {}),
+                "classes": enhanced_classes,
+                "namespaces": extracted_data.get('namespaces', {}),
+                
+                # 保留原有的分组结构作为补充信息
                 "project_call_graph": {
                     "project_info": {
                         "total_functions": len(extracted_data.get('functions', {})),
@@ -66,17 +79,23 @@ class JsonExporter:
                     },
                     "modules": {}, # 可选，暂为空
                     "global_call_graph": {
-                        "functions": extracted_data.get('functions', {})
+                        # 引用到顶层的functions
+                        "total_functions": len(extracted_data.get('functions', {})),
+                        "function_references": list(extracted_data.get('functions', {}).keys())
                     },
                     "reverse_call_graph": {} # 反向图信息已合并到函数定义中
                 },
                 "oop_analysis": {
-                    "classes": extracted_data.get('classes', {}),
+                    # 引用到顶层的classes
+                    "total_classes": len(extracted_data.get('classes', {})),
+                    "class_references": list(extracted_data.get('classes', {}).keys()),
                     "inheritance_graph": self._build_inheritance_graph(extracted_data.get('classes', {})),
                     "method_resolution_orders": {} # 可选
                 },
                 "cpp_analysis": {
-                    "namespaces": extracted_data.get('namespaces', {}),
+                    # 引用到顶层的namespaces
+                    "total_namespaces": len(extracted_data.get('namespaces', {})),
+                    "namespace_references": list(extracted_data.get('namespaces', {}).keys()),
                     "templates": {}, # 可选
                     "preprocessor": {} # 可选
                 },
@@ -84,22 +103,28 @@ class JsonExporter:
                     "format_version": self.FORMAT_VERSION,
                     "uses_usr_id": True,
                     "has_code_content": True,
-                    "has_global_nodes": True
+                    "has_global_nodes": True,
+                    "global_structure": {
+                        "functions_at_top_level": True,
+                        "classes_at_top_level": True,
+                        "namespaces_at_top_level": True,
+                        "uses_usr_id_as_key": True
+                    }
                 }
             }
 
-            # 2. 写入主要的JSON文件
+            # 3. 写入主要的JSON文件
             self.logger.info(f"正在将主要结果写入: {output_path}")
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(json_data, f, indent=2, ensure_ascii=False, cls=CustomJsonEncoder)
             
-            # 3. 导出全局nodes到单独的文件
+            # 4. 导出全局nodes到单独的文件
             if extracted_data.get('global_nodes'):
                 nodes_output_path = self._get_nodes_output_path(output_path)
                 self.logger.info(f"正在将全局nodes写入: {nodes_output_path}")
                 self._export_global_nodes(extracted_data.get('global_nodes', {}), nodes_output_path)
 
-            # 4. 生成兼容性映射文件（可选）
+            # 5. 生成兼容性映射文件（可选）
             self._export_compatibility_mappings(extracted_data, output_path)
             
             self.logger.info("JSON 导出成功!")
@@ -110,6 +135,29 @@ class JsonExporter:
             import traceback
             self.logger.error(traceback.format_exc())
             return False
+
+    def _enhance_class_methods(self, classes: Dict[str, Any], functions: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        增强类对象，使其包含完整的方法内容。
+        将methods从USR ID列表转换为完整的函数对象列表。
+        """
+        enhanced_classes = {}
+        
+        for usr_id, class_obj in classes.items():
+            enhanced_methods = {}  # 改为字典格式：{usr_id: function_object}
+            
+            # class_obj.methods是USR ID的列表
+            if hasattr(class_obj, 'methods') and class_obj.methods:
+                for method_usr_id in class_obj.methods:
+                    if isinstance(method_usr_id, str) and method_usr_id in functions:
+                        # 从functions中获取完整的方法对象
+                        enhanced_methods[method_usr_id] = functions[method_usr_id]
+                    
+            # 更新class对象的methods字段为包含完整内容的字典
+            class_obj.methods = enhanced_methods
+            enhanced_classes[usr_id] = class_obj
+            
+        return enhanced_classes
 
     def _build_inheritance_graph(self, classes: Dict[str, Any]) -> Dict[str, Any]:
         """构建继承关系图"""

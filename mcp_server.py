@@ -210,6 +210,55 @@ def get_connection_pool_stats(pool) -> Dict[str, Any]:
     return {"status": "stats_unavailable"}
 
 
+def find_actual_table_name(db_url: str, expected_table_name: str) -> Optional[str]:
+    """动态查找实际的数据库表名，因为cocoindex可能添加前缀"""
+    try:
+        import psycopg
+        with psycopg.connect(db_url) as conn:
+            with conn.cursor() as cur:
+                # 首先检查原始表名
+                cur.execute(
+                    "SELECT table_name FROM information_schema.tables WHERE table_name = %s",
+                    (expected_table_name,)
+                )
+                if cur.fetchone():
+                    return expected_table_name
+                
+                # 如果不存在，查找包含期望表名的所有表
+                cur.execute(
+                    "SELECT table_name FROM information_schema.tables WHERE table_name LIKE %s",
+                    (f'%{expected_table_name}%',)
+                )
+                tables = cur.fetchall()
+                
+                if tables:
+                    # 返回第一个匹配的表名
+                    actual_table = tables[0][0]
+                    print(f"🔍 找到实际表名: {actual_table} (期望: {expected_table_name})")
+                    return actual_table
+                
+                return None
+    except Exception as e:
+        print(f"❌ 查找表名时出错: {e}")
+        return None
+
+
+def get_all_cocoindex_tables(db_url: str) -> List[str]:
+    """获取所有cocoindex相关的表"""
+    try:
+        import psycopg
+        with psycopg.connect(db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT table_name FROM information_schema.tables WHERE table_name LIKE '%embedding%' OR table_name LIKE '%cocoindex%'"
+                )
+                tables = [row[0] for row in cur.fetchall()]
+                return tables
+    except Exception as e:
+        print(f"❌ 获取表列表时出错: {e}")
+        return []
+
+
 def extract_extension(filename: str) -> str:
     """Extract the extension of a filename."""
     return os.path.splitext(filename)[1]
@@ -267,11 +316,21 @@ def code_embedding_flow(
     print("🔍 正在扫描源文件...")
     path = "D:/c7_i9_EngineDev/Client"
     included_patterns = ["*.cpp", "*.h", "*.hpp", "*.c"]
+    excluded_patterns = ["**/.*", "target", "**/node_modules", "**/Binaries", "**/DerivedDataCache", "**/Intermediate", "**/Saved", "**/Build", "**/Content"]
+    
+    print("=" * 60)
+    print("🔧 Flow配置调试信息:")
+    print(f"📂 扫描路径: {path}")
+    print(f"📄 包含文件类型: {included_patterns}")
+    print(f"🚫 排除模式: {excluded_patterns}")
+    print(f"🏷️  Flow名称: CodeEmbedding")
+    print("=" * 60)
+    
     data_scope["files"] = flow_builder.add_source(
         cocoindex.sources.LocalFile(
             path=path,
             included_patterns=included_patterns,
-            excluded_patterns=["**/.*", "target", "**/node_modules", "**/Binaries", "**/DerivedDataCache", "**/Intermediate", "**/Saved", "**/Build", "**/Content"],
+            excluded_patterns=excluded_patterns,
         )
     )
     print("📋 处理的文件路径: ", path)
@@ -508,6 +567,7 @@ class CocoIndexMcpServer:
         self.search_engine: Optional[ImprovedCodeSearch] = None
         self.db_url = db_url
         self.table_name = table_name
+        self.actual_table_name: Optional[str] = None # 新增属性，用于存储实际使用的表名
         
         self.mcp_server = FastMCP(            
             name="CocoIndex"
@@ -635,18 +695,26 @@ class CocoIndexMcpServer:
             if self.db_pool:
                 try:
                     self.logger.info("🔍 检查数据库中是否已有现有数据...")
+                    
+                    # 首先显示所有cocoindex相关表
+                    all_tables = get_all_cocoindex_tables(self.db_url)
+                    self.logger.info(f"📋 数据库中所有相关表: {all_tables}")
+                    
+                    # 查找实际的表名
+                    actual_table_name = find_actual_table_name(self.db_url, self.table_name)
+                    if actual_table_name:
+                        self.logger.info(f"✅ 找到实际表名: '{actual_table_name}' (配置表名: '{self.table_name}')")
+                        # 更新实际使用的表名
+                        self.actual_table_name = actual_table_name
+                    else:
+                        self.logger.info(f"📋 表 '{self.table_name}' 不存在，将执行flow创建表并索引数据")
+                        self.actual_table_name = self.table_name  # 保持原表名，让cocoindex创建
+                    
                     with self.db_pool.connection() as conn:
                         with conn.cursor() as cur:
-                            # 首先检查表是否存在
-                            cur.execute(
-                                "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = %s)",
-                                (self.table_name,)
-                            )
-                            table_exists = cur.fetchone()
-                            self.logger.info(f"📋 表 '{self.table_name}' 存在性检查: {table_exists[0] if table_exists else False}")
-                            
-                            if table_exists and table_exists[0]:
-                                cur.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(self.table_name)))
+                            # 使用实际表名检查
+                            if actual_table_name:
+                                cur.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(actual_table_name)))
                                 count_result = cur.fetchone()
                                 existing_count = count_result[0] if count_result else 0
                                 
@@ -665,6 +733,7 @@ class CocoIndexMcpServer:
                     self.logger.warning(f"⚠️  检查现有数据时出错: {e}")
                     # 如果检查失败，继续执行flow，让它创建表
                     self.logger.info("🔄 继续执行flow以创建表和索引数据")
+                    self.actual_table_name = self.table_name
             
             self.logger.info("⏳ 正在处理文件，这可能需要一些时间...")
             
@@ -727,13 +796,15 @@ class CocoIndexMcpServer:
                 # 显示最终统计
                 if self.db_pool:
                     try:
+                        # 使用实际表名，如果为None则使用原始表名
+                        table_to_query = self.actual_table_name or self.table_name
                         with self.db_pool.connection() as conn:
                             with conn.cursor() as cur:
-                                cur.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(self.table_name)))
+                                cur.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(table_to_query)))
                                 total_count = cur.fetchone()
                                 count = total_count[0] if total_count else 0
                                 
-                                cur.execute(sql.SQL("SELECT COUNT(DISTINCT filename) FROM {}").format(sql.Identifier(self.table_name)))
+                                cur.execute(sql.SQL("SELECT COUNT(DISTINCT filename) FROM {}").format(sql.Identifier(table_to_query)))
                                 file_count_result = cur.fetchone()
                                 file_count = file_count_result[0] if file_count_result else 0
                                 
@@ -933,16 +1004,16 @@ class CocoIndexMcpServer:
                     with conn.cursor() as cur:
                         # 获取正确的表名
                         try:
-                            cur.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(self.table_name)))
+                            cur.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(self.actual_table_name)))
                             total_count = cur.fetchone()
                             count = total_count[0] if total_count else 0
                             
-                            cur.execute(sql.SQL("SELECT COUNT(DISTINCT filename) FROM {}").format(sql.Identifier(self.table_name)))
+                            cur.execute(sql.SQL("SELECT COUNT(DISTINCT filename) FROM {}").format(sql.Identifier(self.actual_table_name)))
                             file_count_result = cur.fetchone()
                             file_count = file_count_result[0] if file_count_result else 0
                             
                             result = {
-                                "table_name": self.table_name,
+                                "table_name": self.actual_table_name,
                                 "total_records": count,
                                 "unique_files": file_count,
                                 "table_exists": True
@@ -959,7 +1030,7 @@ class CocoIndexMcpServer:
                         except Exception as e:
                             if "does not exist" in str(e):
                                 result = {
-                                    "table_name": self.table_name,
+                                    "table_name": self.actual_table_name,
                                     "table_exists": False,
                                     "message": "表不存在，请先运行初始化流程"
                                 }
