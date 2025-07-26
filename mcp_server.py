@@ -812,13 +812,15 @@ class ImprovedCodeSearch:
             return formatted_results
     
     async def hybrid_search(self, query: str, search_type: str, top_k: int = 5) -> List[dict]:
+        hybrid_start_time = time.perf_counter()
         request_id = str(uuid.uuid4())[:8]
         self.logger.info(f"⚡️ [{request_id}] 开始混合搜索: query='{query}', type='{search_type}', k={top_k}")
         
         cache_key = f"{search_type}:{query}:{top_k}:{self.actual_table_name}"
         cached_result = self.query_cache.get(cache_key)
         if cached_result is not None:
-            self.logger.info(f"✅ [{request_id}] 从缓存中返回结果")
+            cache_time = time.perf_counter() - hybrid_start_time
+            self.logger.info(f"✅ [{request_id}] 从缓存中返回结果 (缓存命中耗时: {cache_time:.3f}秒)")
             return cached_result
 
         async with PerformanceMonitor(f"混合搜索 ({search_type})", self.logger, request_id) as monitor:
@@ -890,7 +892,9 @@ class ImprovedCodeSearch:
 
             await monitor.checkpoint(f"结果处理完成, 生成 {len(final_results)} 个最终结果")
 
-            self.logger.info(f"✅ [{request_id}] 混合搜索完成，返回 {len(final_results)} 个结果")
+            # 计算混合搜索总耗时
+            hybrid_total_time = time.perf_counter() - hybrid_start_time
+            self.logger.info(f"✅ [{request_id}] 混合搜索完成，返回 {len(final_results)} 个结果 (混合搜索耗时: {hybrid_total_time:.3f}秒)")
             self.query_cache.set(cache_key, final_results)
             return final_results
         
@@ -942,9 +946,10 @@ class CocoIndexMcpServer:
             query: str,
             search_type: str = "advanced",
             flow_name: Optional[str] = None,
-            top_k: int = 5,
+            top_k: int = 10,
         ) -> List[dict]:
             """根据自然语言查询在代码库中进行高级混合搜索"""
+            request_start_time = time.perf_counter()
             request_id = str(uuid.uuid4())[:8]
             self.logger.info(
                 f"📥 [{request_id}] 收到搜索请求: query='{query}', type='{search_type}', k={top_k}"
@@ -966,10 +971,13 @@ class CocoIndexMcpServer:
                     else:
                         results = await self.search_engine.hybrid_search(query, search_type, top_k)
                     
-                    self.logger.info(f"📤 [{request_id}] 响应搜索请求，返回 {len(results)} 个结果")
+                    # 计算总体请求时间
+                    total_request_time = time.perf_counter() - request_start_time
+                    self.logger.info(f"📤 [{request_id}] 响应搜索请求，返回 {len(results)} 个结果 (总耗时: {total_request_time:.3f}秒)")
                     return results
             except Exception as e:
-                self.logger.error(f"❌ [{request_id}] 执行搜索时发生意外错误: {e}", exc_info=True)
+                total_request_time = time.perf_counter() - request_start_time
+                self.logger.error(f"❌ [{request_id}] 执行搜索时发生意外错误: {e} (总耗时: {total_request_time:.3f}秒)", exc_info=True)
                 return [{"error": f"An unexpected error occurred: {e}"}]
 
     async def initialize(self):
