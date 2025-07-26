@@ -16,11 +16,24 @@ import sys
 import threading
 import time
 import re
-from typing import Dict, List, Optional, Any
+import platform
+from typing import Dict, List, Optional, Any, Union
 import argparse
 import uuid
 from numpy.typing import NDArray
 import numpy as np
+from functools import lru_cache
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import hashlib
+import psycopg_pool
+from psycopg import sql
+from functools import lru_cache
+from sentence_transformers import SentenceTransformer
+from fastmcp import FastMCP
+
+# 在Windows上设置正确的事件循环策略，解决 psycopg 异步连接问题
+if platform.system() == "Windows":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 # 添加python目录到路径，以便导入cocoindex
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'python'))
@@ -31,13 +44,209 @@ from cocoindex.cli import (
     _load_user_app, _get_app_ref_from_specifier
 )
 
-# 导入FastMCP
-from fastmcp import FastMCP
-
 # 添加数据库相关导入
 from psycopg_pool import ConnectionPool
 from pgvector.psycopg import register_vector
 from psycopg import sql, errors as psycopg_errors
+
+# 性能监控类
+class PerformanceMonitor:
+    """一个用于性能监控和日志记录的上下文管理器（异步兼容）"""
+    def __init__(self, name: str, logger: logging.Logger, request_id: str, log_memory: bool = False):
+        self.name = name
+        self.logger = logger
+        self.request_id = request_id
+        self.start_time = None
+        self.checkpoints = []
+        self.last_checkpoint_time = None
+        self.memory_usages = []
+        self.log_memory = log_memory
+        
+    async def __aenter__(self):
+        """异步进入上下文，记录开始时间"""
+        self.start_time = time.perf_counter()
+        self.logger.debug(f"⏱️ [{self.request_id}] 开始执行: {self.name}")
+        if self.log_memory:
+            await self.memory_checkpoint("初始化")
+        return self
+        
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """异步退出上下文，记录总耗时和详细步骤"""
+        if self.start_time is None:
+            return
+            
+        total_time = time.perf_counter() - self.start_time
+        self.logger.debug(f"✅ [{self.request_id}] 完成执行: {self.name} (总耗时: {total_time:.6f}秒)")
+
+        if self.checkpoints:
+            # 性能统计分析
+            self.logger.debug(f"📊 [{self.request_id}] 性能分析详情:")
+            for i, (name, duration) in enumerate(self.checkpoints):
+                percentage = (duration / total_time * 100) if total_time > 0 else 0
+                self.logger.debug(f"    {i+1:2d}. {name}: {duration:.6f}秒 ({percentage:.1f}%)")
+            
+            # 性能优化建议
+            if self.checkpoints:
+                max_step = max(self.checkpoints, key=lambda x: x[1])
+                min_step = min(self.checkpoints, key=lambda x: x[1]) 
+                avg_step = sum(duration for _, duration in self.checkpoints) / len(self.checkpoints) if len(self.checkpoints) > 0 else 0
+                
+                self.logger.debug(f"📈 [{self.request_id}] 性能概览:")
+                self.logger.debug(f"    🐌 最慢步骤: {max_step[0]} ({max_step[1]:.6f}秒)")
+                self.logger.debug(f"    ⚡ 最快步骤: {min_step[0]} ({min_step[1]:.6f}秒)")
+                self.logger.debug(f"    📊 平均耗时: {avg_step:.6f}秒")
+                
+                # 效率比计算
+                if min_step[1] > 0:
+                    efficiency_ratio = max_step[1] / min_step[1]
+                    self.logger.debug(f"    ⚡ 效率比: {efficiency_ratio:.1f}x (最慢/最快)")
+                else:
+                    self.logger.debug(f"    ⚡ 效率比: 无法计算（最快步骤耗时为0）")
+                
+                # 相邻步骤对比
+                for i in range(1, len(self.checkpoints)):
+                    current_step = self.checkpoints[i]
+                    prev_step = self.checkpoints[i-1]
+                    if prev_step[1] > 0:
+                        change_ratio = current_step[1] / prev_step[1]
+                        change_desc = "加速" if change_ratio < 1 else "减速"
+                        self.logger.debug(f"    🔄 与上步比: {current_step[0]} {change_desc} {change_ratio:.1f}x")
+
+    def __enter__(self):
+        """同步进入上下文，记录开始时间"""
+        self.start_time = time.perf_counter()
+        self.logger.debug(f"⏱️ [{self.request_id}] 开始执行 (同步): {self.name}")
+        return self
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """同步退出上下文，记录总耗S时"""
+        if self.start_time is None:
+            return
+        total_time = time.perf_counter() - self.start_time
+        self.logger.debug(f"✅ [{self.request_id}] 完成执行 (同步): {self.name} (总耗it: {total_time:.6f}秒)")
+
+    async def checkpoint(self, name: str, extra_info: str = ""):
+        """添加性能检查点 - 增强版"""
+        if self.start_time is not None:
+            current_time = time.time()
+            
+            # 计算与上一个检查点的时间差
+            if self.checkpoints:
+                last_checkpoint_total = sum(prev_time for _, prev_time in self.checkpoints)
+                duration = current_time - self.start_time - last_checkpoint_total
+            else:
+                duration = current_time - self.start_time
+            
+            # 计算与上一个检查点的间隔
+            step_duration = current_time - self.last_checkpoint_time if self.last_checkpoint_time else duration
+            self.last_checkpoint_time = current_time
+            
+            self.checkpoints.append((name, duration))
+            
+            # 基本DEBUG日志
+            self.logger.debug(f"🔍 [{self.request_id}] {name}: {duration:.6f}秒")
+            
+            # 详细DEBUG日志
+            if extra_info:
+                self.logger.debug(f"💡 [{self.request_id}] {name} - {extra_info}")
+            
+            # 实时性能指标
+            total_elapsed = current_time - self.start_time
+            checkpoint_percentage = (duration / total_elapsed) * 100 if total_elapsed > 0 else 0
+            
+            self.logger.debug(f"📏 [{self.request_id}] {name} - 实时指标:")
+            self.logger.debug(f"    ⏱️  步骤耗时: {step_duration:.6f}秒")
+            self.logger.debug(f"    📊 累计占比: {checkpoint_percentage:.2f}%")
+            self.logger.debug(f"    🕐 总经过时间: {total_elapsed:.6f}秒")
+    
+    async def memory_checkpoint(self, name: str, memory_info: Optional[dict] = None):
+        """记录内存检查点（异步）"""
+        try:
+            import psutil
+            process = psutil.Process(os.getpid())
+            mem_info = process.memory_info()
+            extra_info = f"RSS: {mem_info.rss / 1024**2:.2f} MB, VMS: {mem_info.vms / 1024**2:.2f} MB"
+            if memory_info:
+                extra_info += f", 额外信息: {memory_info}"
+            await self.checkpoint(name, extra_info)
+        except ImportError:
+            await self.checkpoint(name, "内存监控不可用（需要psutil）")
+        except Exception as e:
+            await self.checkpoint(name, f"内存监控失败: {e}")
+
+
+class QueryCache:
+    """一个带TTL（生存时间）的简单线程安全LRU查询缓存"""
+    def __init__(self, maxsize: int = 128, ttl: int = 300):
+        self._cache = {}
+        self._order = []
+        self._lock = threading.Lock()
+        self.maxsize = maxsize
+        self.ttl = ttl
+
+    def get(self, key: str) -> Optional[Any]:
+        with self._lock:
+            if key in self._cache:
+                value, timestamp = self._cache[key]
+                if time.time() - timestamp < self.ttl:
+                    # 更新访问顺序
+                    self._order.remove(key)
+                    self._order.append(key)
+                    return value
+                else:
+                    # TTL过期，删除
+                    self._remove_entry(key)
+        return None
+
+    def set(self, key: str, value: Any):
+        with self._lock:
+            if key in self._cache:
+                self._order.remove(key)
+            elif len(self._cache) >= self.maxsize:
+                # 缓存已满，移除最旧的
+                oldest_key = self._order.pop(0)
+                self._remove_entry(oldest_key)
+            
+            self._cache[key] = (value, time.time())
+            self._order.append(key)
+
+    def _remove_entry(self, key: str):
+        if key in self._cache:
+            del self._cache[key]
+            if key in self._order:
+                self._order.remove(key)
+
+# 全局共享的SentenceTransformer模型，避免重复初始化
+_shared_sentence_transformer = None
+_transformer_lock = threading.Lock()
+
+def get_shared_sentence_transformer():
+    """获取共享的SentenceTransformer模型，避免重复初始化"""
+    global _shared_sentence_transformer
+    
+    if _shared_sentence_transformer is None:
+        with _transformer_lock:
+            if _shared_sentence_transformer is None:  # 双重检查锁定
+                try:
+                    import sentence_transformers
+                    print("🤖 正在初始化共享的SentenceTransformer模型...")
+                    _shared_sentence_transformer = sentence_transformers.SentenceTransformer(
+                        "sentence-transformers/all-MiniLM-L6-v2"
+                    )
+                    print("✅ SentenceTransformer模型初始化完成")
+                except ImportError as e:
+                    raise ImportError(
+                        "sentence_transformers is required. Install it with: pip install sentence-transformers"
+                    ) from e
+    
+    return _shared_sentence_transformer
+
+@lru_cache(maxsize=1024)
+def get_cached_embedding(query: str) -> List[float]:
+    """获取缓存的向量嵌入，使用共享模型避免重复初始化"""
+    model = get_shared_sentence_transformer()
+    result = model.encode(query, convert_to_numpy=True, show_progress_bar=False)
+    return result.tolist() # 确保返回列表
 
 # 全局变量用于跟踪进度
 processing_stats = {
@@ -54,6 +263,7 @@ class ProgressMonitor:
     def __init__(self, db_url: str, table_name: str):
         self.db_url = db_url
         self.table_name = table_name
+        self.actual_table_name = None  # 缓存实际找到的表名
         self.running = False
         self.thread = None
         self.start_time = None
@@ -76,6 +286,16 @@ class ProgressMonitor:
     def _monitor(self):
         """监控进程的主循环"""
         try:
+            # 初始化时查找实际表名
+            if not self.actual_table_name:
+                found_table_name = find_actual_table_name(self.db_url, self.table_name)
+                if found_table_name:
+                    self.actual_table_name = found_table_name
+                    print(f"📊 监控器找到实际表名: {self.actual_table_name}")
+                else:
+                    self.actual_table_name = self.table_name
+                    print(f"📊 监控器使用配置表名: {self.table_name}")
+            
             while self.running:
                 try:
                     # 使用优化的连接池配置连接数据库检查记录数
@@ -90,7 +310,7 @@ class ProgressMonitor:
                             with conn.cursor() as cur:
                                 # 检查总记录数
                                 try:
-                                    cur.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(self.table_name)))
+                                    cur.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(self.actual_table_name)))
                                     total_count = cur.fetchone()
                                     if total_count:
                                         total_count = total_count[0]
@@ -98,7 +318,7 @@ class ProgressMonitor:
                                         total_count = 0
                                     
                                     # 检查不同文件数
-                                    cur.execute(sql.SQL("SELECT COUNT(DISTINCT filename) FROM {}").format(sql.Identifier(self.table_name)))
+                                    cur.execute(sql.SQL("SELECT COUNT(DISTINCT filename) FROM {}").format(sql.Identifier(self.actual_table_name)))
                                     file_count = cur.fetchone()
                                     if file_count:
                                         file_count = file_count[0]
@@ -390,871 +610,518 @@ def code_embedding_flow(
     print("✅ 流程定义完成！")
 
 
+def extract_line_number(position_obj) -> int:
+    """从位置对象中安全地提取行号"""
+    if isinstance(position_obj, dict):
+        return position_obj.get('line', 1)  # 默认返回第1行
+    elif isinstance(position_obj, (int, float)):
+        return int(position_obj)
+    else:
+        return 1  # 默认值
+
+
 class ImprovedCodeSearch:
-    """改进的代码搜索引擎"""
+    """改进的代码搜索引擎，优化了性能"""
     
-    def __init__(self, db_url: str, table_name: str):
-        self.db_url = db_url
+    def __init__(self, db_pool: psycopg_pool.AsyncConnectionPool, table_name: str, logger: Optional[logging.Logger] = None, flow_name: Optional[str] = None):
+        """
+        初始化搜索引擎。
+
+        :param db_pool: 一个 `psycopg_pool.AsyncConnectionPool` 实例。
+        :param table_name: 主表名（不带前缀）。
+        :param logger: 日志记录器实例。
+        :param flow_name: 工作流名称，用于确定表名前缀。
+        """
+        self.db_pool = db_pool
         self.table_name = table_name
+        self.flow_name = flow_name
+        self.logger = logger or logging.getLogger(__name__)
+        self.query_cache = QueryCache(maxsize=128, ttl=300)
         
-        # 初始化CocoIndex
-        settings = setting.Settings.from_env()
-        lib.init(settings)
-    
-    def exact_search(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """精确匹配搜索"""
-        results = []
+        # 根据是否提供 flow_name 来确定实际表名
+        # CocoIndex 使用格式: {flow_name.lower()}__{table_name}
+        if self.flow_name:
+            # 特殊处理：如果是 "gmzz" 但实际表是 "codeembedding__" 开头的，则使用 "codeembedding"
+            if self.flow_name.lower() == "gmzz":
+                self.actual_table_name = f"codeembedding__{self.table_name}"
+            else:
+                self.actual_table_name = f"{self.flow_name.lower()}__{self.table_name}"
+        else:
+            self.actual_table_name = self.table_name
+            
+        self.schema_name = None  # CocoIndex 不使用 PostgreSQL schema 分离
+        self.logger.info(f"搜索引擎已配置，将使用表: {self.actual_table_name}")
+
+    async def initialize_table_name(self):
+        """验证表名是否存在并可访问"""
+        self.logger.info(f"验证表名: {self.actual_table_name}")
+
+        # 连接数据库验证表是否存在
         try:
-            import psycopg
-            with psycopg.connect(self.db_url) as conn:
-                with conn.cursor() as cur:
-                    search_query = sql.SQL("""
-                        SELECT filename, code, start, "end", 'exact' as match_type
-                        FROM {} 
-                        WHERE code ILIKE %s
-                        ORDER BY LENGTH(code) ASC
-                        LIMIT %s
-                    """).format(sql.Identifier(self.table_name))
-                    
-                    cur.execute(search_query, (f'%{query}%', limit))
-                    rows = cur.fetchall()
-                    
-                    for row in rows:
-                        results.append({
-                            "filename": row[0],
-                            "code": row[1],
-                            "start": row[2],
-                            "end": row[3],
-                            "match_type": row[4],
-                            "score": 1.0,  # 精确匹配给满分
-                        })
-        except Exception as e:
-            print(f"精确搜索错误: {e}")
-        
-        return results
+            async with self.db_pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    # 直接使用表名，不需要 schema 分离
+                    identifier = sql.Identifier(self.actual_table_name)
+                    await cur.execute(sql.SQL("SELECT 1 FROM {} LIMIT 1").format(identifier))
+            self.logger.info(f"✅ 成功验证表 '{self.actual_table_name}' 存在。")
+        except Exception:
+            self.logger.warning(
+                f"⚠️ 表 '{self.actual_table_name}' 可能不存在或无法访问。将在第一次查询时处理此问题。",
+                exc_info=False
+            )
     
-    def fuzzy_search(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """模糊匹配搜索（分解查询词）"""
+    async def _execute_query(self, query: sql.Composable, params: Optional[dict], monitor: PerformanceMonitor, fetch: str = "all"):
+        """
+        执行数据库查询并进行性能分析。
+
+        :param query: 要执行的SQL查询（psycopg.sql对象）。
+        :param params: 查询参数。
+        :param monitor: PerformanceMonitor 实例。
+        :param fetch: 'all', 'one', or 'none'
+        :return: 查询结果或None。
+        """
         results = []
-        
-        # 将查询分解为单词（处理驼峰命名）
-        words = re.findall(r'[A-Z][a-z]*|[a-z]+|\d+', query)
-        
-        if len(words) > 1:
+        await monitor.checkpoint("开始数据库查询")
+        try:
+            # 使用 `async with` 来自动处理连接的获取和释放
+            async with self.db_pool.connection() as conn:
+                await monitor.checkpoint("数据库连接已获取")
+                async with conn.cursor() as cur:
+                    start_query_time = time.perf_counter()
+                    await cur.execute(query, params) # type: ignore
+                    query_duration = time.perf_counter() - start_query_time
+                    self.logger.debug(f"⚡️ 数据库原生查询耗时: {query_duration:.6f}秒")
+                    
+                    if fetch == "all":
+                        results = await cur.fetchall()
+                    elif fetch == "one":
+                        results = await cur.fetchone()
+                    # 如果 fetch == 'none'，不获取结果
+
+            await monitor.checkpoint("数据库查询完成")
+            return results
+        except Exception as e:
+            self.logger.error(f"数据库查询失败: {e}", exc_info=True)
+            await monitor.checkpoint(f"数据库查询失败: {e}")
+            return None # 或者可以重新抛出异常
+    
+    async def exact_search(self, query: str, limit: int = 5, request_id: Optional[str] = None) -> List[dict]:
+        """执行精确匹配搜索"""
+        request_id = request_id or str(uuid.uuid4())[:8]
+        self.logger.debug(f"🎯 [{request_id}] 开始精确搜索: query='{query}'")
+        async with PerformanceMonitor("精确搜索", self.logger, request_id) as monitor:
+            # 动态构建表标识符
+            sql_query = sql.SQL("""
+                SELECT filename, code, score, start, "end"
+                FROM (
+                    SELECT
+                        filename,
+                        code,
+                        ts_rank_cd(to_tsvector('simple', code), plainto_tsquery('simple', %(query)s)) as score,
+                        start,
+                        "end"
+                    FROM {table}
+                    WHERE to_tsvector('simple', code) @@ plainto_tsquery('simple', %(query)s)
+                ) as ranked_results
+                WHERE score > 0
+                ORDER BY score DESC
+                LIMIT %(limit)s;
+            """).format(table=sql.Identifier(self.actual_table_name))
+            
+            params = {"query": query, "limit": limit}
+            
+            results = await self._execute_query(sql_query, params, monitor, fetch="all")
+            
+            if results is None: return []
+
+            formatted_results = [
+                {"filename": row[0], "code": row[1], "score": row[2], 
+                 "start_line": extract_line_number(row[3]), "end_line": extract_line_number(row[4])}
+                for row in results
+            ]
+            self.logger.debug(f"🎯 [{request_id}] 精确搜索最终结果: {len(formatted_results)} 个精确匹配项")
+            return formatted_results
+    
+    async def fuzzy_search(self, query: str, limit: int = 5, request_id: Optional[str] = None) -> List[dict]:
+        """执行模糊匹配搜索 (ILIKE with trigram)"""
+        request_id = request_id or str(uuid.uuid4())[:8]
+        self.logger.debug(f"🎯 [{request_id}] 开始模糊搜索: query='{query}'")
+        async with PerformanceMonitor("模糊搜索", self.logger, request_id) as monitor:
+            # 动态构建表标识符
+            sql_query = sql.SQL("""
+                SELECT filename, code, similarity(code, %(query)s) as score, start, "end"
+                FROM {table}
+                WHERE code %% %(query)s
+                ORDER BY score DESC
+                LIMIT %(limit)s;
+            """).format(table=sql.Identifier(self.actual_table_name))
+            
+            params = {"query": query, "limit": limit}
+
+            results = await self._execute_query(sql_query, params, monitor, fetch="all")
+
+            if results is None: return []
+
+            formatted_results = [
+                {"filename": row[0], "code": row[1], "score": row[2], 
+                 "start_line": extract_line_number(row[3]), "end_line": extract_line_number(row[4])}
+                for row in results
+            ]
+            self.logger.debug(f"🎯 [{request_id}] 模糊搜索最终结果: {len(formatted_results)} 个模糊匹配项")
+            return formatted_results
+    
+    async def semantic_search(self, query: str, limit: int = 5, request_id: Optional[str] = None) -> List[dict]:
+        """执行语义（向量）搜索"""
+        request_id = request_id or str(uuid.uuid4())[:8]
+        self.logger.debug(f"🎯 [{request_id}] 开始语义搜索: query='{query}'")
+        async with PerformanceMonitor("语义搜索", self.logger, request_id) as monitor:
+            await monitor.checkpoint("开始向量嵌入计算")
+            start_embed_time = time.perf_counter()
             try:
-                import psycopg
-                with psycopg.connect(self.db_url) as conn:
-                    with conn.cursor() as cur:
-                        # 构建模糊搜索条件
-                        conditions = []
-                        params = []
-                        for word in words:
-                            conditions.append("code ILIKE %s")
-                            params.append(f'%{word}%')
-                        
-                        search_query = sql.SQL("""
-                            SELECT filename, code, start, "end", 'fuzzy' as match_type
-                            FROM {} 
-                            WHERE {}
-                            ORDER BY LENGTH(code) ASC
-                            LIMIT %s
-                        """).format(
-                            sql.Identifier(self.table_name),
-                            sql.SQL(' AND ').join(sql.SQL(cond) for cond in conditions)
-                        )
-                        
-                        params.append(limit)
-                        cur.execute(search_query, params)
-                        rows = cur.fetchall()
-                        
-                        for row in rows:
-                            # 计算匹配度
-                            code = row[1].lower()
-                            matched_words = sum(1 for word in words if word.lower() in code)
-                            score = matched_words / len(words) * 0.8  # 模糊匹配给80%权重
-                            
-                            results.append({
-                                "filename": row[0],
-                                "code": row[1],
-                                "start": row[2],
-                                "end": row[3],
-                                "match_type": row[4],
-                                "score": score,
-                            })
+                # 这个函数是同步的，但在后台是线程安全的
+                query_embedding = get_cached_embedding(query)
+                api_call_duration = time.perf_counter() - start_embed_time
+                await monitor.checkpoint(f"向量嵌入计算完成，耗时: {api_call_duration:.6f}s")
+                
+                self.logger.debug(f"💡 [{request_id}] 向量嵌入计算 - 查询长度: {len(query)}, 向量维度: {len(query_embedding)}, API调用耗时: {api_call_duration:.6f}秒")
             except Exception as e:
-                print(f"模糊搜索错误: {e}")
-        
-        return results
+                self.logger.error(f"❌ [{request_id}] 向量嵌入计算失败: {e}", exc_info=True)
+                await monitor.checkpoint("向量嵌入计算失败")
+                return []
+
+            # 动态构建表标识符
+            sql_query = sql.SQL("""
+                SELECT filename, code, (1 - (embedding <=> %(embedding)s)) as score, start, "end"
+                FROM {table}
+                ORDER BY score DESC
+                LIMIT %(limit)s;
+            """).format(table=sql.Identifier(self.actual_table_name))
+
+            params = {"embedding": str(query_embedding), "limit": limit}
+            
+            results = await self._execute_query(sql_query, params, monitor, fetch="all")
+
+            if results is None: return []
+
+            formatted_results = [
+                {"filename": row[0], "code": row[1], "score": row[2], 
+                 "start_line": extract_line_number(row[3]), "end_line": extract_line_number(row[4])}
+                for row in results
+            ]
+            self.logger.debug(f"🎯 [{request_id}] 语义搜索最终结果: {len(formatted_results)} 个语义匹配项")
+            return formatted_results
     
-    def semantic_search(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """语义搜索"""
-        results = []
-        try:
-            import psycopg
-            from pgvector.psycopg import register_vector
-            with psycopg.connect(self.db_url) as conn:
-                register_vector(conn)
-                with conn.cursor() as cur:
-                    # 生成查询向量
-                    query_vector = code_to_embedding.eval(query)
-                    
-                    # 执行向量搜索
-                    search_query = sql.SQL("""
-                        SELECT filename, code, embedding <=> %s AS distance, start, "end"
-                        FROM {} 
-                        ORDER BY distance 
-                        LIMIT %s
-                    """).format(sql.Identifier(self.table_name))
-                    
-                    cur.execute(search_query, (query_vector, limit))
-                    rows = cur.fetchall()
-                    
-                    for row in rows:
-                        similarity = 1.0 - row[2]
-                        # 只有相似度够高的才认为是有效结果
-                        if similarity > 0.2:  # 降低阈值以获得更多结果
-                            results.append({
-                                "filename": row[0],
-                                "code": row[1],
-                                "start": row[3],
-                                "end": row[4],
-                                "match_type": "semantic",
-                                "score": similarity * 0.6,  # 语义搜索权重较低
-                            })
-        except Exception as e:
-            print(f"语义搜索错误: {e}")
+    async def hybrid_search(self, query: str, search_type: str, top_k: int = 5) -> List[dict]:
+        request_id = str(uuid.uuid4())[:8]
+        self.logger.info(f"⚡️ [{request_id}] 开始混合搜索: query='{query}', type='{search_type}', k={top_k}")
         
-        return results
-    
-    def hybrid_search(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """混合搜索：结合精确、模糊和语义搜索"""
-        # 执行三种搜索
-        exact_results = self.exact_search(query, limit)
-        fuzzy_results = self.fuzzy_search(query, limit)
-        semantic_results = self.semantic_search(query, limit)
+        cache_key = f"{search_type}:{query}:{top_k}:{self.actual_table_name}"
+        cached_result = self.query_cache.get(cache_key)
+        if cached_result is not None:
+            self.logger.info(f"✅ [{request_id}] 从缓存中返回结果")
+            return cached_result
+
+        async with PerformanceMonitor(f"混合搜索 ({search_type})", self.logger, request_id) as monitor:
+            exact_results, fuzzy_results, semantic_results = [], [], []
+
+            if search_type in ["advanced", "all"]:
+                await monitor.checkpoint("开始并行搜索")
+                tasks = [
+                    self.exact_search(query, top_k, request_id),
+                    self.fuzzy_search(query, top_k, request_id),
+                    self.semantic_search(query, top_k, request_id)
+                ]
+                results_from_gather = await asyncio.gather(*tasks, return_exceptions=True)
+                await monitor.checkpoint("并行搜索完成")
+
+                # 安全地解包结果并记录错误
+                if isinstance(results_from_gather[0], BaseException):
+                    self.logger.error(f"❌ [{request_id}] 并行精确搜索失败: {results_from_gather[0]}")
+                    exact_results = []
+                else:
+                    exact_results = results_from_gather[0]
+
+                if isinstance(results_from_gather[1], BaseException):
+                    self.logger.error(f"❌ [{request_id}] 并行模糊搜索失败: {results_from_gather[1]}")
+                    fuzzy_results = []
+                else:
+                    fuzzy_results = results_from_gather[1]
+                
+                if isinstance(results_from_gather[2], BaseException):
+                    self.logger.error(f"❌ [{request_id}] 并行语义搜索失败: {results_from_gather[2]}")
+                    semantic_results = []
+                else:
+                    semantic_results = results_from_gather[2]
+            else:
+                if search_type == "exact":
+                    exact_results = await self.exact_search(query, top_k, request_id)
+                elif search_type == "fuzzy":
+                    fuzzy_results = await self.fuzzy_search(query, top_k, request_id)
+                elif search_type == "semantic":
+                    semantic_results = await self.semantic_search(query, top_k, request_id)
+
+            await monitor.checkpoint("开始结果去重和排序")
+            
+            all_results = []
+            seen = set()
+            
+            # 优先级: 精确 > 模糊 > 语义
+            search_results_list = [
+                (exact_results, 'exact'), 
+                (fuzzy_results, 'fuzzy'), 
+                (semantic_results, 'semantic')
+            ]
+
+            for results_list, match_type in search_results_list:
+                for result in results_list:
+                    # 使用 文件名 + 起始行 作为唯一标识进行去重
+                    # 现在start_line已经是简单的整数，可以安全地用作哈希key
+                    key = (result.get("filename"), result.get("start_line"))
+                    if key not in seen:
+                        seen.add(key)
+                        # 为结果添加 match_type 以便追溯
+                        result_with_type = result.copy()
+                        result_with_type['match_type'] = match_type
+                        all_results.append(result_with_type)
+
+            # 按分数降序排序
+            all_results.sort(key=lambda x: x.get("score", 0.0), reverse=True)
+            final_results = all_results[:top_k]
+
+            await monitor.checkpoint(f"结果处理完成, 生成 {len(final_results)} 个最终结果")
+
+            self.logger.info(f"✅ [{request_id}] 混合搜索完成，返回 {len(final_results)} 个结果")
+            self.query_cache.set(cache_key, final_results)
+            return final_results
         
-        # 合并结果，去重
-        all_results = []
-        seen = set()
-        
-        # 优先级：精确 > 模糊 > 语义
-        for results_list in [exact_results, fuzzy_results, semantic_results]:
-            for result in results_list:
-                # 使用文件名+位置作为唯一标识，转换dict为字符串
-                start_str = str(result["start"])
-                end_str = str(result["end"])
-                key = (result["filename"], start_str, end_str)
-                if key not in seen:
-                    seen.add(key)
-                    all_results.append(result)
-        
-        # 按分数排序
-        all_results.sort(key=lambda x: x["score"], reverse=True)
-        
-        return all_results[:limit]
+    async def advanced_search(self, query: str, top_k: int = 5) -> List[dict]:
+        """
+        智能高级搜索。根据查询类型决定最佳搜索策略。
+        """
+        # 简单规则：如果查询看起来像一个精确的标识符，优先精确搜索。
+        # 否则，并行运行所有搜索并合并结果。
+        # 这是一个可以未来扩展的策略引擎。
+        return await self.hybrid_search(query, "all", top_k)
 
 
 class CocoIndexMcpServer:
-    """MCP Server for CocoIndex code analysis using FastMCP."""
-    
-    def __init__(self, flow_name: str, host: str, port: int, db_url: str, table_name: str):
+    def __init__(
+        self,
+        flow_name: str,
+        host: str = "0.0.0.0",
+        port: int = 2010,
+        db_url: Optional[str] = None,
+        table_name: str = "c7_client_code_embeddings",
+        log_level: str = "INFO",
+    ):
         self.flow_name = flow_name
+        self.db_url = db_url or os.environ.get("DATABASE_URL")
+        if not self.db_url:
+            raise ValueError("数据库URL未提供，请设置DATABASE_URL环境变量或通过参数传递")
+            
+        self.table_name = table_name
+        self.log_level = log_level
         self.host = host
         self.port = port
-        self.logger = logging.getLogger(__name__)
-        self._initialized = False
-        self.db_pool: Optional[ConnectionPool] = None
+        self.db_pool: Optional[psycopg_pool.AsyncConnectionPool] = None
         self.search_engine: Optional[ImprovedCodeSearch] = None
-        self.db_url = db_url
-        self.table_name = table_name
-        self.actual_table_name: Optional[str] = None # 新增属性，用于存储实际使用的表名
-        
-        self.mcp_server = FastMCP(            
-            name="CocoIndex"
-        )
+
+        # 配置日志
+        log_format = '%(asctime)s - %(name)s.%(funcName)s - %(levelname)s - %(message)s'
+        logging.basicConfig(level=self.log_level.upper(), format=log_format)
+        self.logger = logging.getLogger(__name__)
+
+        # 创建FastMCP实例
+        self.mcp = FastMCP(name="CocoIndex MCP Server")
         self._setup_tools()
-    
-    async def initialize(self):
-        """初始化MCP服务器"""
-        if self._initialized:
-            return
-            
-        self.logger.info("🚀 开始初始化 CocoIndex MCP 服务器...")
-            
-        try:
-            # 初始化CocoIndex
-            settings = setting.Settings.from_env()
-            lib.init(settings)
-            
-            # 初始化数据库连接池
-            if self.db_url:
-                # 使用大幅增强的连接池配置以应对高并发索引需求
-                self.logger.info("🔧 正在配置数据库连接池...")
-                self.db_pool = ConnectionPool(
-                    self.db_url, 
-                    open=True,
-                    max_size=100,         # 大幅增加最大连接数，支持超高并发
-                    min_size=20,          # 增加最小连接数，减少连接创建延迟
-                    timeout=300.0,        # 大幅增加获取连接超时时间（5分钟）
-                    max_waiting=200,      # 增加最大排队请求数
-                    max_lifetime=7200.0,  # 连接最大生存时间（2小时）
-                    max_idle=1800.0       # 连接最大空闲时间（30分钟）
-                )
-                self.search_engine = ImprovedCodeSearch(self.db_url, self.table_name)
-                self.logger.info("✅ 数据库连接池初始化完成")
-                self.logger.info(f"🔧 连接池配置: max_size=100, min_size=20, timeout=300s, max_waiting=200")
-                self.logger.info(f"🔧 连接管理: max_lifetime=7200s, max_idle=1800s")
-                
-                # 测试连接池
-                try:
-                    with self.db_pool.connection() as conn:
-                        with conn.cursor() as cur:
-                            cur.execute("SELECT version()")
-                            version = cur.fetchone()
-                            self.logger.info(f"🔗 数据库连接测试成功: {version[0] if version else 'Unknown'}")
-                except Exception as e:
-                    self.logger.error(f"❌ 数据库连接测试失败: {e}")
-                    raise
-            else:
-                self.logger.warning("COCOINDEX_DATABASE_URL not set, database queries will not work")
-            
-            # 确保flows可用
-            try:
-                flow.ensure_all_flows_built()
-                self.logger.info(f"MCP Server initialized with flow: {self.flow_name}")
-            except Exception as e:
-                self.logger.warning(f"Could not build flows: {e}")
-            
-            # 自动初始化代码嵌入流程
-            await self._auto_initialize_flow()
-            
-            self._initialized = True
-            self.logger.info("🎉 CocoIndex MCP 服务器初始化完成！")
-            
-        except Exception as e:
-            self.logger.error(f"Failed to initialize MCP server: {e}")
-            raise
-
-    def _programmatic_setup_flows(self, flow_names: List[str]):
-        """以编程方式执行flow setup，等同于 `cocoindex setup`"""
-        try:
-            target_flows = [flow.flow_by_name(name) for name in flow_names]
-            if not target_flows:
-                self.logger.info("没有找到需要 setup 的 flow。")
-                return
-
-            self.logger.info(f"为 {', '.join(flow_names)} 创建 setup bundle...")
-            setup_bundle = flow.make_setup_bundle(target_flows)
-
-            description, is_up_to_date = setup_bundle.describe()
-            self.logger.info("Flow setup 描述:\n" + description)
-
-            if is_up_to_date:
-                self.logger.info("✅ Flow setup 已经是最新的。")
-                return
-
-            self.logger.info("应用 flow setup 变更...")
-            setup_bundle.apply(report_to_stdout=False) # 在后台静默应用
-            self.logger.info("✅ Flow setup 变更应用成功。")
-
-        except Exception as e:
-            self.logger.error(f"❌ 以编程方式执行 flow setup 失败: {e}")
-            import traceback
-            self.logger.error(f"详细错误: {traceback.format_exc()}")
-            raise # 重新抛出异常，因为这是一个关键步骤
-
-    async def _auto_initialize_flow(self):
-        """自动初始化代码嵌入流程"""
-        try:
-            self.logger.info("🚀 开始自动初始化代码嵌入流程...")
-            
-            # 强制更新Flow setup，等同于运行 `cocoindex setup`
-            self.logger.info("🔧 检查并更新 flow setup...")
-            try:
-                flow_to_setup = code_embedding_flow.name
-                if flow_to_setup in flow.flow_names():
-                    self._programmatic_setup_flows([flow_to_setup])
-                    self.logger.info(f"✅ Flow '{flow_to_setup}' setup 检查和更新完成。")
-                else:
-                    self.logger.warning(f"未找到 '{flow_to_setup}' flow，跳过 setup。")
-            except Exception as e:
-                self.logger.error(f"❌ Flow setup 失败，索引流程无法继续。")
-                return
-
-            # 重置进度统计
-            reset_progress_stats()
-            
-            # 启动进度监控
-            monitor = None
-            if self.db_url:
-                monitor = ProgressMonitor(self.db_url, self.table_name)
-                monitor.start()
-                self.logger.info("📊 进度监控已启动")
-            
-            # 检查是否已经有数据
-            if self.db_pool:
-                try:
-                    self.logger.info("🔍 检查数据库中是否已有现有数据...")
-                    
-                    # 首先显示所有cocoindex相关表
-                    all_tables = get_all_cocoindex_tables(self.db_url)
-                    self.logger.info(f"📋 数据库中所有相关表: {all_tables}")
-                    
-                    # 查找实际的表名
-                    actual_table_name = find_actual_table_name(self.db_url, self.table_name)
-                    if actual_table_name:
-                        self.logger.info(f"✅ 找到实际表名: '{actual_table_name}' (配置表名: '{self.table_name}')")
-                        # 更新实际使用的表名
-                        self.actual_table_name = actual_table_name
-                    else:
-                        self.logger.info(f"📋 表 '{self.table_name}' 不存在，将执行flow创建表并索引数据")
-                        self.actual_table_name = self.table_name  # 保持原表名，让cocoindex创建
-                    
-                    with self.db_pool.connection() as conn:
-                        with conn.cursor() as cur:
-                            # 使用实际表名检查
-                            if actual_table_name:
-                                cur.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(actual_table_name)))
-                                count_result = cur.fetchone()
-                                existing_count = count_result[0] if count_result else 0
-                                
-                                self.logger.info(f"📊 现有记录数: {existing_count}")
-                                
-                                if existing_count > 0:
-                                    self.logger.info(f"📁 数据库中已有 {existing_count} 条记录，跳过重新索引")
-                                    if monitor:
-                                        monitor.stop()
-                                    return
-                                else:
-                                    self.logger.info("📝 表存在但无数据，将进行全新索引")
-                            else:
-                                self.logger.info("📋 表不存在，将执行flow创建表并索引数据")
-                except Exception as e:
-                    self.logger.warning(f"⚠️  检查现有数据时出错: {e}")
-                    # 如果检查失败，继续执行flow，让它创建表
-                    self.logger.info("🔄 继续执行flow以创建表和索引数据")
-                    self.actual_table_name = self.table_name
-            
-            self.logger.info("⏳ 正在处理文件，这可能需要一些时间...")
-            
-            try:
-                # 记录执行前的连接池状态
-                if self.db_pool:
-                    pool_stats_before = get_connection_pool_stats(self.db_pool)
-                    self.logger.info(f"🔧 Flow执行前连接池状态: {pool_stats_before}")
-                
-                self.logger.info("🚀 开始执行cocoindex flow...")
-                start_time = time.time()
-                
-                # 更新流程
-                stats = code_embedding_flow.update()
-                
-                execution_time = time.time() - start_time
-                self.logger.info(f"⏱️  Flow执行完成，耗时: {execution_time:.2f}秒")
-                
-                # 记录执行后的连接池状态
-                if self.db_pool:
-                    pool_stats_after = get_connection_pool_stats(self.db_pool)
-                    self.logger.info(f"🔧 Flow执行后连接池状态: {pool_stats_after}")
-                
-                # 详细解析统计结果
-                self.logger.info(f"📊 原始处理统计: {stats}")
-                parsed_stats = parse_cocoindex_stats(str(stats))
-                self.logger.info(f"📊 解析后的统计信息:")
-                self.logger.info(f"  - 总文件数: {parsed_stats['total_files']}")
-                self.logger.info(f"  - 失败文件数: {parsed_stats['failed_files']}")
-                self.logger.info(f"  - 无变化文件数: {parsed_stats['no_change_files']}")
-                self.logger.info(f"  - 成功文件数: {parsed_stats['success_files']}")
-                self.logger.info(f"  - 失败率: {parsed_stats['failed_rate']:.2%}")
-                
-                # 根据失败率判断流程是否真正成功
-                failure_threshold = 0.5  # 50%失败率阈值
-                if parsed_stats['failed_rate'] > failure_threshold:
-                    error_msg = f"❌ Flow处理失败率过高: {parsed_stats['failed_rate']:.2%} > {failure_threshold:.2%}"
-                    self.logger.error(error_msg)
-                    self.logger.error(f"  失败文件: {parsed_stats['failed_files']}/{parsed_stats['total_files']}")
-                    self.logger.error("  主要原因可能是数据库连接池超时，请检查连接池配置或数据库性能")
-                    
-                    # 停止进度监控
-                    if monitor:
-                        monitor.stop()
-                    
-                    # 不抛出异常，但记录为失败状态
-                    self.logger.warning("⚠️  虽然flow报告完成，但实际处理失败率过高，继续启动服务器但数据可能不完整")
-                    return
-                
-                # 停止进度监控
-                if monitor:
-                    monitor.stop()
-                
-                self.logger.info("✅ 代码嵌入流程初始化成功！")
-                
-                # 等待一小段时间确保数据库操作完成
-                self.logger.info("⏳ 等待数据库操作完成...")
-                time.sleep(3)
-                
-                # 显示最终统计
-                if self.db_pool:
-                    try:
-                        # 使用实际表名，如果为None则使用原始表名
-                        table_to_query = self.actual_table_name or self.table_name
-                        with self.db_pool.connection() as conn:
-                            with conn.cursor() as cur:
-                                cur.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(table_to_query)))
-                                total_count = cur.fetchone()
-                                count = total_count[0] if total_count else 0
-                                
-                                cur.execute(sql.SQL("SELECT COUNT(DISTINCT filename) FROM {}").format(sql.Identifier(table_to_query)))
-                                file_count_result = cur.fetchone()
-                                file_count = file_count_result[0] if file_count_result else 0
-                                
-                                self.logger.info(f"✅ 数据库验证: 共有 {count} 条代码块记录")
-                                self.logger.info(f"📁 数据库验证: 处理了 {file_count} 个不同的文件")
-                                
-                                if count == 0:
-                                    self.logger.error("❌ 警告: 数据库中没有找到任何记录，表可能创建失败")
-                                elif count < parsed_stats['success_files'] * 100:  # 假设每个文件平均100个代码块
-                                    self.logger.warning(f"⚠️  警告: 数据库记录数({count})可能少于预期")
-                    except Exception as e:
-                        self.logger.error(f"❌ 数据库验证失败: {e}")
-                        # 这可能是因为表还没有创建，这是一个严重问题
-                        self.logger.error("  表可能未成功创建，请检查cocoindex处理过程中的错误")
-                
-            except Exception as e:
-                if monitor:
-                    monitor.stop()
-                import traceback
-                self.logger.error(f"❌ 代码嵌入流程初始化失败: {e}")
-                self.logger.error(f"详细错误堆栈: {traceback.format_exc()}")
-                
-                # 如果是连接相关的错误，提供更具体的建议
-                error_str = str(e).lower()
-                if 'pool timed out' in error_str or 'connection' in error_str:
-                    self.logger.error("🔧 建议解决方案:")
-                    self.logger.error("  1. 增加PostgreSQL的max_connections设置")
-                    self.logger.error("  2. 检查PostgreSQL服务器性能")
-                    self.logger.error("  3. 考虑减少cocoindex的并发度（如果可配置）")
-                    self.logger.error("  4. 检查网络延迟和稳定性")
-                
-                # 不抛出异常，让服务器继续运行
-                
-        except Exception as e:
-            self.logger.error(f"自动初始化流程失败: {e}")
-            # 不抛出异常，让服务器继续运行
 
     def _setup_tools(self):
         """设置MCP工具"""
-        
-        @self.mcp_server.tool()
-        async def test_connection() -> Dict[str, Any]:
-            """测试CocoIndex连接和服务器状态"""
-            # 生成请求ID并记录请求
-            request_id = str(uuid.uuid4())[:8]
-            self.logger.info(f"🔧 [请求 {request_id}] 工具: test_connection")
-            self.logger.info(f"📥 [请求 {request_id}] 参数: 无")
-            
-            start_time = time.time()
-            
-            try:
-                self.logger.info(f"⚙️  [处理 {request_id}] 正在执行工具: test_connection")
-                
-                status = {
-                    "cocoindex_initialized": self._initialized,
-                    "database_connected": bool(self.db_pool),
-                    "search_engine_ready": bool(self.search_engine),
-                    "flow_name": self.flow_name
-                }
-                
-                # 测试数据库连接
-                if self.db_pool:
-                    try:
-                        with self.db_pool.connection() as conn:
-                            with conn.cursor() as cur:
-                                cur.execute("SELECT 1")
-                                result = cur.fetchone()
-                                status["database_test"] = "SUCCESS" if result else "FAILED"
-                    except Exception as e:
-                        status["database_test"] = f"ERROR: {str(e)}"
-                else:
-                    status["database_test"] = "NO_POOL"
-                
-                # 检查可用的flows
-                try:
-                    current_flows = list(flow.flow_names())
-                    status["available_flows"] = current_flows
-                except Exception as e:
-                    status["available_flows"] = f"ERROR: {str(e)}"
-                
-                # 记录成功响应
-                execution_time = time.time() - start_time
-                self.logger.info(f"✅ [响应 {request_id}] 工具: test_connection - 执行成功")
-                self.logger.info(f"⏱️  [响应 {request_id}] 执行耗时: {execution_time:.3f}秒")
-                
-                result_str = str(status)
-                if len(result_str) > 500:
-                    result_preview = result_str[:500] + "... (结果被截断)"
-                else:
-                    result_preview = result_str
-                self.logger.info(f"📤 [响应 {request_id}] 返回结果: {result_preview}")
-                
-                return status
-                
-            except Exception as e:
-                # 记录错误响应
-                execution_time = time.time() - start_time
-                self.logger.error(f"❌ [响应 {request_id}] 工具: test_connection - 执行失败")
-                self.logger.error(f"⏱️  [响应 {request_id}] 执行耗时: {execution_time:.3f}秒")
-                self.logger.error(f"🚨 [响应 {request_id}] 错误信息: {str(e)}")
-                raise e
-
-        @self.mcp_server.tool()
+        @self.mcp.tool()
         async def search_code(
-            query: str, 
-            search_type: str = "hybrid",
+            query: str,
+            search_type: str = "advanced",
             flow_name: Optional[str] = None,
-            top_k: int = 5
-        ) -> List[Dict[str, Any]]:
-            """改进的代码搜索，支持精确、模糊、语义和混合搜索"""
-            # 生成请求ID并记录请求
+            top_k: int = 5,
+        ) -> List[dict]:
+            """根据自然语言查询在代码库中进行高级混合搜索"""
             request_id = str(uuid.uuid4())[:8]
-            self.logger.info(f"🔧 [请求 {request_id}] 工具: search_code")
-            self.logger.info(f"📥 [请求 {request_id}] 参数: query='{query}', search_type='{search_type}', flow_name={flow_name}, top_k={top_k}")
-            
-            start_time = time.time()
+            self.logger.info(
+                f"📥 [{request_id}] 收到搜索请求: query='{query}', type='{search_type}', k={top_k}"
+            )
+
+            if not self.search_engine:
+                self.logger.error(f"❌ [{request_id}] 搜索引擎未初始化")
+                return [{"error": "Search engine is not initialized."}]
+
+            # 检查是否需要切换flow
+            if flow_name and self.flow_name != flow_name:
+                self.logger.warning(f"[{request_id}] 请求的 flow_name '{flow_name}' 与服务器初始化的 '{self.flow_name}' 不同。此功能暂不支持动态切换。")
+                # 当前设计为每个服务器实例服务一个flow，未来可以扩展
             
             try:
-                self.logger.info(f"⚙️  [处理 {request_id}] 正在执行工具: search_code")
-                
-                if not self.search_engine:
-                    error_result = [{"error": "Search engine not available. Please check database connection."}]
+                async with PerformanceMonitor(f"Tool search_code", self.logger, request_id) as monitor:
+                    if search_type == "advanced":
+                        results = await self.search_engine.advanced_search(query, top_k)
+                    else:
+                        results = await self.search_engine.hybrid_search(query, search_type, top_k)
                     
-                    # 记录错误响应
-                    execution_time = time.time() - start_time
-                    self.logger.error(f"❌ [响应 {request_id}] 工具: search_code - 搜索引擎不可用")
-                    self.logger.error(f"⏱️  [响应 {request_id}] 执行耗时: {execution_time:.3f}秒")
-                    self.logger.error(f"📤 [响应 {request_id}] 返回结果: {error_result}")
-                    
-                    return error_result
-                
-                # 使用改进的搜索引擎
-                if search_type == "exact":
-                    results = self.search_engine.exact_search(query, top_k)
-                elif search_type == "fuzzy":
-                    results = self.search_engine.fuzzy_search(query, top_k)
-                elif search_type == "semantic":
-                    results = self.search_engine.semantic_search(query, top_k)
-                else:  # hybrid (default)
-                    results = self.search_engine.hybrid_search(query, top_k)
-                
-                # 格式化结果，添加match_type字段
-                formatted_results = []
-                for result in results:
-                    formatted_results.append({
-                        "filename": result["filename"],
-                        "code": result["code"],
-                        "score": result["score"],
-                        "match_type": result["match_type"],
-                        "start": result["start"],
-                        "end": result["end"],
-                    })
-                
-                # 记录成功响应
-                execution_time = time.time() - start_time
-                self.logger.info(f"✅ [响应 {request_id}] 工具: search_code - 执行成功")
-                self.logger.info(f"⏱️  [响应 {request_id}] 执行耗时: {execution_time:.3f}秒")
-                self.logger.info(f"📤 [响应 {request_id}] 搜索到 {len(formatted_results)} 个结果")
-                
-                return formatted_results
-                        
+                    self.logger.info(f"📤 [{request_id}] 响应搜索请求，返回 {len(results)} 个结果")
+                    return results
             except Exception as e:
-                # 记录错误响应
-                execution_time = time.time() - start_time
-                self.logger.error(f"❌ [响应 {request_id}] 工具: search_code - 执行失败")
-                self.logger.error(f"⏱️  [响应 {request_id}] 执行耗时: {execution_time:.3f}秒")
-                self.logger.error(f"🚨 [响应 {request_id}] 错误信息: {str(e)}")
-                
-                error_result = [{"error": f"Search error: {str(e)}"}]
-                return error_result
+                self.logger.error(f"❌ [{request_id}] 执行搜索时发生意外错误: {e}", exc_info=True)
+                return [{"error": f"An unexpected error occurred: {e}"}]
 
-        @self.mcp_server.tool()
-        async def get_database_stats() -> Dict[str, Any]:
-            """获取数据库统计信息"""
-            # 生成请求ID并记录请求
-            request_id = str(uuid.uuid4())[:8]
-            self.logger.info(f"🔧 [请求 {request_id}] 工具: get_database_stats")
-            self.logger.info(f"📥 [请求 {request_id}] 参数: 无")
+    async def initialize(self):
+        """异步初始化服务器资源"""
+        self.logger.info("🚀 服务器正在初始化...")
+        # 1. 初始化数据库连接池
+        self.logger.info(f"🔌 正在连接数据库: {self.db_url}")
+        if not self.db_url:
+            raise ValueError("数据库URL不能为空")
             
-            start_time = time.time()
-            
-            try:
-                self.logger.info(f"⚙️  [处理 {request_id}] 正在执行工具: get_database_stats")
-                
-                if not self.db_pool:
-                    error_result = {"error": "Database not available"}
-                    
-                    # 记录错误响应
-                    execution_time = time.time() - start_time
-                    self.logger.error(f"❌ [响应 {request_id}] 工具: get_database_stats - 数据库不可用")
-                    self.logger.error(f"⏱️  [响应 {request_id}] 执行耗时: {execution_time:.3f}秒")
-                    self.logger.error(f"📤 [响应 {request_id}] 返回结果: {error_result}")
-                    
-                    return error_result
-                
-                with self.db_pool.connection() as conn:
-                    with conn.cursor() as cur:
-                        # 获取正确的表名
-                        try:
-                            cur.execute(sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(self.actual_table_name)))
-                            total_count = cur.fetchone()
-                            count = total_count[0] if total_count else 0
-                            
-                            cur.execute(sql.SQL("SELECT COUNT(DISTINCT filename) FROM {}").format(sql.Identifier(self.actual_table_name)))
-                            file_count_result = cur.fetchone()
-                            file_count = file_count_result[0] if file_count_result else 0
-                            
-                            result = {
-                                "table_name": self.actual_table_name,
-                                "total_records": count,
-                                "unique_files": file_count,
-                                "table_exists": True
-                            }
-                            
-                            # 记录成功响应
-                            execution_time = time.time() - start_time
-                            self.logger.info(f"✅ [响应 {request_id}] 工具: get_database_stats - 执行成功")
-                            self.logger.info(f"⏱️  [响应 {request_id}] 执行耗时: {execution_time:.3f}秒")
-                            self.logger.info(f"📤 [响应 {request_id}] 数据库统计: {count} 条记录, {file_count} 个文件")
-                            
-                            return result
-                            
-                        except Exception as e:
-                            if "does not exist" in str(e):
-                                result = {
-                                    "table_name": self.actual_table_name,
-                                    "table_exists": False,
-                                    "message": "表不存在，请先运行初始化流程"
-                                }
-                                
-                                # 记录警告响应
-                                execution_time = time.time() - start_time
-                                self.logger.warning(f"⚠️  [响应 {request_id}] 工具: get_database_stats - 表不存在")
-                                self.logger.warning(f"⏱️  [响应 {request_id}] 执行耗时: {execution_time:.3f}秒")
-                                self.logger.warning(f"📤 [响应 {request_id}] 返回结果: {result}")
-                                
-                                return result
-                            else:
-                                raise e
-                                
-            except Exception as e:
-                # 记录错误响应
-                execution_time = time.time() - start_time
-                self.logger.error(f"❌ [响应 {request_id}] 工具: get_database_stats - 执行失败")
-                self.logger.error(f"⏱️  [响应 {request_id}] 执行耗时: {execution_time:.3f}秒")
-                self.logger.error(f"🚨 [响应 {request_id}] 错误信息: {str(e)}")
-                
-                error_result = {"error": f"Database query failed: {str(e)}"}
-                return error_result
-
-        @self.mcp_server.tool()
-        async def cli_list_flows(app_target: Optional[str] = None) -> Dict[str, Any]:
-            """列出所有flows"""
-            # 生成请求ID并记录请求
-            request_id = str(uuid.uuid4())[:8]
-            self.logger.info(f"🔧 [请求 {request_id}] 工具: cli_list_flows")
-            self.logger.info(f"📥 [请求 {request_id}] 参数: app_target={app_target}")
-            
-            start_time = time.time()
-            
-            try:
-                self.logger.info(f"⚙️  [处理 {request_id}] 正在执行工具: cli_list_flows")
-                
-                from cocoindex.setup import flow_names_with_setup
-                
-                persisted_flow_names = flow_names_with_setup()
-                result = {"persisted_flows": persisted_flow_names}
-                
-                if app_target:
-                    app_ref = _get_app_ref_from_specifier(app_target)
-                    _load_user_app(app_ref)
-                    
-                    current_flow_names = list(flow.flow_names())
-                    result["current_flows"] = current_flow_names
-                    result["app_target"] = [str(app_ref)]
-                    
-                    persisted_set = set(persisted_flow_names)
-                    missing_setup = [name for name in current_flow_names if name not in persisted_set]
-                    result["missing_setup"] = missing_setup
-                
-                # 记录成功响应
-                execution_time = time.time() - start_time
-                self.logger.info(f"✅ [响应 {request_id}] 工具: cli_list_flows - 执行成功")
-                self.logger.info(f"⏱️  [响应 {request_id}] 执行耗时: {execution_time:.3f}秒")
-                
-                result_str = str(result)
-                if len(result_str) > 500:
-                    result_preview = result_str[:500] + "... (结果被截断)"
-                else:
-                    result_preview = result_str
-                self.logger.info(f"📤 [响应 {request_id}] 返回结果: {result_preview}")
-                
-                return result
-                
-            except Exception as e:
-                # 记录错误响应
-                execution_time = time.time() - start_time
-                self.logger.error(f"❌ [响应 {request_id}] 工具: cli_list_flows - 执行失败")
-                self.logger.error(f"⏱️  [响应 {request_id}] 执行耗时: {execution_time:.3f}秒")
-                self.logger.error(f"🚨 [响应 {request_id}] 错误信息: {str(e)}")
-                
-                error_result = {"error": str(e)}
-                return error_result
-
-        # 设置资源
-        @self.mcp_server.resource("cocoindex://flows")
-        async def get_flows():
-            """获取可用的CocoIndex flows"""
-            try:
-                current_flows = list(flow.flow_names())
-                return {"flows": current_flows}
-            except Exception as e:
-                return {"error": str(e), "flows": []}
-
-        @self.mcp_server.resource("cocoindex://schema")
-        async def get_schema():
-            """获取流程架构信息"""
-            return {"message": "Schema information would be here"}
-
-    async def test_connection(self) -> Dict[str, Any]:
-        """测试CocoIndex连接和服务器状态（用于测试模式）"""
-        status = {
-            "cocoindex_initialized": self._initialized,
-            "database_connected": bool(self.db_pool),
-            "flow_name": self.flow_name
-        }
-        
-        # 测试数据库连接
-        if self.db_pool:
-            try:
-                with self.db_pool.connection() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute("SELECT 1")
-                        result = cur.fetchone()
-                        status["database_test"] = "SUCCESS" if result else "FAILED"
-            except Exception as e:
-                status["database_test"] = f"ERROR: {str(e)}"
-        else:
-            status["database_test"] = "NO_POOL"
-        
-        # 检查可用的flows
         try:
-            current_flows = list(flow.flow_names())
-            status["available_flows"] = current_flows
+            self.db_pool = psycopg_pool.AsyncConnectionPool(self.db_url, min_size=5, max_size=20, open=True)  # type: ignore
+            # 预热连接池
+            if self.db_pool:
+                async with self.db_pool.connection() as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute("SELECT 1;")
+                        self.logger.info("✅ 数据库连接池初始化成功")
         except Exception as e:
-            status["available_flows"] = f"ERROR: {str(e)}"
-        
-        return status
+            self.logger.error(f"❌ 数据库连接失败: {e}", exc_info=True)
+            # 连接失败是致命错误，直接退出
+            raise
 
-    def run_stdio(self):
-        """运行stdio传输"""
-        self.logger.info("🔌 启动 MCP 服务器（stdio 传输）")
-        self.mcp_server.run('stdio')
+        # 2. 初始化代码搜索引擎
+        if self.db_pool:
+            self.search_engine = ImprovedCodeSearch(
+                db_pool=self.db_pool,
+                table_name=self.table_name,
+                logger=self.logger,
+                flow_name=self.flow_name,
+            )
+            await self.search_engine.initialize_table_name()
+            self.logger.info(f"✅ 代码搜索引擎已准备就绪 (操作表: {self.search_engine.actual_table_name})")
+        else:
+            self.logger.error("❌ 数据库连接池未初始化，无法创建搜索引擎。")
 
-    def run_sse(self):
-        """运行Streamable HTTP传输"""
-        self.logger.info(f"🚀 启动 MCP Streamable HTTP 服务器: http://{self.host}:{self.port}")
-        self.logger.info(f"📡 消息端点: http://{self.host}:{self.port}/message")
-        self.logger.info(f"💚 健康检查: http://{self.host}:{self.port}/health")
-        self.logger.info(f"📋 传输方式: streamable-http (FastMCP)")
-        self.logger.info("🎯 MCP 服务器准备就绪，等待客户端请求...")
-        self.mcp_server.run(transport="sse", host=self.host, port=self.port)
+        # 3. 优化模糊搜索（确保在 search_engine 初始化之后）
+        try:
+            await self._ensure_fuzzy_search_index()
+        except Exception as e:
+            self.logger.error(f"⚠️ 模糊搜索索引优化失败: {e}", exc_info=True)
 
-def main_sync():
+        # 4. 预加载语义搜索模型，避免首次请求延迟
+        try:
+            self.logger.info("⏳ 正在预热语义搜索模型 (首次启动可能需要下载)...")
+            loop = asyncio.get_event_loop()
+            # 在线程池中执行同步的加载函数，避免阻塞事件循环
+            async with PerformanceMonitor("预加载SentenceTransformer", self.logger, "startup") as monitor:
+                await loop.run_in_executor(
+                    None,  # 使用默认的 ThreadPoolExecutor
+                    get_shared_sentence_transformer
+                )
+        except Exception as e:
+            self.logger.error(f"❌ 预加载 SentenceTransformer 模型失败: {e}", exc_info=True)
+            # 这不是致命错误，服务器可以继续运行，但首次语义搜索会很慢
+
+        self.logger.info("🎉 服务器初始化完成，随时可以接收请求")
+
+    async def cleanup(self):
+        """清理资源，在服务器关闭时调用"""
+        self.logger.info("👋 服务器正在关闭，清理资源...")
+        if self.db_pool:
+            await self.db_pool.close()
+            self.logger.info("✅ 数据库连接池已关闭")
+
+    async def _ensure_fuzzy_search_index(self):
+        """检查并创建用于模糊搜索的pg_trgm GIN索引"""
+        if self.search_engine and self.search_engine.actual_table_name and self.db_pool:
+            self.logger.info("🔧 正在检查并创建模糊搜索优化索引 (pg_trgm)...")
+            table_to_index = self.search_engine.actual_table_name
+
+            async with self.db_pool.connection() as conn:
+                async with conn.cursor() as cur:
+                    # 1. 启用 pg_trgm 扩展
+                    await cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
+                    self.logger.info("✅ pg_trgm 扩展已启用")
+
+                    # 2. 检查表是否存在
+                    await cur.execute(
+                        "SELECT 1 FROM information_schema.tables WHERE table_name = %s",
+                        (table_to_index,)
+                    )
+                    table_exists = await cur.fetchone()
+                    
+                    if not table_exists:
+                        self.logger.warning(f"⚠️ 表 '{table_to_index}' 不存在，跳过创建索引")
+                        return
+
+                    # 3. 在 code 列上创建 GIN 索引
+                    # 清理表名中的特殊字符以生成有效的索引名
+                    clean_table_name = table_to_index.replace('__', '_').replace('-', '_')
+                    index_name = f"idx_gin_code_trgm_{clean_table_name}"
+                    
+                    table_identifier = sql.Identifier(table_to_index)
+
+                    try:
+                        await cur.execute(sql.SQL("""
+                            CREATE INDEX IF NOT EXISTS {index_name} ON {table_name} USING gin (code gin_trgm_ops);
+                        """).format(
+                            index_name=sql.Identifier(index_name),
+                            table_name=table_identifier
+                        ))
+                        self.logger.info(f"✅ 在 '{table_to_index}' 表上成功创建或验证了 GIN 索引 '{index_name}'")
+                    except Exception as index_error:
+                        # 如果索引创建失败，记录警告但不中断服务器启动
+                        self.logger.warning(f"⚠️ 在 '{table_to_index}' 上创建 GIN 索引失败: {index_error}")
+                        self.logger.info("📝 模糊搜索功能仍可使用，但性能可能较慢")
+        else:
+            self.logger.warning("⚠️ 未能获取到有效的表名或数据库连接池，跳过模糊搜索索引的创建")
+
+    async def run(self, transport: str = "stdio"):
+        """运行服务器"""
+        await self.initialize()
+        self.logger.info(f"🚀 启动 FastMCP 服务器: {transport} 模式")
+        if transport == "sse":
+            await self.mcp.run_sse_async(port=self.port, host=self.host)
+        else:
+            await self.mcp.run_stdio_async()
+
+def main():
     """同步主入口函数，用于FastMCP运行"""
     parser = argparse.ArgumentParser(description="CocoIndex MCP Server")
-    parser.add_argument("--flow", default="gmzz", help="CocoIndex flow name")
-    parser.add_argument("--log-level", default="INFO", help="Logging level")
-    parser.add_argument("--transport", choices=["stdio", "sse"], default="sse", 
-                       help="Transport type (stdio or sse)")
-    parser.add_argument("--host", default="0.0.0.0", help="Server host")
-    parser.add_argument("--port", type=int, default=2010, help="Server port")
-    parser.add_argument("--test", action="store_true", help="Run test mode")
-    
-    args = parser.parse_args()
-    
-    # 设置日志
-    log_formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
+    parser.add_argument("--flow-name", default="gmzz", help="要服务的Flow的名称")
+    parser.add_argument("--host", default="0.0.0.0", help="服务器主机地址")
+    parser.add_argument("--port", type=int, default=2010, help="服务器端口")
+    parser.add_argument("--db-url", default="postgresql://cocoindex:cocoindex@localhost/cocoindex", help="数据库连接URL")
+    parser.add_argument("--table-name", default="c7_client_code_embeddings", help="代码嵌入表名")
+    parser.add_argument("--transport", default="sse", choices=["sse", "stdio"], help="MCP传输方式")
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="日志记录级别"
     )
-    
-    # 创建文件处理器
-    file_handler = logging.FileHandler("cocoindex_mcp.log", encoding='utf-8')
-    file_handler.setLevel(getattr(logging, args.log_level.upper()))
-    file_handler.setFormatter(log_formatter)
-    
-    # 创建控制台处理器
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(getattr(logging, args.log_level.upper()))
-    console_handler.setFormatter(log_formatter)
-    
-    # 配置根日志记录器
-    root_logger = logging.getLogger()
-    root_logger.setLevel(getattr(logging, args.log_level.upper()))
-    root_logger.addHandler(file_handler)
-    root_logger.addHandler(console_handler)
-    
-    # 设置环境变量
-    db_url = os.environ.get("COCOINDEX_DATABASE_URL")
-    if not db_url:
-        # 设置基本的数据库URL，连接池参数将在创建ConnectionPool时直接配置
-        db_url = "postgresql://cocoindex:cocoindex@localhost/cocoindex"
-        os.environ["COCOINDEX_DATABASE_URL"] = db_url
-        logging.info(f"COCOINDEX_DATABASE_URL 未设置, 使用默认值: {db_url}")
-    
-    try:
-        # 创建MCP服务器
-        server = CocoIndexMcpServer(
-            flow_name=args.flow,
-            host=args.host,
-            port=args.port,
-            db_url=db_url,
-            table_name=os.environ.get("COCOINDEX_DATABASE_TABLE", "c7_client_code_embeddings")
-        )
-        
-        if args.test:
-            # 测试模式需要异步初始化
-            async def test_async():
-                await server.initialize()
-                status = await server.test_connection()
-                print("🔍 CocoIndex MCP Server Test Results:")
-                print(json.dumps(status, indent=2))
-            
-            asyncio.run(test_async())
-        elif args.transport == "sse":
-            # 先同步初始化CocoIndex部分
-            # 然后运行FastMCP服务器（它会处理自己的事件循环）
-            async def init_async():
-                await server.initialize()
-            
-            asyncio.run(init_async())
-            
-            # 现在运行FastMCP服务器（同步方式）
-            server.run_sse()
-        else:
-            # stdio模式
-            async def init_and_run():
-                await server.initialize()
-                server.run_stdio()
-            
-            asyncio.run(init_and_run())
-            
-    except KeyboardInterrupt:
-        logging.info("🛑 服务器被用户停止")
-    except Exception as e:
-        import traceback
-        logging.error(f"❌ 服务器错误: {e}, {traceback.format_exc()}")
-        sys.exit(1)
 
+    args = parser.parse_args()
+
+    server = CocoIndexMcpServer(
+        flow_name=args.flow_name,
+        host=args.host,
+        port=args.port,
+        db_url=args.db_url,
+        table_name=args.table_name,
+        log_level=args.log_level,
+    )
+
+    try:
+        asyncio.run(server.run(transport=args.transport))
+    except KeyboardInterrupt:
+        print("\n👋 服务器已停止")
+    finally:
+        asyncio.run(server.cleanup())
 
 if __name__ == "__main__":
-    main_sync() 
+    main() 
