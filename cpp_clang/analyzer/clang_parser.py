@@ -65,6 +65,8 @@ class ClangParser:
     def set_working_directory(self, working_dir: str):
         """设置clang执行的工作目录"""
         self._working_directory = working_dir
+        logger = get_logger()
+        logger.info(f"设置clang工作目录: {working_dir}")
         if self.console:
             self.console.print(f"✓ 设置clang工作目录: {working_dir}", style="green")
     
@@ -231,6 +233,7 @@ class ClangParser:
     def _parse_compile_commands(self, commands_data: List[Dict]) -> Dict[str, Dict[str, Any]]:
         """解析compile_commands.json数据，支持UE的@rsp文件"""
         file_commands = {}
+        logger = get_logger()
         
         for entry in commands_data:
             file_path = entry.get('file', '')
@@ -239,6 +242,11 @@ class ClangParser:
             directory = entry.get('directory', '')
             
             if not file_path:
+                continue
+            
+            # 跳过所有 *.gen.cpp 文件
+            if file_path.endswith('.gen.cpp'):
+                logger.info(f"跳过生成的文件: {file_path}")
                 continue
             
             # 临时保存当前目录，用于解析rsp相对路径
@@ -590,10 +598,24 @@ class ClangParser:
                    task_id: Optional[TaskID] = None) -> List[ParsedFile]:
         """解析多个文件"""
         results = []
+        total_files = len(file_paths)
+        logger = get_logger()
+        
+        # 输出总体文件数目
+        if self.console:
+            self.console.print(f"\n[bold blue]开始解析C++文件，总计: {total_files} 个文件[/bold blue]")
+        logger.info(f"开始解析C++文件，总计: {total_files} 个文件")
         
         for i, file_path in enumerate(file_paths):
+            current_index = i + 1
+            
             if progress and task_id:
                 progress.update(task_id, completed=i)
+            
+            # 输出当前进度
+            if self.console:
+                self.console.print(f"\n[bold cyan]解析进度: {current_index}/{total_files}[/bold cyan]")
+            logger.info(f"解析进度: {current_index}/{total_files}")
             
             # 获取文件特定的编译参数和工作目录
             file_args = self._get_file_compile_args(file_path)
@@ -604,13 +626,20 @@ class ClangParser:
             # 输出解析状态
             if parsed_file.success:
                 if self.console:
-                    self.console.print(f"✓ {file_path}", style="green")
+                    self.console.print(f"✓ [{current_index}/{total_files}] {file_path}", style="green")
+                logger.info(f"解析成功 [{current_index}/{total_files}]: {file_path}")
             else:
                 if self.console:
-                    self.console.print(f"✗ {file_path}: {len(parsed_file.diagnostics)} issues", style="red")
+                    self.console.print(f"✗ [{current_index}/{total_files}] {file_path}: {len(parsed_file.diagnostics)} issues", style="red")
+                logger.error(f"解析失败 [{current_index}/{total_files}]: {file_path}")
         
         if progress and task_id:
             progress.update(task_id, completed=len(file_paths))
+        
+        # 输出完成信息
+        if self.console:
+            self.console.print(f"\n[bold green]文件解析完成，总计处理: {total_files} 个文件[/bold green]")
+        logger.info(f"文件解析完成，总计处理: {total_files} 个文件")
         
         return results
     
@@ -636,6 +665,8 @@ class ClangParser:
                 os.chdir(target_directory)
                 if self.console:
                     self.console.print(f"🔀 切换工作目录到: {target_directory}", style="dim cyan")
+                logger = get_logger()
+                logger.info(f"切换工作目录到: {target_directory}")
                 
             try:    
                 tu = self.index.parse(
@@ -679,6 +710,8 @@ class ClangParser:
                     
                     if self.console:
                         self.console.print(f"  {severity_name}: {diag.spelling}", style="red" if diag.severity >= clang.Diagnostic.Error else "yellow")
+                    logger = get_logger()
+                    logger.warning(f"  {severity_name}: {diag.spelling}")
                     
                     if diag.severity >= clang.Diagnostic.Error:
                         error_count += 1

@@ -1,8 +1,80 @@
 [
   {
-    "file": "D:/c7_i9_EngineDev/Client/Plugins/KGCore/Intermediate/Build/Win64/UnrealEditor/Inc/KGCore/UHT/KGCurveUtil.gen.cpp",
-    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"D:/c7_i9_EngineDev/Client/Plugins/KGCore/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCore/KGCurveUtil.gen.cpp.obj.rsp\"",
-    "directory": "D:/c7_i9_EngineDev/Engine/Source",
-    "output": "D:/c7_i9_EngineDev/Client/Plugins/KGCore/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCore/KGCurveUtil.gen.cpp.obj"
+    "file": "N:/c7_enginedev/Client/Intermediate/Build/Win64/UnrealEditor/Inc/C7Editor/UHT/AssetDeduplicateSettings.gen.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7Editor/AssetDeduplicateSettings.gen.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7Editor/AssetDeduplicateSettings.gen.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Intermediate/Build/Win64/UnrealEditor/Inc/C7Editor/UHT/C7LuaTemplateCreateWidget.gen.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7Editor/C7LuaTemplateCreateWidget.gen.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7Editor/C7LuaTemplateCreateWidget.gen.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Intermediate/Build/Win64/UnrealEditor/Inc/C7Editor/UHT/EditorTracker.gen.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7Editor/EditorTracker.gen.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7Editor/EditorTracker.gen.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Intermediate/Build/Win64/UnrealEditor/Inc/C7Editor/UHT/KGLuaTestGameInstance.gen.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7Editor/KGLuaTestGameInstance.gen.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7Editor/KGLuaTestGameInstance.gen.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Intermediate/Build/Win64/UnrealEditor/Inc/C7Editor/UHT/MaterialReplaceBlueprintLibrary.gen.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7Editor/MaterialReplaceBlueprintLibrary.gen.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7Editor/MaterialReplaceBlueprintLibrary.gen.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Intermediate/Build/Win64/UnrealEditor/Inc/C7Editor/UHT/UISpriteSheetHelper.gen.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7Editor/UISpriteSheetHelper.gen.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7Editor/UISpriteSheetHelper.gen.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Intermediate/Build/Win64/UnrealEditor/Inc/C7/UHT/AkAudioVolume.gen.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7/AkAudioVolume.gen.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7/AkAudioVolume.gen.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Intermediate/Build/Win64/UnrealEditor/Inc/C7/UHT/C7FunctionLibrary.gen.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7/C7FunctionLibrary.gen.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7/C7FunctionLibrary.gen.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Intermediate/Build/Win64/UnrealEditor/Inc/C7/UHT/C7LandscapeSplineActor.gen.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7/C7LandscapeSplineActor.gen.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7/C7LandscapeSplineActor.gen.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Intermediate/Build/Win64/UnrealEditor/Inc/C7/UHT/C7MapTagBase.gen.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7/C7MapTagBase.gen.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7/C7MapTagBase.gen.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Intermediate/Build/Win64/UnrealEditor/Inc/C7/UHT/C7MapTagEdgeWidget.gen.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7/C7MapTagEdgeWidget.gen.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7/C7MapTagEdgeWidget.gen.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Intermediate/Build/Win64/UnrealEditor/Inc/C7/UHT/C7MapTagLayer.gen.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7/C7MapTagLayer.gen.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7/C7MapTagLayer.gen.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCore/Intermediate/Build/Win64/UnrealEditor/Inc/KGCore/UHT/C7AkAudioVolume.gen.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCore/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCore/C7AkAudioVolume.gen.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCore/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCore/C7AkAudioVolume.gen.cpp.obj"
   }
-] 
+]
