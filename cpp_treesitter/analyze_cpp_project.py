@@ -217,7 +217,23 @@ def main():
         logger.info("开始执行完整分析...")
         print("🔍 正在执行两阶段分析...")
         logger.info("调用 analyze_and_export 方法...")
-        project = analyzer.analyze_and_export(args.output)
+        project = analyzer.analyze()
+        
+        # 调试：检查分析后的调用关系状态
+        debug_stats = analyzer.repo.get_statistics()
+        print(f"🔍 分析后调用关系调试:")
+        print(f"   get_statistics(): {debug_stats['call_relationships']}")
+        print(f"   call_relationships['calls_to']: {len(analyzer.repo.call_relationships['calls_to'])}")
+        
+        # 检查函数实体中的调用关系
+        functions = analyzer.repo.get_nodes_by_type('function')
+        functions_with_calls = sum(1 for f in functions if hasattr(f, 'calls_to') and f.calls_to)
+        total_calls = sum(len(f.calls_to) for f in functions if hasattr(f, 'calls_to') and f.calls_to)
+        print(f"   函数实体中有调用的函数数: {functions_with_calls}")
+        print(f"   函数实体中调用总数: {total_calls}")
+        
+        # 导出结果
+        analyzer.export_results(args.output)
         logger.info("analyze_and_export 方法执行完成")
 
         logger.info("=" * 80)

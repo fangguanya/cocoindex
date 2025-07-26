@@ -62,6 +62,8 @@ class CallRelationshipAnalyzer:
             called_usr_id = self._analyze_single_call_enhanced(call_node, function_usr_id)
             if called_usr_id and called_usr_id not in calls_to:
                 calls_to.append(called_usr_id)
+                # 🔧 修复：立即建立调用关系到全局存储库
+                self.repo.add_call_relationship(function_usr_id, called_usr_id)
                 self.resolved_calls_count += 1
         
         return calls_to

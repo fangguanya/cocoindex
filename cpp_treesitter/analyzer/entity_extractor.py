@@ -313,11 +313,10 @@ class EntityExtractor:
             body_node = node.child_by_field_name('body')
             if body_node:
                 self.logger.info(f"🔍 开始分析函数 {qualified_name} 的调用关系")
-                # 使用调用分析器分析函数调用，它会自动建立双向关系
+                # 使用调用分析器分析函数调用，它会自动建立双向关系到全局存储库
                 calls_to = self.call_analyzer.analyze_function_calls(node, usr, self.file_content)
-                # 注意：calls_to和called_by已经在analyze_function_calls过程中通过add_call_relationship建立
-                # 这里只需要确保function_obj的calls_to列表是最新的
-                function_obj.calls_to = calls_to
+                # 🔧 修复：调用关系现在已经通过add_call_relationship正确添加到存储库
+                # function_obj.calls_to会通过add_call_relationship自动同步更新
                 self.logger.info(f"✅ 函数 {qualified_name} 调用关系分析完成，发现 {len(calls_to)} 个调用")
             else:
                 self.logger.warning(f"⚠️ 函数 {qualified_name} 没有函数体，跳过调用关系分析")
@@ -414,7 +413,8 @@ class EntityExtractor:
         # 分析方法调用关系
         if method.code_content:
             calls_to = self.call_analyzer.analyze_function_calls(node, usr, self.file_content)
-            method.calls_to = calls_to
+            # 🔧 修复：调用关系现在已经通过add_call_relationship正确添加到存储库
+            # method.calls_to会通过add_call_relationship自动同步更新
         
         return method
 
@@ -828,7 +828,8 @@ class EntityExtractor:
         # 分析方法调用关系
         if method.code_content:
             calls_to = self.call_analyzer.analyze_function_calls(node, usr, self.file_content)
-            method.calls_to = calls_to
+            # 🔧 修复：调用关系现在已经通过add_call_relationship正确添加到存储库
+            # method.calls_to会通过add_call_relationship自动同步更新
         
         return method
 
