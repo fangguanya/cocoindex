@@ -208,12 +208,21 @@ class UnifiedFileFilter:
     
     def get_statistics(self) -> dict:
         """获取过滤统计信息"""
+        # 手动构建cache_info字典，避免_asdict()调用
+        cache_info = self.should_exclude.cache_info()
+        cache_dict = {
+            'hits': cache_info.hits,
+            'misses': cache_info.misses,
+            'maxsize': cache_info.maxsize,
+            'currsize': cache_info.currsize
+        }
+        
         return {
             'total_checks': self.total_checks,
             'excluded_count': self.excluded_count,
             'included_count': self.total_checks - self.excluded_count,
             'exclusion_rate': (self.excluded_count / max(self.total_checks, 1)) * 100,
-            'cache_info': self.should_exclude.cache_info()._asdict(),
+            'cache_info': cache_dict,
             'compiled_patterns': {
                 'dir_patterns_count': len(self.compiled_filter.dir_patterns),
                 'dir_names_count': len(self.compiled_filter.dir_names),

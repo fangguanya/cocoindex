@@ -12,12 +12,17 @@ Tree-sitter C++ Analyzer Main Module
 支持函数体文本提取功能和调用关系分析。
 """
 
+import os
 import time
 import json
+import gc
+import hashlib
+import psutil
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
+from contextlib import contextmanager
 
 from rich.console import Console
 from rich.progress import track, Progress
@@ -33,6 +38,7 @@ from .file_filter import UnifiedFileFilter, create_unreal_filter
 
 from pathlib import Path
 from typing import List, Dict, Any
+import tree_sitter
 from tree_sitter import Parser, Language
 import os
 
@@ -41,7 +47,8 @@ from .data_structures import Project, NodeRepository, Function, Class, Namespace
 
 # 尝试加载tree-sitter语言库
 try:
-    CPP_LANGUAGE = Language(os.path.join(os.path.dirname(__file__), '..', '..', 'grammars', 'languages.so'), 'cpp')
+    import tree_sitter_cpp
+    CPP_LANGUAGE = tree_sitter.Language(tree_sitter_cpp.language())
 except Exception as e:
     # 如果无法加载预编译的语言库，尝试从源码编译
     Logger.get_logger().warning(f"无法加载预编译的C++语言库: {e}")
@@ -55,11 +62,84 @@ except Exception as e:
         raise
 
 
+class PerformanceMonitor:
+    """性能监控器，用于跟踪分析过程的性能指标"""
+    
+    def __init__(self):
+        self.timers = {}
+        self.memory_tracker = {}
+        self.process = psutil.Process()
+        
+    @contextmanager
+    def timer(self, name: str):
+        """性能计时器上下文管理器"""
+        start_time = time.time()
+        start_memory = self.get_memory_usage()
+        
+        try:
+            yield
+        finally:
+            elapsed = time.time() - start_time
+            end_memory = self.get_memory_usage()
+            memory_delta = end_memory - start_memory
+            
+            self.timers[name] = {
+                'duration': elapsed,
+                'start_memory_mb': start_memory,
+                'end_memory_mb': end_memory,
+                'memory_delta_mb': memory_delta
+            }
+            
+            from .logger import Logger
+            logger = Logger.get_logger()
+            logger.info(f"⏱️  {name}: {elapsed:.2f}s, 内存: {end_memory:.1f}MB (+{memory_delta:+.1f}MB)")
+    
+    def get_memory_usage(self) -> float:
+        """获取当前内存使用量(MB)"""
+        return self.process.memory_info().rss / 1024 / 1024
+    
+    def log_memory_checkpoint(self, name: str):
+        """记录内存检查点"""
+        memory_mb = self.get_memory_usage()
+        self.memory_tracker[name] = memory_mb
+        
+        from .logger import Logger
+        logger = Logger.get_logger()
+        logger.info(f"📊 内存检查点 {name}: {memory_mb:.1f}MB")
+    
+    def force_gc(self, description: str = ""):
+        """强制垃圾回收并记录效果"""
+        before_mb = self.get_memory_usage()
+        gc.collect()
+        after_mb = self.get_memory_usage()
+        freed_mb = before_mb - after_mb
+        
+        from .logger import Logger
+        logger = Logger.get_logger()
+        if freed_mb > 1.0:  # 只有回收超过1MB才记录
+            logger.info(f"🗑️  垃圾回收{description}: 释放 {freed_mb:.1f}MB 内存")
+    
+    def get_performance_summary(self) -> Dict[str, Any]:
+        """获取性能摘要"""
+        total_time = sum(timer['duration'] for timer in self.timers.values())
+        peak_memory = max(timer['end_memory_mb'] for timer in self.timers.values()) if self.timers else 0
+        
+        return {
+            'total_analysis_time': total_time,
+            'peak_memory_mb': peak_memory,
+            'stage_timings': {name: timer['duration'] for name, timer in self.timers.items()},
+            'memory_checkpoints': self.memory_tracker
+        }
+
+
 class CppAnalyzer:
     def __init__(self, project_path: str):
         self.project_path = Path(project_path)
         self.project_name = self.project_path.name
         self.logger = Logger.get_logger()
+        
+        # 初始化性能监控器
+        self.performance_monitor = PerformanceMonitor()
         
         # 初始化tree-sitter解析器
         # 新版tree-sitter API: 在构造时直接传入language
@@ -159,7 +239,7 @@ class CppAnalyzer:
             return self.project
             
         except Exception as e:
-            self.logger.error(f"分析过程中发生错误: {e}", exc_info=True)
+            self.logger.error(f"分析过程中发生错误: {e}")
             raise
 
     def _scan_cpp_files(self) -> List[Path]:
@@ -463,10 +543,54 @@ class CppAnalyzer:
         self.logger.info(f"  - 分析摘要: {summary_output}")
 
     def analyze_and_export(self, output_dir: str = "analysis_results") -> Project:
-        """分析项目并导出结果的便捷方法"""
-        project = self.analyze()
-        self.export_results(output_dir)
-        return project 
+        """分析项目并导出结果的便捷方法，集成性能监控"""
+        overall_start = time.time()
+        self.performance_monitor.log_memory_checkpoint("分析开始")
+        
+        try:
+            # 执行分析
+            with self.performance_monitor.timer("项目分析"):
+                project = self.analyze()
+            
+            # 强制垃圾回收
+            self.performance_monitor.force_gc("分析完成后")
+            self.performance_monitor.log_memory_checkpoint("分析完成")
+            
+            # 导出结果
+            with self.performance_monitor.timer("结果导出"):
+                self.export_results(output_dir)
+            
+            # 最终垃圾回收
+            self.performance_monitor.force_gc("导出完成后")
+            self.performance_monitor.log_memory_checkpoint("导出完成")
+            
+            # 输出性能摘要
+            total_time = time.time() - overall_start
+            self.logger.info("=" * 60)
+            self.logger.info("📊 性能分析摘要:")
+            
+            summary = self.performance_monitor.get_performance_summary()
+            self.logger.info(f"   - 总耗时: {total_time:.2f}秒")
+            self.logger.info(f"   - 峰值内存: {summary['peak_memory_mb']:.1f}MB")
+            
+            for stage, duration in summary['stage_timings'].items():
+                percentage = (duration / total_time) * 100
+                self.logger.info(f"   - {stage}: {duration:.2f}秒 ({percentage:.1f}%)")
+            
+            # 缓存性能统计
+            cache_stats = self.get_cache_statistics()
+            if cache_stats['total_operations'] > 0:
+                self.logger.info(f"   - AST缓存命中率: {cache_stats['hit_rate']:.1f}%")
+                saved_time = cache_stats['cache_hits'] * 0.1  # 假设每次缓存命中节省0.1秒
+                self.logger.info(f"   - 预估节省时间: {saved_time:.2f}秒")
+            
+            self.logger.info("=" * 60)
+            
+            return project
+            
+        except Exception as e:
+            self.logger.error(f"分析过程出错: {e}")
+            raise 
 
     def clear_ast_cache(self):
         """清理AST缓存以释放内存"""
@@ -482,6 +606,43 @@ class CppAnalyzer:
             "cache_misses": self.cache_misses,
             "total_operations": total_operations,
             "hit_rate": (self.cache_hits / total_operations * 100) if total_operations > 0 else 0,
-            "cached_files": len(self.ast_cache),
-            "estimated_time_saved_seconds": self.cache_hits * 0.1
-        } 
+            "estimated_time_saved": self.cache_hits * 0.1  # 假设每次命中节省0.1秒
+        }
+
+    def _get_file_hash(self, file_path: Path) -> str:
+        """计算文件的MD5哈希值，用于缓存键"""
+        import hashlib
+        try:
+            with open(file_path, 'rb') as f:
+                return hashlib.md5(f.read()).hexdigest()
+        except Exception:
+            return str(file_path.stat().st_mtime)  # 降级到修改时间
+    
+    def _get_cached_ast(self, file_path: Path) -> Optional[Any]:
+        """从缓存获取AST，基于文件哈希检查是否有效"""
+        file_hash = self._get_file_hash(file_path)
+        cache_key = str(file_path)
+        
+        if cache_key in self.ast_cache:
+            cached_tree, cached_hash = self.ast_cache[cache_key]
+            if cached_hash == file_hash:
+                self.cache_hits += 1
+                return cached_tree
+            else:
+                # 文件已更改，移除旧缓存
+                del self.ast_cache[cache_key]
+        
+        self.cache_misses += 1
+        return None
+    
+    def _cache_ast(self, file_path: Path, tree: Any):
+        """缓存AST，同时存储文件哈希"""
+        file_hash = self._get_file_hash(file_path)
+        cache_key = str(file_path)
+        self.ast_cache[cache_key] = (tree, file_hash)
+        
+        # 限制缓存大小，避免内存溢出
+        if len(self.ast_cache) > 1000:  # 最多缓存1000个文件
+            # 移除最旧的缓存项
+            oldest_key = next(iter(self.ast_cache))
+            del self.ast_cache[oldest_key] 

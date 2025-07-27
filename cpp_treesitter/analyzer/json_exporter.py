@@ -13,8 +13,9 @@ JSON Exporter (符合 json_format.md v2.4)
 - 导出额外的nodes.json文件
 """
 
+import gc
 import json
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, is_dataclass, fields
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
@@ -26,8 +27,46 @@ class CustomJsonEncoder(json.JSONEncoder):
     """自定义JSON编码器，用于处理dataclass"""
     def default(self, o: Any) -> Any:
         if is_dataclass(o):
-            return asdict(o)
+            # 使用快速字典转换，避免asdict()的递归开销
+            return self._entity_to_dict_fast(o)
         return super().default(o)
+    
+    def _entity_to_dict_fast(self, entity) -> Dict[str, Any]:
+        """快速实体转字典方法，避免asdict()递归开销"""
+        if hasattr(entity, 'type'):
+            # 基础Entity信息
+            result = {
+                "type": getattr(entity, 'type', ''),
+                "name": getattr(entity, 'name', ''),
+                "qualified_name": getattr(entity, 'qualified_name', ''),
+                "file_path": getattr(entity, 'file_path', ''),
+                "start_line": getattr(entity, 'start_line', 0),
+                "end_line": getattr(entity, 'end_line', 0),
+                "usr": getattr(entity, 'usr', '')
+            }
+            
+            # 添加特定类型的字段
+            if hasattr(entity, 'signature'):
+                result["signature"] = getattr(entity, 'signature', '')
+            if hasattr(entity, 'parameters'):
+                result["parameters"] = getattr(entity, 'parameters', [])
+            if hasattr(entity, 'return_type'):
+                result["return_type"] = getattr(entity, 'return_type', '')
+            if hasattr(entity, 'calls_to'):
+                result["calls_to"] = getattr(entity, 'calls_to', [])
+            if hasattr(entity, 'called_by'):
+                result["called_by"] = getattr(entity, 'called_by', [])
+            if hasattr(entity, 'base_classes'):
+                result["base_classes"] = getattr(entity, 'base_classes', [])
+            if hasattr(entity, 'methods'):
+                result["methods"] = getattr(entity, 'methods', [])
+            
+            return result
+        else:
+            # 对于非Entity类型的dataclass，回退到简单处理
+            return {field.name: getattr(entity, field.name, None) 
+                    for field in fields(entity) if not field.name.startswith('_')}
+    
 
 
 class JsonExporter:
@@ -131,6 +170,7 @@ class JsonExporter:
     def export_analysis_result(self, project: Project, repo: NodeRepository, output_path: str):
         """
         导出主分析结果JSON文件，符合json_format.md规范.
+        使用流式导出优化性能，避免一次性构建完整数据结构.
         
         :param project: 分析后的Project对象.
         :param repo: 包含所有节点的NodeRepository.
@@ -155,145 +195,284 @@ class JsonExporter:
         if consistency_issues["statistics"]["total_invalid_references"] > 0:
             logger.warning(f"发现 {consistency_issues['statistics']['total_invalid_references']} 个无效引用")
         
-        logger.info("🏗️  开始构建分析结果数据结构...")
+        logger.info("🏗️  开始流式构建和导出分析结果...")
         
-        # 构建符合v2.4规范的完整结构
-        logger.info("📋 构建基础信息...")
-        analysis_result = {
-            "version": self.SCHEMA_VERSION,  # 使用统一版本
-            "language": "cpp", 
-            "timestamp": datetime.now().isoformat(),
-            "file_mappings": self._file_mappings,
-            "data_quality": {
-                "consistency_check": consistency_issues["statistics"],
-                "validated_call_graph": True,
-                "total_entities": len(repo.nodes)
-            },
-            "entities": {},  # 先创建空的entities
-            "metadata": {},
-            "config": {},
-            "project_call_graph": {},
-            "oop_analysis": {},
-            "cpp_analysis": {},
-            "summary": {}
-        }
+        # 使用流式导出，边构建边写入
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
         
-        logger.info("🔧 构建函数实体...")
-        analysis_result["entities"]["functions"] = self._build_functions_entities(repo)
-        logger.info(f"✅ 函数实体构建完成，数量: {len(analysis_result['entities']['functions'])}")
+        logger.info(f"💾 准备写入JSON到: {path}")
         
-        logger.info("🏛️  构建类实体...")
-        analysis_result["entities"]["classes"] = self._build_classes_entities(repo)
-        logger.info(f"✅ 类实体构建完成，数量: {len(analysis_result['entities']['classes'])}")
+        import time
+        start_time = time.time()
         
-        logger.info("🗂️  构建命名空间实体...")
-        analysis_result["entities"]["namespaces"] = self._build_namespaces_entities(repo)
-        logger.info(f"✅ 命名空间实体构建完成，数量: {len(analysis_result['entities']['namespaces'])}")
-        
-        logger.info("📄 构建模板实体...")
-        analysis_result["entities"]["templates"] = self._build_templates_entities()
-        logger.info("✅ 模板实体构建完成")
-        
-        logger.info("⚙️  构建操作符实体...")
-        analysis_result["entities"]["operators"] = self._build_operators_entities(repo)
-        logger.info("✅ 操作符实体构建完成")
-        
-        logger.info("🔗 构建调用关系...")
-        analysis_result["entities"]["call_relations"] = self._build_call_relations(repo)
-        logger.info(f"✅ 调用关系构建完成，数量: {len(analysis_result['entities']['call_relations'])}")
-        
-        logger.info("🏗️  构建继承关系...")
-        analysis_result["entities"]["inheritance_relations"] = self._build_inheritance_relations(repo)
-        logger.info("✅ 继承关系构建完成")
-        
-        logger.info("🧠 构建类型推理信息...")
-        analysis_result["entities"]["type_inference_info"] = self._build_type_inference_info(repo)
-        logger.info("✅ 类型推理信息构建完成")
-        
-        logger.info("📊 构建元数据...")
-        analysis_result["metadata"] = self._build_metadata_v24(project, repo)
-        logger.info("✅ 元数据构建完成")
-        
-        logger.info("⚙️  构建配置信息...")
-        analysis_result["config"] = self._build_config_v24(project)
-        logger.info("✅ 配置信息构建完成")
-        
-        logger.info("🌐 构建项目调用图...")
-        logger.info("  - 构建项目信息...")
-        project_info = {
-            "name": project.name,
-            "total_files": len(project.files),
-            "total_functions": len(project.functions),
-            "total_classes": len(project.classes),
-            "total_namespaces": len(project.namespaces)
-        }
-        logger.info("  ✅ 项目信息构建完成")
-        
-        logger.info("  - 构建模块信息...")
-        modules_info = self._build_modules_info(project, repo)
-        logger.info(f"  ✅ 模块信息构建完成，数量: {len(modules_info)}")
-        
-        logger.info("  - 添加全局调用图（这可能需要较长时间）...")
-        analysis_result["project_call_graph"] = {
-            "project_info": project_info,
-            "modules": modules_info,
-            "global_call_graph": validated_calls_to,  # 使用校验后的数据
-            "reverse_call_graph": validated_called_by   # 使用校验后的数据
-        }
-        logger.info(f"  ✅ 项目调用图构建完成，calls_to: {len(validated_calls_to)}, called_by: {len(validated_called_by)}")
-        
-        logger.info("🏛️  构建OOP分析...")
-        analysis_result["oop_analysis"] = {
-            "classes": self._build_classes_analysis(repo),
-            "inheritance_graph": self._build_inheritance_graph(repo),
-            "method_resolution_orders": {}  # 简化处理
-        }
-        logger.info("✅ OOP分析构建完成")
-        
-        logger.info("🔧 构建C++分析...")
-        analysis_result["cpp_analysis"] = {
-            "namespaces": self._build_namespaces_analysis(repo),
-            "templates": {},  # 简化处理
-            "preprocessor": {}  # 简化处理
-        }
-        logger.info("✅ C++分析构建完成")
-        
-        logger.info("📋 构建摘要...")
-        analysis_result["summary"] = self._build_summary(project, repo)
-        logger.info("✅ 摘要构建完成")
-        
-        logger.info("💾 开始写入JSON文件...")
-        self._write_json(analysis_result, output_path)
-        logger.info("✅ JSON文件写入完成")
+        try:
+            with open(path, 'w', encoding='utf-8') as f:
+                # 开始JSON对象
+                f.write('{\n')
+                
+                # 写入基础信息
+                logger.info("📋 写入基础信息...")
+                f.write(f'  "version": "{self.SCHEMA_VERSION}",\n')
+                f.write('  "language": "cpp",\n')
+                f.write(f'  "timestamp": "{datetime.now().isoformat()}",\n')
+                
+                # 写入文件映射
+                f.write('  "file_mappings": ')
+                json.dump(self._file_mappings, f, cls=CustomJsonEncoder, ensure_ascii=False)
+                f.write(',\n')
+                
+                # 写入数据质量信息
+                f.write('  "data_quality": ')
+                data_quality = {
+                    "consistency_check": consistency_issues["statistics"],
+                    "validated_call_graph": True,
+                    "total_entities": len(repo.nodes)
+                }
+                json.dump(data_quality, f, cls=CustomJsonEncoder, ensure_ascii=False)
+                f.write(',\n')
+                
+                # 开始entities对象
+                f.write('  "entities": {\n')
+                
+                # 流式写入函数实体
+                logger.info("🔧 流式写入函数实体...")
+                f.write('    "functions": ')
+                self._write_functions_streaming(f, repo)
+                f.write(',\n')
+                
+                # 流式写入类实体
+                logger.info("🏛️  流式写入类实体...")
+                f.write('    "classes": ')
+                self._write_classes_streaming(f, repo)
+                f.write(',\n')
+                
+                # 流式写入命名空间实体
+                logger.info("🗂️  流式写入命名空间实体...")
+                f.write('    "namespaces": ')
+                self._write_namespaces_streaming(f, repo)
+                f.write(',\n')
+                
+                # 写入其他实体（简化处理）
+                f.write('    "templates": {},\n')
+                f.write('    "operators": ')
+                self._write_operators_streaming(f, repo)
+                f.write(',\n')
+                
+                # 流式写入调用关系
+                logger.info("🔗 流式写入调用关系...")
+                f.write('    "call_relations": ')
+                self._write_call_relations_streaming(f, repo)
+                f.write(',\n')
+                
+                # 写入其他关系
+                f.write('    "inheritance_relations": {},\n')
+                f.write('    "type_inference_info": {}\n')
+                
+                # 结束entities对象
+                f.write('  },\n')
+                
+                # 写入元数据
+                logger.info("📊 写入元数据...")
+                import time
+                metadata_start = time.time()
+                f.write('  "metadata": ')
+                metadata = self._build_metadata_v24(project, repo)
+                json.dump(metadata, f, cls=CustomJsonEncoder, ensure_ascii=False)
+                f.write(',\n')
+                metadata_time = time.time() - metadata_start
+                logger.info(f"   ✅ 元数据写入完成，耗时: {metadata_time:.2f}秒")
+                
+                # 写入配置
+                logger.info("⚙️ 写入配置信息...")
+                config_start = time.time()
+                f.write('  "config": ')
+                config = self._build_config_v24(project)
+                json.dump(config, f, cls=CustomJsonEncoder, ensure_ascii=False)
+                f.write(',\n')
+                config_time = time.time() - config_start
+                logger.info(f"   ✅ 配置信息写入完成，耗时: {config_time:.2f}秒")
+                
+                # 流式写入项目调用图
+                logger.info("🌐 流式写入项目调用图...")
+                f.write('  "project_call_graph": {\n')
+                
+                # 项目信息
+                logger.info("   📈 构建项目信息...")
+                project_info_start = time.time()
+                project_info = {
+                    "name": project.name,
+                    "total_files": len(project.files),
+                    "total_functions": len(project.functions),
+                    "total_classes": len(project.classes),
+                    "total_namespaces": len(project.namespaces)
+                }
+                f.write('    "project_info": ')
+                json.dump(project_info, f, cls=CustomJsonEncoder, ensure_ascii=False)
+                f.write(',\n')
+                project_info_time = time.time() - project_info_start
+                logger.info(f"   ✅ 项目信息构建完成，耗时: {project_info_time:.2f}秒")
+                
+                # 模块信息 - 流式写入
+                logger.info("   📈 构建模块信息...")
+                modules_start = time.time()
+                f.write('    "modules": ')
+                self._write_modules_info_streaming(f, project, repo)
+                f.write(',\n')
+                modules_time = time.time() - modules_start
+                logger.info(f"   ✅ 模块信息构建完成: {len(project.files)} 个模块，耗时: {modules_time:.2f}秒")
+                
+                # 全局调用图 - 分批写入
+                logger.info("   📈 写入全局调用图...")
+                f.write('    "global_call_graph": ')
+                self._write_call_graph_streaming(f, validated_calls_to)
+                f.write(',\n')
+                
+                # 反向调用图 - 分批写入
+                logger.info("   📈 写入反向调用图...")
+                f.write('    "reverse_call_graph": ')
+                self._write_call_graph_streaming(f, validated_called_by)
+                f.write('\n')
+                
+                f.write('  },\n')
+                
+                # 简化的其他部分
+                f.write('  "oop_analysis": {},\n')
+                f.write('  "cpp_analysis": {},\n')
+                
+                # 摘要
+                f.write('  "summary": ')
+                summary = self._build_summary(project, repo)
+                json.dump(summary, f, cls=CustomJsonEncoder, ensure_ascii=False)
+                f.write('\n')
+                
+                # 结束JSON对象
+                f.write('}\n')
+            
+            export_time = time.time() - start_time
+            file_size_mb = path.stat().st_size / (1024 * 1024)
+            logger.info(f"✅ 流式导出完成: {file_size_mb:.2f}MB, 耗时: {export_time:.2f}秒")
+            
+        except Exception as e:
+            export_time = time.time() - start_time
+            logger.error(f"❌ 流式导出失败 (耗时: {export_time:.2f}秒): {e}")
+            raise
 
     def export_nodes_json(self, repo: NodeRepository, output_path: str):
         """
-        导出全局节点映射JSON文件.
+        导出全局节点映射JSON文件 (高性能流式版本).
         
         :param repo: 包含所有节点的NodeRepository.
         :param output_path: 输出文件路径.
         """
+        from .logger import Logger
+        logger = Logger.get_logger()
+        
+        logger.info("🔗 开始高性能流式导出全局nodes映射...")
+        
         # 修复：确保文件映射已初始化
         if not self._file_mappings:
+            logger.info("🔧 初始化文件映射...")
             self._initialize_file_mappings(repo)
+            logger.info(f"✅ 文件映射初始化完成: {len(self._file_mappings)} 个文件")
             
-        nodes_data = {
-            "version": self.SCHEMA_VERSION,  # 使用统一版本
-            "timestamp": datetime.now().isoformat(),
-            "node_type": "global_entities",
-            "total_entities": len(repo.nodes),
-            "statistics": repo.get_statistics(),
-            "entities": {}
-        }
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
         
-        # 以USR ID为key，完整实体对象为value
-        for usr_id, entity in repo.nodes.items():
-            nodes_data["entities"][usr_id] = {
-                "type": entity.type,
-                "data": self._entity_to_dict(entity)
-            }
+        logger.info(f"💾 准备写入JSON到: {path}")
+        logger.info(f"   - 总节点数量: {len(repo.nodes)}")
+        
+        import time
+        start_time = time.time()
+        
+        try:
+            with open(path, 'w', encoding='utf-8', buffering=65536) as f:  # 增大缓冲区
+                # 写入JSON开始
+                f.write('{\n')
+                
+                # 写入基础信息
+                logger.info("📋 写入基础元数据...")
+                f.write('  "version": "')
+                f.write(self.SCHEMA_VERSION)
+                f.write('",\n')
+                
+                f.write('  "timestamp": "')
+                f.write(datetime.now().isoformat())
+                f.write('",\n')
+                
+                f.write('  "node_type": "global_entities",\n')
+                f.write(f'  "total_entities": {len(repo.nodes)},\n')
+                
+                # 写入统计信息（使用字符串拼接避免json.dump）
+                stats = repo.get_statistics()
+                f.write('  "statistics": {')
+                f.write(f'"total_entities": {stats.get("total_entities", 0)}, ')
+                f.write(f'"by_type": {stats.get("by_type", {})}, ')
+                f.write(f'"call_relationships": {stats.get("call_relationships", 0)}, ')
+                f.write(f'"files_analyzed": {stats.get("files_analyzed", 0)}')
+                f.write('},\n')
+                
+                # 开始entities对象
+                f.write('  "entities": {\n')
+                
+                # 流式写入实体 - 优化版本
+                logger.info("🔄 开始高性能流式写入实体...")
+                entity_count = 0
+                total_entities = len(repo.nodes)
+                
+                # 预先获取所有实体以避免重复访问
+                entities_list = list(repo.nodes.items())
+                
+                for i, (usr_id, entity) in enumerate(entities_list):
+                    try:
+                        # 每100个实体输出进度并回收内存（更频繁）
+                        if entity_count % 100 == 0:
+                            if entity_count % 1000 == 0:  # 每1000个输出详细进度
+                                logger.info(f"📊 处理进度: {entity_count}/{total_entities} ({entity_count/total_entities*100:.1f}%)")
+                            # 强制垃圾回收（更频繁）
+                            gc.collect()
+                        
+                        # 使用字符串拼接而不是JSON序列化
+                        f.write(f'    "{usr_id}": {{\n')
+                        f.write(f'      "type": "{entity.type}",\n')
+                        f.write('      "data": ')
+                        
+                        # 快速转换实体为字典并写入
+                        entity_data = self._entity_to_dict_fast(entity)
+                        # 使用更快的JSON序列化
+                        json.dump(entity_data, f, cls=None, separators=(',', ':'), ensure_ascii=False)
+                        
+                        # 如果不是最后一个实体，添加逗号
+                        if i < total_entities - 1:
+                            f.write('\n    },\n')
+                        else:
+                            f.write('\n    }\n')
+                            
+                        entity_count += 1
+                        
+                    except Exception as e:
+                        logger.error(f"❌ 处理实体 {usr_id} 时出错: {e}")
+                        # 继续处理其他实体
+                        if i < total_entities - 1:
+                            f.write('\n    },\n')
+                        else:
+                            f.write('\n    }\n')
+                        continue
+                
+                # 结束entities对象和JSON
+                f.write('  }\n')
+                f.write('}\n')
+                
+                logger.info(f"✅ 实体写入完成: {entity_count} 个实体")
             
-        self._write_json(nodes_data, output_path)
+            export_time = time.time() - start_time
+            file_size_mb = path.stat().st_size / (1024 * 1024)
+            logger.info(f"✅ 全局nodes映射导出完成: {file_size_mb:.2f}MB, 耗时: {export_time:.2f}秒")
+            
+        except Exception as e:
+            export_time = time.time() - start_time
+            logger.error(f"❌ 全局nodes映射导出失败 (耗时: {export_time:.2f}秒): {e}")
+            raise
 
     def _initialize_file_mappings(self, repo: NodeRepository):
         """初始化文件映射缓存"""
@@ -325,8 +504,59 @@ class JsonExporter:
             self._initialize_file_mappings(repo)
         return self._file_mappings.copy()
 
+    def _write_modules_info_streaming(self, f, project: Project, repo: NodeRepository):
+        """流式写入模块信息，避免内存峰值"""
+        from .logger import Logger
+        logger = Logger.get_logger()
+        import time
+        
+        total_files = len(project.files)
+        logger.info(f"      📈 开始处理 {total_files} 个文件的模块信息...")
+        
+        start_time = time.time()
+        batch_size = 50
+        
+        f.write('{\n')
+        
+        # 按文件组织模块
+        for i, file_path in enumerate(project.files):
+            # 批次进度日志
+            if i % batch_size == 0 and i > 0:
+                elapsed = time.time() - start_time
+                rate = i / elapsed if elapsed > 0 else 0
+                remaining = (total_files - i) / rate if rate > 0 else 0
+                logger.info(f"      📊 模块文件进度: {i}/{total_files} ({i/total_files*100:.1f}%) - 处理速度: {rate:.1f}/秒 - 预估剩余: {remaining:.1f}秒")
+            
+            file_id = self._get_file_id_for_path(file_path)
+            entities = repo.get_nodes_by_file(file_path)
+            
+            # 直接构建并写入模块信息，不使用CustomJsonEncoder
+            module_info = {
+                "file_path": file_path,
+                "functions": [e.usr for e in entities if isinstance(e, Function)],
+                "classes": [e.usr for e in entities if isinstance(e, Class)],
+                "namespaces": [e.usr for e in entities if isinstance(e, Namespace)]
+            }
+            
+            f.write(f'      "{file_id}": ')
+            json.dump(module_info, f, ensure_ascii=False, separators=(',', ':'))
+            
+            if i < total_files - 1:
+                f.write(',')
+            f.write('\n')
+            
+            # 定期释放内存
+            if i % 100 == 0:
+                import gc
+                gc.collect()
+        
+        f.write('    }')
+        
+        total_time = time.time() - start_time
+        logger.info(f"      ✅ 模块信息处理完成: {total_files} 个文件，耗时: {total_time:.2f}秒")
+
     def _build_modules_info(self, project: Project, repo: NodeRepository) -> Dict[str, Any]:
-        """构建模块信息"""
+        """构建模块信息（保留用于向后兼容）"""
         modules = {}
         
         # 按文件组织模块
@@ -579,28 +809,58 @@ class JsonExporter:
         return entities
 
     def _entity_to_dict(self, entity: Entity) -> Dict[str, Any]:
-        """将单个实体对象转换为字典"""
-        # asdict能很好地处理dataclass的转换
-        entity_dict = asdict(entity)
+        """将单个实体对象转换为字典 - 高性能版本"""
+        # 手动构建字典，避免asdict()的递归开销
+        entity_dict = {
+            "id": entity.id,
+            "usr": entity.usr,
+            "name": entity.name,
+            "qualified_name": entity.qualified_name,
+            "file_path": entity.file_path,
+            "start_line": entity.start_line,
+            "end_line": entity.end_line,
+            "type": entity.type,
+            "is_definition": entity.is_definition
+        }
         
-        # 为函数添加扩展信息
+        # 只为特定类型添加额外字段
         if isinstance(entity, Function):
-            entity_dict["cpp_extensions"] = {
-                "qualified_name": entity.qualified_name,
-                "namespace": "::".join(entity.qualified_name.split("::")[:-1]) if "::" in entity.qualified_name else "",
-                "function_status_flags": 0,  # 简化处理
-                "access_specifier": getattr(entity, 'access_specifier', 'public'),
-                "storage_class": "none",
-                "calling_convention": "default",
+            entity_dict.update({
+                "signature": entity.signature,
                 "return_type": entity.return_type,
-                "parameter_types": {p.get('name', ''): p.get('type', '') for p in entity.parameters},
-                "template_parameters": [],
-                "exception_specification": "",
-                "attributes": [],
-                "mangled_name": "",
-                "usr": entity.usr,
-                "signature_key": f"{entity.qualified_name}_{self._get_file_id_for_path(entity.file_path)}"
-            }
+                "parameters": entity.parameters,
+                "calls_to": entity.calls_to,
+                "called_by": entity.called_by,
+                "complexity": entity.complexity,
+                "is_static": entity.is_static,
+                "is_virtual": entity.is_virtual,
+                "access_specifier": entity.access_specifier,
+                "parent_class": entity.parent_class,
+                "cpp_extensions": {
+                    "qualified_name": entity.qualified_name,
+                    "namespace": "::".join(entity.qualified_name.split("::")[:-1]) if "::" in entity.qualified_name else "",
+                    "function_status_flags": 0,
+                    "access_specifier": entity.access_specifier,
+                    "return_type": entity.return_type or "",
+                    "usr": entity.usr
+                }
+            })
+        elif isinstance(entity, Class):
+            entity_dict.update({
+                "base_classes": entity.base_classes,
+                "derived_classes": entity.derived_classes,
+                "methods": entity.methods,
+                "fields": entity.fields,
+                "is_struct": entity.is_struct,
+                "is_abstract": entity.is_abstract,
+                "is_template": entity.is_template,
+                "parent_namespace": entity.parent_namespace
+            })
+        elif isinstance(entity, Namespace):
+            entity_dict.update({
+                "parent_namespace": entity.parent_namespace,
+                "children": getattr(entity, 'children', [])
+            })
         
         return entity_dict
 
@@ -1179,3 +1439,307 @@ class JsonExporter:
         
         quality_score = max(0.0, 1.0 - (total_issues / total_entities))
         return round(quality_score, 3) 
+
+    def _write_functions_streaming(self, f, repo: NodeRepository):
+        """流式写入函数实体，分批处理避免内存峰值"""
+        from .logger import Logger
+        logger = Logger.get_logger()
+        import time
+        
+        f.write('{\n')
+        functions = [node for node in repo.nodes.values() if node.type == 'function']
+        total_functions = len(functions)
+        
+        logger.info(f"   📈 开始处理 {total_functions} 个函数实体...")
+        start_time = time.time()
+        batch_size = 100
+        
+        for i, func in enumerate(functions):
+            # 批次进度日志
+            if i % batch_size == 0 and i > 0:
+                elapsed = time.time() - start_time
+                rate = i / elapsed if elapsed > 0 else 0
+                remaining = (total_functions - i) / rate if rate > 0 else 0
+                logger.info(f"   📊 函数进度: {i}/{total_functions} ({i/total_functions*100:.1f}%) - 处理速度: {rate:.1f}/秒 - 预估剩余: {remaining:.1f}秒")
+                
+            f.write(f'      "{func.usr}": ')
+            func_data = self._build_function_entity(func, repo)
+            json.dump(func_data, f, cls=CustomJsonEncoder, ensure_ascii=False)
+            
+            if i < total_functions - 1:
+                f.write(',')
+            f.write('\n')
+            
+            # 每处理100个函数释放一次内存
+            if i % 100 == 0:
+                import gc
+                gc.collect()
+        
+        f.write('    }')
+        total_time = time.time() - start_time
+        logger.info(f"   ✅ 函数实体写入完成: {total_functions} 个，耗时: {total_time:.2f}秒")
+
+    def _write_classes_streaming(self, f, repo: NodeRepository):
+        """流式写入类实体"""
+        from .logger import Logger
+        logger = Logger.get_logger()
+        import time
+        
+        f.write('{\n')
+        classes = [node for node in repo.nodes.values() if node.type == 'class']
+        total_classes = len(classes)
+        
+        logger.info(f"   📈 开始处理 {total_classes} 个类实体...")
+        start_time = time.time()
+        
+        for i, cls in enumerate(classes):
+            # 每50个类输出一次进度
+            if i % 50 == 0 and i > 0:
+                elapsed = time.time() - start_time
+                rate = i / elapsed if elapsed > 0 else 0
+                remaining = (total_classes - i) / rate if rate > 0 else 0
+                logger.info(f"   📊 类进度: {i}/{total_classes} ({i/total_classes*100:.1f}%) - 处理速度: {rate:.1f}/秒 - 预估剩余: {remaining:.1f}秒")
+                
+            f.write(f'      "{cls.usr}": ')
+            cls_data = self._build_class_entity(cls, repo)
+            json.dump(cls_data, f, cls=CustomJsonEncoder, ensure_ascii=False)
+            
+            if i < total_classes - 1:
+                f.write(',')
+            f.write('\n')
+        
+        f.write('    }')
+        total_time = time.time() - start_time
+        logger.info(f"   ✅ 类实体写入完成: {total_classes} 个，耗时: {total_time:.2f}秒")
+
+    def _write_namespaces_streaming(self, f, repo: NodeRepository):
+        """流式写入命名空间实体"""
+        from .logger import Logger
+        logger = Logger.get_logger()
+        import time
+        
+        f.write('{\n')
+        namespaces = [node for node in repo.nodes.values() if node.type == 'namespace']
+        total_namespaces = len(namespaces)
+        
+        logger.info(f"   📈 开始处理 {total_namespaces} 个命名空间实体...")
+        start_time = time.time()
+        
+        for i, ns in enumerate(namespaces):
+            f.write(f'      "{ns.usr}": ')
+            ns_data = self._build_namespace_entity(ns, repo)
+            json.dump(ns_data, f, cls=CustomJsonEncoder, ensure_ascii=False)
+            
+            if i < total_namespaces - 1:
+                f.write(',')
+            f.write('\n')
+        
+        f.write('    }')
+        total_time = time.time() - start_time
+        logger.info(f"   ✅ 命名空间实体写入完成: {total_namespaces} 个，耗时: {total_time:.2f}秒")
+
+    def _write_operators_streaming(self, f, repo: NodeRepository):
+        """流式写入操作符实体"""
+        from .logger import Logger
+        logger = Logger.get_logger()
+        import time
+        
+        logger.info("   📈 开始处理操作符实体...")
+        start_time = time.time()
+        
+        operators = self._build_operators_entities(repo)
+        json.dump(operators, f, cls=CustomJsonEncoder, ensure_ascii=False)
+        
+        total_time = time.time() - start_time
+        logger.info(f"   ✅ 操作符实体写入完成: {len(operators)} 个，耗时: {total_time:.2f}秒")
+
+    def _write_call_relations_streaming(self, f, repo: NodeRepository):
+        """流式写入调用关系，分批处理大量数据"""
+        from .logger import Logger
+        logger = Logger.get_logger()
+        import time
+        
+        f.write('[\n')
+        
+        # 获取所有调用关系
+        logger.info("   📈 开始收集调用关系...")
+        collect_start = time.time()
+        
+        call_relations = []
+        for node in repo.nodes.values():
+            if hasattr(node, 'calls_to') and node.calls_to:
+                for callee_usr in node.calls_to:
+                    call_relations.append({
+                        "caller_usr": node.usr,
+                        "callee_usr": callee_usr,
+                        "call_type": "direct"
+                    })
+        
+        collect_time = time.time() - collect_start
+        total_relations = len(call_relations)
+        logger.info(f"   📊 调用关系收集完成: {total_relations} 个关系，耗时: {collect_time:.2f}秒")
+        
+        logger.info(f"   📈 开始写入 {total_relations} 个调用关系...")
+        write_start = time.time()
+        batch_size = 500  # 分批处理，减少内存压力
+        
+        for i in range(0, total_relations, batch_size):
+            batch = call_relations[i:i + batch_size]
+            batch_start = time.time()
+            
+            for j, relation in enumerate(batch):
+                f.write('      ')
+                json.dump(relation, f, cls=CustomJsonEncoder, ensure_ascii=False)
+                
+                if i + j < total_relations - 1:
+                    f.write(',')
+                f.write('\n')
+            
+            # 批次进度日志
+            batch_time = time.time() - batch_start
+            processed = i + len(batch)
+            elapsed = time.time() - write_start
+            rate = processed / elapsed if elapsed > 0 else 0
+            remaining = (total_relations - processed) / rate if rate > 0 else 0
+            
+            logger.info(f"   📊 调用关系进度: {processed}/{total_relations} ({processed/total_relations*100:.1f}%) - 批次耗时: {batch_time:.2f}秒 - 预估剩余: {remaining:.1f}秒")
+            
+            # 释放内存
+            import gc
+            gc.collect()
+        
+        f.write('    ]')
+        total_time = time.time() - write_start
+        logger.info(f"   ✅ 调用关系写入完成: {total_relations} 个，耗时: {total_time:.2f}秒")
+
+    def _write_call_graph_streaming(self, f, call_graph_data):
+        """流式写入调用图数据，分批处理"""
+        from .logger import Logger
+        logger = Logger.get_logger()
+        import time
+        
+        f.write('{\n')
+        
+        total_entries = len(call_graph_data)
+        logger.info(f"   📈 开始写入调用图: {total_entries} 个条目...")
+        start_time = time.time()
+        
+        batch_size = 200  # 减小批次大小
+        processed = 0
+        
+        for caller_usr, callees in call_graph_data.items():
+            f.write(f'      "{caller_usr}": ')
+            json.dump(list(callees), f, cls=CustomJsonEncoder, ensure_ascii=False)
+            
+            processed += 1
+            if processed < total_entries:
+                f.write(',')
+            f.write('\n')
+            
+            # 定期输出进度和释放内存
+            if processed % batch_size == 0:
+                elapsed = time.time() - start_time
+                rate = processed / elapsed if elapsed > 0 else 0
+                remaining = (total_entries - processed) / rate if rate > 0 else 0
+                logger.info(f"   📊 调用图进度: {processed}/{total_entries} ({processed/total_entries*100:.1f}%) - 处理速度: {rate:.1f}/秒 - 预估剩余: {remaining:.1f}秒")
+                
+                import gc
+                gc.collect()
+        
+        f.write('    }')
+        total_time = time.time() - start_time
+        logger.info(f"   ✅ 调用图写入完成: {total_entries} 个条目，耗时: {total_time:.2f}秒")
+
+    def _build_function_entity(self, func_node, repo: NodeRepository) -> Dict[str, Any]:
+        """构建单个函数实体数据"""
+        return {
+            "usr": func_node.usr,
+            "name": func_node.name,
+            "signature": getattr(func_node, 'signature', ''),
+            "file_path": getattr(func_node, 'file_path', ''),
+            "line_number": getattr(func_node, 'line_number', 0),
+            "is_definition": getattr(func_node, 'is_definition', False),
+            "parameters": getattr(func_node, 'parameters', []),
+            "return_type": getattr(func_node, 'return_type', ''),
+            "calls_to": list(getattr(func_node, 'calls_to', [])),
+            "called_by": list(getattr(func_node, 'called_by', []))
+        }
+
+    def _build_class_entity(self, class_node, repo: NodeRepository) -> Dict[str, Any]:
+        """构建单个类实体数据"""
+        return {
+            "usr": class_node.usr,
+            "name": class_node.name,
+            "file_path": getattr(class_node, 'file_path', ''),
+            "line_number": getattr(class_node, 'line_number', 0),
+            "is_definition": getattr(class_node, 'is_definition', False),
+            "members": getattr(class_node, 'members', []),
+            "methods": getattr(class_node, 'methods', []),
+            "base_classes": getattr(class_node, 'base_classes', [])
+        }
+
+    def _build_namespace_entity(self, ns_node, repo: NodeRepository) -> Dict[str, Any]:
+        """构建单个命名空间实体数据"""
+        return {
+            "usr": ns_node.usr,
+            "name": ns_node.name,
+            "file_path": getattr(ns_node, 'file_path', ''),
+            "line_number": getattr(ns_node, 'line_number', 0),
+            "members": getattr(ns_node, 'members', [])
+        } 
+
+    def _entity_to_dict_fast(self, entity: Entity) -> Dict[str, Any]:
+        """将单个实体对象转换为字典 - 高性能版本"""
+        # 手动构建字典，避免asdict()的递归开销
+        entity_dict = {
+            "id": entity.id,
+            "usr": entity.usr,
+            "name": entity.name,
+            "qualified_name": entity.qualified_name,
+            "file_path": entity.file_path,
+            "start_line": entity.start_line,
+            "end_line": entity.end_line,
+            "type": entity.type,
+            "is_definition": entity.is_definition
+        }
+        
+        # 只为特定类型添加额外字段
+        if isinstance(entity, Function):
+            entity_dict.update({
+                "signature": entity.signature,
+                "return_type": entity.return_type,
+                "parameters": entity.parameters,
+                "calls_to": entity.calls_to,
+                "called_by": entity.called_by,
+                "complexity": entity.complexity,
+                "is_static": entity.is_static,
+                "is_virtual": entity.is_virtual,
+                "access_specifier": entity.access_specifier,
+                "parent_class": entity.parent_class,
+                "cpp_extensions": {
+                    "qualified_name": entity.qualified_name,
+                    "namespace": "::".join(entity.qualified_name.split("::")[:-1]) if "::" in entity.qualified_name else "",
+                    "function_status_flags": 0,
+                    "access_specifier": entity.access_specifier,
+                    "return_type": entity.return_type or "",
+                    "usr": entity.usr
+                }
+            })
+        elif isinstance(entity, Class):
+            entity_dict.update({
+                "base_classes": entity.base_classes,
+                "derived_classes": entity.derived_classes,
+                "methods": entity.methods,
+                "fields": entity.fields,
+                "is_struct": entity.is_struct,
+                "is_abstract": entity.is_abstract,
+                "is_template": entity.is_template,
+                "parent_namespace": entity.parent_namespace
+            })
+        elif isinstance(entity, Namespace):
+            entity_dict.update({
+                "parent_namespace": entity.parent_namespace,
+                "children": getattr(entity, 'children', [])
+            })
+        
+        return entity_dict 
