@@ -42,9 +42,11 @@ class ParsedFile:
 class ClangParser:
     """Clang解析器 - 支持compile_commands.json和动态编译参数"""
     
-    def __init__(self, console: Optional[Console] = None):
+    def __init__(self, console: Optional[Console] = None, verbose: bool = True):
         """初始化解析器"""
         self.console = console or Console()
+        self.logger = get_logger()  # 确保logger始终被初始化
+        self._verbose = verbose  # 控制详细输出
         self.index = None
         # 修改数据结构：存储每个文件的编译参数和工作目录
         self.compile_commands: Dict[str, Dict[str, Any]] = {}  # file -> {"args": List[str], "directory": str}
@@ -169,7 +171,8 @@ class ClangParser:
                 logger = get_logger()
                 logger.rsp_file_parsed(rsp_path, len(args))
                 
-                if self.console:
+                # 减少RSP文件解析的输出干扰
+                if self.console and hasattr(self, '_verbose') and self._verbose:
                     self.console.print(f"✓ 解析RSP文件: {rsp_path} ({len(args)} 参数)", style="green")
                 
                 return args
@@ -538,7 +541,10 @@ class ClangParser:
             else:
                 processed_args.append(arg)
         
-        return processed_args
+        # 移除-Wshadow参数
+        final_args = [arg for arg in processed_args if arg != '-Wshadow']
+        
+        return final_args
     
     def _process_macro_definition(self, macro_def: str) -> Optional[str]:
         """处理宏定义，修复常见的语法问题"""
@@ -594,154 +600,107 @@ class ClangParser:
             # 如果路径规范化失败，返回原路径
             return str(path)
     
-    def parse_files(self, file_paths: List[str], progress: Optional[Progress] = None, 
-                   task_id: Optional[TaskID] = None) -> List[ParsedFile]:
-        """解析多个文件"""
-        results = []
-        total_files = len(file_paths)
-        logger = get_logger()
+    def parse_file(self, file_path: str) -> Optional[ParsedFile]:
+        """
+        解析单个文件。
         
-        # 输出总体文件数目
-        if self.console:
-            self.console.print(f"\n[bold blue]开始解析C++文件，总计: {total_files} 个文件[/bold blue]")
-        logger.info(f"开始解析C++文件，总计: {total_files} 个文件")
+        Args:
+            file_path (str): 要解析的文件路径。
         
-        for i, file_path in enumerate(file_paths):
-            current_index = i + 1
+        Returns:
+            ParsedFile: 包含解析结果的数据对象。
+        """
+        self.logger.debug(f"开始解析文件: {file_path}")
+        
+        # 确保 compile_commands 已加载
+        if not self.compile_commands:
+            self.logger.error("尝试在未加载 compile_commands 的情况下解析文件")
+            raise RuntimeError("Compile commands not loaded.")
             
-            if progress and task_id:
-                progress.update(task_id, completed=i)
-            
-            # 输出当前进度
-            if self.console:
-                self.console.print(f"\n[bold cyan]解析进度: {current_index}/{total_files}[/bold cyan]")
-            logger.info(f"解析进度: {current_index}/{total_files}")
-            
-            # 获取文件特定的编译参数和工作目录
-            file_args = self._get_file_compile_args(file_path)
-            file_directory = self._get_file_directory(file_path)
-            parsed_file = self._parse_single_file(file_path, file_args, file_directory)
-            results.append(parsed_file)
-            
-            # 输出解析状态
-            if parsed_file.success:
-                if self.console:
-                    self.console.print(f"✓ [{current_index}/{total_files}] {file_path}", style="green")
-                logger.info(f"解析成功 [{current_index}/{total_files}]: {file_path}")
-            else:
-                if self.console:
-                    self.console.print(f"✗ [{current_index}/{total_files}] {file_path}: {len(parsed_file.diagnostics)} issues", style="red")
-                logger.error(f"解析失败 [{current_index}/{total_files}]: {file_path}")
-        
-        if progress and task_id:
-            progress.update(task_id, completed=len(file_paths))
-        
-        # 输出完成信息
-        if self.console:
-            self.console.print(f"\n[bold green]文件解析完成，总计处理: {total_files} 个文件[/bold green]")
-        logger.info(f"文件解析完成，总计处理: {total_files} 个文件")
-        
-        return results
-    
-    def _parse_single_file(self, file_path: str, compile_args: Optional[List[str]] = None, directory: Optional[str] = None) -> ParsedFile:
-        """解析单个文件"""
-        start_time = time.time()
-        
+        # 从 compile_commands 获取编译参数
+        args = self.compile_commands.get(file_path, [])
+        if not args:
+            self.logger.warning(f"在 compile_commands.json 中未找到文件 '{file_path}' 的编译命令，跳过。")
+            return None # 修改：找不到编译命令则返回 None
+
         try:
-            # 使用文件特定的编译参数或默认参数
-            args = compile_args
+            # 创建 Clang Index
+            if self.index is None:
+                self.index = Index.create()
+
+            # 解析翻译单元
+            # TU.PARSE_DETAILED_PROCESSING_RECORD: 提供了更详细的AST信息
+            # TU.PARSE_SKIP_FUNCTION_BODIES: 对于大型项目，可以加快速度，但会丢失函数内部信息
+            tu = self.index.parse(file_path, args=args, options=TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD)
+
+            # 检查解析错误
+            if not tu:
+                self.logger.error(f"Clang 未能为文件 '{file_path}' 创建翻译单元 (Translation Unit)。")
+                return None # 修改：解析失败返回 None
+
+            errors = [d for d in tu.diagnostics if d.severity >= Diagnostic.Error]
+            if errors:
+                error_messages = [f"  - {d.spelling} at {d.location}" for d in errors]
+                self.logger.warning(f"文件 '{file_path}' 解析时出现 {len(errors)} 个错误:\n" + "\n".join(error_messages))
+                # 即使有错误，我们仍然尝试继续提取信息
             
-            # 创建翻译单元
-            if not self.index:
-                raise RuntimeError("libclang索引未初始化")
-            
-            # 使用文件特定的directory或全局的_working_directory（向后兼容）
-            original_cwd = None
-            target_directory = directory or self._working_directory
-            
-            if target_directory and Path(target_directory).exists():
-                import os
-                original_cwd = os.getcwd()
-                os.chdir(target_directory)
-                if self.console:
-                    self.console.print(f"🔀 切换工作目录到: {target_directory}", style="dim cyan")
-                logger = get_logger()
-                logger.info(f"切换工作目录到: {target_directory}")
-                
-            try:    
-                tu = self.index.parse(
-                    file_path,
-                    args=args,
-                    options=clang.TranslationUnit.PARSE_NONE
-                )
-            finally:
-                # 恢复原始工作目录
-                if original_cwd:
-                    import os
-                    os.chdir(original_cwd)
-            
-            # 收集详细诊断信息
-            diagnostics = []
-            # 显示详细的诊断信息
-            error_count = 0
-            for diag in tu.diagnostics:
-                if diag.severity >= clang.Diagnostic.Warning:
-                    severity_map = {
-                        clang.Diagnostic.Ignored: 'ignored',
-                        clang.Diagnostic.Note: 'note',
-                        clang.Diagnostic.Warning: 'warning',
-                        clang.Diagnostic.Error: 'error',
-                        clang.Diagnostic.Fatal: 'fatal'
-                    }
-                    
-                    diagnostics.append(DiagnosticInfo(
-                        severity=severity_map.get(diag.severity, 'unknown'),
-                        message=diag.spelling,
-                        file_path=str(diag.location.file) if diag.location.file else file_path,
-                        line=diag.location.line,
-                        column=diag.location.column,
-                        category=diag.category_name
-                    ))
-                    severity_name = {
-                        clang.Diagnostic.Warning: 'WARNING',
-                        clang.Diagnostic.Error: 'ERROR',
-                        clang.Diagnostic.Fatal: 'FATAL'
-                    }.get(diag.severity, 'UNKNOWN')
-                    
-                    if self.console:
-                        self.console.print(f"  {severity_name}: {diag.spelling}", style="red" if diag.severity >= clang.Diagnostic.Error else "yellow")
-                    logger = get_logger()
-                    logger.warning(f"  {severity_name}: {diag.spelling}")
-                    
-                    if diag.severity >= clang.Diagnostic.Error:
-                        error_count += 1
-            
-            success = error_count == 0
-            parse_time = time.time() - start_time
+            # 返回成功的解析结果
             return ParsedFile(
                 file_path=file_path,
-                translation_unit=tu,
-                success=success,
-                diagnostics=diagnostics,
-                parse_time=parse_time
+                success=True,
+                translation_unit=tu
             )
-            
+
         except Exception as e:
-            parse_time = time.time() - start_time
-            return ParsedFile(
-                file_path=file_path,
-                translation_unit=None,
-                success=False,
-                diagnostics=[DiagnosticInfo(
-                    severity='fatal',
-                    message=f"Parse error: {str(e)}",
-                    file_path=file_path,
-                    line=0,
-                    column=0,
-                    category='parse_error'
-                )],
-                parse_time=parse_time
-            )
+            self.logger.error(f"解析文件 '{file_path}' 时发生未知异常: {e}\n{traceback.format_exc()}")
+            return None # 修改：发生异常返回 None
+    
+    def parse_files(self, file_paths: List[str], progress: Optional[Progress] = None, task_id=None) -> List[ParsedFile]:
+        """
+        解析文件列表 (保留此方法但标记为弃用，或用于非并行场景)
+        
+        Args:
+            file_paths (List[str]): 要解析的文件路径列表。
+            progress (Optional[Progress]): rich 进度条对象。
+            task_id: rich 进度条任务ID。
+        
+        Returns:
+            List[ParsedFile]: 解析结果列表。
+        """
+        self.logger.warning("`parse_files` is deprecated and will be removed. Use the parallel analyzer.")
+        results = []
+        for file_path in file_paths:
+            result = self.parse_file(file_path)
+            results.append(result)
+            if progress and task_id is not None:
+                progress.update(task_id, advance=1)
+        return results
+
+    def _extract_arguments(self, command: str) -> List[str]:
+        """从编译命令中提取参数"""
+        try:
+            # 使用shlex.split处理带引号的参数
+            if platform.system() == 'Windows':
+                args = shlex.split(command, posix=False)
+            else:
+                args = shlex.split(command)
+            
+            # 处理UE的@response_file.rsp格式
+            processed_args = []
+            for arg in args:
+                if arg.startswith('@'):
+                    # 解析.rsp响应文件
+                    arg = arg[1:].strip('"\'')
+                    rsp_args = self._parse_rsp_file(arg)
+                    processed_args.extend(rsp_args)
+                else:
+                    processed_args.append(arg)
+            
+            return processed_args
+            
+        except ValueError:
+            # 如果shlex.split失败，使用简单的空格分割
+            return command.split()
     
     def cleanup(self):
         """清理资源"""

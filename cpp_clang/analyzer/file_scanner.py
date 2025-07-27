@@ -259,3 +259,73 @@ class FileScanner:
             return True
         except ValueError:
             return False
+
+    def _is_file_excluded(self, file_path: str) -> bool:
+        """
+        检查单个文件是否应被排除（高性能版本）。
+        
+        Args:
+            file_path: 文件的绝对路径。
+            
+        Returns:
+            bool: 如果文件应被排除，则返回 True。
+        """
+        path_obj = Path(file_path)
+        
+        # 1. 检查文件扩展名
+        if path_obj.suffix in self._excluded_extensions:
+            return True
+            
+        # 2. 检查隐藏文件（基于文件名）
+        if path_obj.name.startswith('.'):
+            return True
+
+        # 3. 将路径标准化为Unix风格，以匹配模式
+        normalized_path = path_obj.as_posix()
+        
+        # 4. 检查预编译的正则表达式
+        for pattern in self._compiled_patterns:
+            if pattern.match(normalized_path):
+                return True
+        
+        return False
+
+    def filter_files_from_list(self, file_list: List[str], scan_directory: str) -> List[str]:
+        """
+        从现有文件列表中过滤文件。
+
+        Args:
+            file_list (List[str]): 从 compile_commands.json 读取的原始文件列表。
+            scan_directory (str): 需要分析的目标目录。只有在此目录下的文件才会被包含。
+
+        Returns:
+            List[str]: 过滤后的文件列表。
+        """
+        filtered_files = []
+        scan_path = Path(scan_directory).resolve()
+        
+        from .logger import get_logger
+        logger = get_logger()
+        logger.info(f"开始过滤文件列表... 原始数量: {len(file_list)}, 目标目录: {scan_directory}")
+        
+        for file_path_str in file_list:
+            file_path = Path(file_path_str).resolve()
+            
+            # 1. 检查文件是否在指定的扫描目录下
+            if not self._is_under_directory(file_path, scan_path):
+                continue
+                
+            # 2. 检查文件是否应被排除
+            if self._is_file_excluded(str(file_path)):
+                logger.debug(f"排除文件: {file_path_str}")
+                continue
+            
+            # 3. 检查文件扩展名是否为支持的类型
+            if file_path.suffix.lower() not in self.ALL_EXTENSIONS:
+                logger.debug(f"因扩展名不受支持而跳过: {file_path_str}")
+                continue
+
+            filtered_files.append(file_path_str)
+            
+        logger.info(f"过滤完成。保留文件数: {len(filtered_files)}")
+        return filtered_files
