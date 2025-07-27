@@ -407,14 +407,16 @@ class JsonExporter:
                 f.write('  "node_type": "global_entities",\n')
                 f.write(f'  "total_entities": {len(repo.nodes)},\n')
                 
-                # 写入统计信息（使用字符串拼接避免json.dump）
+                # 写入统计信息（使用正确的JSON格式）
                 stats = repo.get_statistics()
-                f.write('  "statistics": {')
-                f.write(f'"total_entities": {stats.get("total_entities", 0)}, ')
-                f.write(f'"by_type": {stats.get("by_type", {})}, ')
-                f.write(f'"call_relationships": {stats.get("call_relationships", 0)}, ')
-                f.write(f'"files_analyzed": {stats.get("files_analyzed", 0)}')
-                f.write('},\n')
+                f.write('  "statistics": ')
+                json.dump({
+                    "total_entities": stats.get("total_entities", 0),
+                    "by_type": stats.get("by_type", {}),
+                    "call_relationships": stats.get("call_relationships", 0),
+                    "files_analyzed": stats.get("files_analyzed", 0)
+                }, f, cls=CustomJsonEncoder, ensure_ascii=False)
+                f.write(',\n')
                 
                 # 开始entities对象
                 f.write('  "entities": {\n')
@@ -1802,6 +1804,7 @@ class JsonExporter:
                 "is_virtual": entity.is_virtual,
                 "access_specifier": entity.access_specifier,
                 "parent_class": entity.parent_class,
+                "code_content": getattr(entity, 'code_content', ''),  # ✅ 添加函数体内容
                 "cpp_extensions": {
                     "qualified_name": entity.qualified_name,
                     "namespace": "::".join(entity.qualified_name.split("::")[:-1]) if "::" in entity.qualified_name else "",
