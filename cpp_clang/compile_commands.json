@@ -1,80 +1,1448 @@
 [
   {
-    "file": "N:/c7_enginedev/Client/Intermediate/Build/Win64/UnrealEditor/Inc/C7Editor/UHT/AssetDeduplicateSettings.gen.cpp",
-    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7Editor/AssetDeduplicateSettings.gen.cpp.obj.rsp\"",
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/AnimationGraphNodeEd/Private/AnimGraphNode_AssetIDSequencePlayer.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/AnimationGraphNodeEd/AnimGraphNode_AssetIDSequencePlayer.cpp.obj.rsp\"",
     "directory": "N:/c7_enginedev/Engine/Source",
-    "output": "N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7Editor/AssetDeduplicateSettings.gen.cpp.obj"
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/AnimationGraphNodeEd/AnimGraphNode_AssetIDSequencePlayer.cpp.obj"
   },
   {
-    "file": "N:/c7_enginedev/Client/Intermediate/Build/Win64/UnrealEditor/Inc/C7Editor/UHT/C7LuaTemplateCreateWidget.gen.cpp",
-    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7Editor/C7LuaTemplateCreateWidget.gen.cpp.obj.rsp\"",
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/AnimationGraphNodeEd/Private/AnimGraphNode_BoneChainPhysics.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/AnimationGraphNodeEd/AnimGraphNode_BoneChainPhysics.cpp.obj.rsp\"",
     "directory": "N:/c7_enginedev/Engine/Source",
-    "output": "N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7Editor/C7LuaTemplateCreateWidget.gen.cpp.obj"
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/AnimationGraphNodeEd/AnimGraphNode_BoneChainPhysics.cpp.obj"
   },
   {
-    "file": "N:/c7_enginedev/Client/Intermediate/Build/Win64/UnrealEditor/Inc/C7Editor/UHT/EditorTracker.gen.cpp",
-    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7Editor/EditorTracker.gen.cpp.obj.rsp\"",
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/AnimationGraphNodeEd/Private/AnimGraphNode_BoneIK.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/AnimationGraphNodeEd/AnimGraphNode_BoneIK.cpp.obj.rsp\"",
     "directory": "N:/c7_enginedev/Engine/Source",
-    "output": "N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7Editor/EditorTracker.gen.cpp.obj"
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/AnimationGraphNodeEd/AnimGraphNode_BoneIK.cpp.obj"
   },
   {
-    "file": "N:/c7_enginedev/Client/Intermediate/Build/Win64/UnrealEditor/Inc/C7Editor/UHT/KGLuaTestGameInstance.gen.cpp",
-    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7Editor/KGLuaTestGameInstance.gen.cpp.obj.rsp\"",
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/AnimationGraphNodeEd/Private/AnimGraphNode_FaceControl.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/AnimationGraphNodeEd/AnimGraphNode_FaceControl.cpp.obj.rsp\"",
     "directory": "N:/c7_enginedev/Engine/Source",
-    "output": "N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7Editor/KGLuaTestGameInstance.gen.cpp.obj"
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/AnimationGraphNodeEd/AnimGraphNode_FaceControl.cpp.obj"
   },
   {
-    "file": "N:/c7_enginedev/Client/Intermediate/Build/Win64/UnrealEditor/Inc/C7Editor/UHT/MaterialReplaceBlueprintLibrary.gen.cpp",
-    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7Editor/MaterialReplaceBlueprintLibrary.gen.cpp.obj.rsp\"",
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/AnimationGraphNodeEd/Private/AnimGraphNode_ThreeLayerPostureBlend.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/AnimationGraphNodeEd/AnimGraphNode_ThreeLayerPostureBlend.cpp.obj.rsp\"",
     "directory": "N:/c7_enginedev/Engine/Source",
-    "output": "N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7Editor/MaterialReplaceBlueprintLibrary.gen.cpp.obj"
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/AnimationGraphNodeEd/AnimGraphNode_ThreeLayerPostureBlend.cpp.obj"
   },
   {
-    "file": "N:/c7_enginedev/Client/Intermediate/Build/Win64/UnrealEditor/Inc/C7Editor/UHT/UISpriteSheetHelper.gen.cpp",
-    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7Editor/UISpriteSheetHelper.gen.cpp.obj.rsp\"",
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/AnimationGraphNodeEd/Private/AnimationGraphNodeEdModule.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/AnimationGraphNodeEd/AnimationGraphNodeEdModule.cpp.obj.rsp\"",
     "directory": "N:/c7_enginedev/Engine/Source",
-    "output": "N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7Editor/UISpriteSheetHelper.gen.cpp.obj"
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/AnimationGraphNodeEd/AnimationGraphNodeEdModule.cpp.obj"
   },
   {
-    "file": "N:/c7_enginedev/Client/Intermediate/Build/Win64/UnrealEditor/Inc/C7/UHT/AkAudioVolume.gen.cpp",
-    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7/AkAudioVolume.gen.cpp.obj.rsp\"",
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/AnimLibEditor.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibEditor.cpp.obj.rsp\"",
     "directory": "N:/c7_enginedev/Engine/Source",
-    "output": "N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7/AkAudioVolume.gen.cpp.obj"
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibEditor.cpp.obj"
   },
   {
-    "file": "N:/c7_enginedev/Client/Intermediate/Build/Win64/UnrealEditor/Inc/C7/UHT/C7FunctionLibrary.gen.cpp",
-    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7/C7FunctionLibrary.gen.cpp.obj.rsp\"",
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Asset/AnimAssetActions.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimAssetActions.cpp.obj.rsp\"",
     "directory": "N:/c7_enginedev/Engine/Source",
-    "output": "N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7/C7FunctionLibrary.gen.cpp.obj"
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimAssetActions.cpp.obj"
   },
   {
-    "file": "N:/c7_enginedev/Client/Intermediate/Build/Win64/UnrealEditor/Inc/C7/UHT/C7LandscapeSplineActor.gen.cpp",
-    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7/C7LandscapeSplineActor.gen.cpp.obj.rsp\"",
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Asset/AnimLibAsset.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibAsset.cpp.obj.rsp\"",
     "directory": "N:/c7_enginedev/Engine/Source",
-    "output": "N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7/C7LandscapeSplineActor.gen.cpp.obj"
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibAsset.cpp.obj"
   },
   {
-    "file": "N:/c7_enginedev/Client/Intermediate/Build/Win64/UnrealEditor/Inc/C7/UHT/C7MapTagBase.gen.cpp",
-    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7/C7MapTagBase.gen.cpp.obj.rsp\"",
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Asset/AnimLibAssetCategory.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibAssetCategory.cpp.obj.rsp\"",
     "directory": "N:/c7_enginedev/Engine/Source",
-    "output": "N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7/C7MapTagBase.gen.cpp.obj"
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibAssetCategory.cpp.obj"
   },
   {
-    "file": "N:/c7_enginedev/Client/Intermediate/Build/Win64/UnrealEditor/Inc/C7/UHT/C7MapTagEdgeWidget.gen.cpp",
-    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7/C7MapTagEdgeWidget.gen.cpp.obj.rsp\"",
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Asset/AnimLibAssetCtrlTableData.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibAssetCtrlTableData.cpp.obj.rsp\"",
     "directory": "N:/c7_enginedev/Engine/Source",
-    "output": "N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7/C7MapTagEdgeWidget.gen.cpp.obj"
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibAssetCtrlTableData.cpp.obj"
   },
   {
-    "file": "N:/c7_enginedev/Client/Intermediate/Build/Win64/UnrealEditor/Inc/C7/UHT/C7MapTagLayer.gen.cpp",
-    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7/C7MapTagLayer.gen.cpp.obj.rsp\"",
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Asset/AnimLibAssetFactory.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibAssetFactory.cpp.obj.rsp\"",
     "directory": "N:/c7_enginedev/Engine/Source",
-    "output": "N:/c7_enginedev/Client/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/C7/C7MapTagLayer.gen.cpp.obj"
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibAssetFactory.cpp.obj"
   },
   {
-    "file": "N:/c7_enginedev/Client/Plugins/KGCore/Intermediate/Build/Win64/UnrealEditor/Inc/KGCore/UHT/C7AkAudioVolume.gen.cpp",
-    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCore/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCore/C7AkAudioVolume.gen.cpp.obj.rsp\"",
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Asset/AnimLibAssetStatistic.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibAssetStatistic.cpp.obj.rsp\"",
     "directory": "N:/c7_enginedev/Engine/Source",
-    "output": "N:/c7_enginedev/Client/Plugins/KGCore/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCore/C7AkAudioVolume.gen.cpp.obj"
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibAssetStatistic.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Asset/AnimTypeFeature.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimTypeFeature.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimTypeFeature.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Commandlet/AnimLibExportCommandlet.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibExportCommandlet.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibExportCommandlet.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/CustomLayout/AnimLibAssetID_CustomLayout.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibAssetID_CustomLayout.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibAssetID_CustomLayout.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Mode/AnimLibEdMode.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibEdMode.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibEdMode.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Tab/AnimLibAssetBrowserTab.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibAssetBrowserTab.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibAssetBrowserTab.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Tab/AnimLibAssetDataTab.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibAssetDataTab.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibAssetDataTab.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Tab/AnimLibAssetDetailTab.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibAssetDetailTab.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibAssetDetailTab.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Tab/AnimLibEdFlowTabFactory.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibEdFlowTabFactory.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibEdFlowTabFactory.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Tab/AnimLibPreviewSettingTab.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibPreviewSettingTab.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibPreviewSettingTab.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Tab/AnimLibViewSceneTab.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibViewSceneTab.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibViewSceneTab.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Utils/AnimExcelUtils.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimExcelUtils.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimExcelUtils.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Utils/AnimLibEditorCommands.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibEditorCommands.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibEditorCommands.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Utils/AnimLibParams.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibParams.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibParams.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Utils/AnimLibUtils.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibUtils.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibUtils.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Viewport/AnimLibEdPreviewScene.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibEdPreviewScene.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibEdPreviewScene.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Viewport/AnimLibEdViewport.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibEdViewport.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibEdViewport.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Viewport/AnimLibPreviewSetting.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibPreviewSetting.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibPreviewSetting.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Widgets/AnimLibAssetFeatureCustomView.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibAssetFeatureCustomView.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibAssetFeatureCustomView.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Widgets/AnimLibAssetForViewCustomView.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibAssetForViewCustomView.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibAssetForViewCustomView.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Widgets/AnimLibPreviewSettingCustomView.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibPreviewSettingCustomView.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimLibPreviewSettingCustomView.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Widgets/AnimPartPickWidget.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimPartPickWidget.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/AnimPartPickWidget.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/AnimLibEditor/Widgets/SAnimLibSearchableComboBox.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/SAnimLibSearchableComboBox.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/SAnimLibSearchableComboBox.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/FaceAnimUtils/FaceAnimFunctionLibrary.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/FaceAnimFunctionLibrary.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/FaceAnimFunctionLibrary.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/KGCharacterEditorModule.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/KGCharacterEditorModule.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/KGCharacterEditorModule.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/ModelEditor/Application/FModelEditorCommands.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/FModelEditorCommands.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/FModelEditorCommands.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/ModelEditor/Application/GenerateNPCLuaBuildCommandlet.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/GenerateNPCLuaBuildCommandlet.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/GenerateNPCLuaBuildCommandlet.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/ModelEditor/Asset/ModelAsset.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/ModelAsset.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/ModelAsset.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/ModelEditor/Asset/ModelAssetActions.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/ModelAssetActions.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/ModelAssetActions.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/ModelEditor/Asset/ModelEdExportData.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/ModelEdExportData.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/ModelEdExportData.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/ModelEditor/CustomLayout/RoleConfigID_CustomLayout.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/RoleConfigID_CustomLayout.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/RoleConfigID_CustomLayout.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/ModelEditor/CustomLayout/SkeletalMeshParamsComponentDetails.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/SkeletalMeshParamsComponentDetails.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/SkeletalMeshParamsComponentDetails.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/ModelEditor/Mode/ModelEdMode.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/ModelEdMode.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/ModelEdMode.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/ModelEditor/ModelEditor.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/ModelEditor.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/ModelEditor.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/ModelEditor/Tab/ModelFlowTabFactory.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/ModelFlowTabFactory.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/ModelFlowTabFactory.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/ModelEditor/Widgets/GeneralNPCPartAssetPanel.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/GeneralNPCPartAssetPanel.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/GeneralNPCPartAssetPanel.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/ModelEditor/Widgets/GeneralNPCPartDetailPanel.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/GeneralNPCPartDetailPanel.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/GeneralNPCPartDetailPanel.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/ModelEditor/Widgets/GeneralNPCPartItemWidget.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/GeneralNPCPartItemWidget.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/GeneralNPCPartItemWidget.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/ModelEditor/Widgets/GeneralNPCSuitAnimationPanel.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/GeneralNPCSuitAnimationPanel.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/GeneralNPCSuitAnimationPanel.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/ModelEditor/Widgets/GeneralNPCSuitAssetPanel.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/GeneralNPCSuitAssetPanel.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/GeneralNPCSuitAssetPanel.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/ModelEditor/Widgets/GeneralNPCSuitDetailPanel.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/GeneralNPCSuitDetailPanel.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/GeneralNPCSuitDetailPanel.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/ModelEditor/Widgets/GeneralNPCSuitItemWidget.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/GeneralNPCSuitItemWidget.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/GeneralNPCSuitItemWidget.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/ModelEditor/Widgets/GeneralNPCSuitPartPanel.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/GeneralNPCSuitPartPanel.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/GeneralNPCSuitPartPanel.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/NPCEditor/Asset/NPCAssetActions.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/NPCAssetActions.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/NPCAssetActions.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/NPCEditor/Asset/NPCAssetFactory.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/NPCAssetFactory.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/NPCAssetFactory.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/NPCEditor/CustomDetail/NPCAssetDetail.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/NPCAssetDetail.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/NPCAssetDetail.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/NPCEditor/Mode/NPCEditorMode.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/NPCEditorMode.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/NPCEditorMode.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/NPCEditor/NPCEditor.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/NPCEditor.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/NPCEditor.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/NPCEditor/Tab/NPCAssetBrowserTab.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/NPCAssetBrowserTab.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/NPCAssetBrowserTab.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/NPCEditor/Tab/NPCAssetDetailTab.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/NPCAssetDetailTab.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/NPCAssetDetailTab.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacterEditor/Private/NPCEditor/Tab/NPCTabFactory.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/NPCTabFactory.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacterEditor/NPCTabFactory.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimCommon.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimCommon.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimCommon.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimContainer/CachedAnimMontage.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CachedAnimMontage.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CachedAnimMontage.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimLayer/BaseAnimLayer.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BaseAnimLayer.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BaseAnimLayer.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimLayer/BodyPostureAnimLayer.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BodyPostureAnimLayer.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BodyPostureAnimLayer.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimLayer/FaceAnimLayer.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/FaceAnimLayer.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/FaceAnimLayer.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimLayer/GazeAnimLayer.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/GazeAnimLayer.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/GazeAnimLayer.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimLayer/IKAnimLayer.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/IKAnimLayer.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/IKAnimLayer.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimNotify/AnimNotifyState_C7AnimNotifyOnSurface.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotifyState_C7AnimNotifyOnSurface.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotifyState_C7AnimNotifyOnSurface.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimNotify/AnimNotifyState_C7AttachItem.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotifyState_C7AttachItem.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotifyState_C7AttachItem.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimNotify/AnimNotifyState_C7ChangeAnimPosture.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotifyState_C7ChangeAnimPosture.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotifyState_C7ChangeAnimPosture.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimNotify/AnimNotifyState_C7ChangeHair.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotifyState_C7ChangeHair.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotifyState_C7ChangeHair.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimNotify/AnimNotifyState_C7HideNiagara.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotifyState_C7HideNiagara.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotifyState_C7HideNiagara.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimNotify/AnimNotifyState_C7TimedNiagaraEffect.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotifyState_C7TimedNiagaraEffect.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotifyState_C7TimedNiagaraEffect.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimNotify/AnimNotify_C7AnimFeatureOperation.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotify_C7AnimFeatureOperation.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotify_C7AnimFeatureOperation.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimNotify/AnimNotify_C7ChangeMaterialTexture.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotify_C7ChangeMaterialTexture.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotify_C7ChangeMaterialTexture.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimNotify/AnimNotify_C7CommonEvent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotify_C7CommonEvent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotify_C7CommonEvent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimNotify/AnimNotify_C7PostProcess.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotify_C7PostProcess.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotify_C7PostProcess.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimNotify/AnimNotify_CustomCallback.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotify_CustomCallback.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotify_CustomCallback.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimNotify/Movement/AnimNotifyState_BikeShakeAkEvent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotifyState_BikeShakeAkEvent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotifyState_BikeShakeAkEvent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimNotify/Movement/AnimNotifyState_C7LocoDisable.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotifyState_C7LocoDisable.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotifyState_C7LocoDisable.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimNotify/Movement/AnimNotifyState_C7MotionWarping.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotifyState_C7MotionWarping.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotifyState_C7MotionWarping.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimNotify/Movement/AnimNotify_RotateInstantly.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotify_RotateInstantly.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNotify_RotateInstantly.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimationGraphNode/AnimNode_AssetIDSequencePlayer.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNode_AssetIDSequencePlayer.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNode_AssetIDSequencePlayer.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimationGraphNode/AnimNode_BoneChainPhysics.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNode_BoneChainPhysics.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNode_BoneChainPhysics.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimationGraphNode/AnimNode_BoneIK.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNode_BoneIK.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNode_BoneIK.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimationGraphNode/AnimNode_FaceControl.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNode_FaceControl.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNode_FaceControl.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/AnimationGraphNode/AnimNode_ThreeLayerPostureBlend.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNode_ThreeLayerPostureBlend.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AnimNode_ThreeLayerPostureBlend.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/BaseAnimInstance.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BaseAnimInstance.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BaseAnimInstance.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/CarrierAnimInstance.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CarrierAnimInstance.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CarrierAnimInstance.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/FaceAnim/FaceAnim.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/FaceAnim.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/FaceAnim.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/FaceAnim/FaceAnimComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/FaceAnimComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/FaceAnimComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/FaceAnim/FaceAnimLipSync.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/FaceAnimLipSync.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/FaceAnimLipSync.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/LookAt/CutSceneAnimInstance.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CutSceneAnimInstance.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CutSceneAnimInstance.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Animation/LookAt/LookAtComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/LookAtComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/LookAtComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Audio/C7AnimNotifyState_AkEvent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/C7AnimNotifyState_AkEvent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/C7AnimNotifyState_AkEvent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Audio/C7AnimNotify_ActionAkEvent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/C7AnimNotify_ActionAkEvent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/C7AnimNotify_ActionAkEvent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Audio/C7AnimNotify_FootStepAkEvent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/C7AnimNotify_FootStepAkEvent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/C7AnimNotify_FootStepAkEvent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Audio/C7AnimNotify_VoiceAkEvent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/C7AnimNotify_VoiceAkEvent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/C7AnimNotify_VoiceAkEvent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Audio/KGAudioNotifyHelper.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KGAudioNotifyHelper.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KGAudioNotifyHelper.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/BaseCamera.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BaseCamera.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BaseCamera.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/BaseCineCamera.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BaseCineCamera.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BaseCineCamera.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraAction/CameraActionBase.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraActionBase.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraActionBase.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraAction/CameraActionBattleCorrection.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraActionBattleCorrection.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraActionBattleCorrection.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraAction/CameraActionFocusOnTarget.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraActionFocusOnTarget.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraActionFocusOnTarget.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraAction/CameraActionHandler.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraActionHandler.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraActionHandler.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraAction/CameraActionParamAdditional.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraActionParamAdditional.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraActionParamAdditional.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraAction/CameraActionParamOverride.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraActionParamOverride.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraActionParamOverride.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraAction/CameraActionTurnToLock.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraActionTurnToLock.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraActionTurnToLock.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraAction/CameraFOVAction.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraFOVAction.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraFOVAction.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraAction/CameraLagAction.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraLagAction.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraLagAction.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraAction/CameraLockLookForward.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraLockLookForward.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraLockLookForward.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraAction/CameraLookAtEffect.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraLookAtEffect.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraLookAtEffect.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraAction/CameraRotAndZoomAdjustAction.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraRotAndZoomAdjustAction.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraRotAndZoomAdjustAction.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraAction/CameraRotateAction.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraRotateAction.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraRotateAction.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraAction/CameraSplineMoveModifier.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraSplineMoveModifier.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraSplineMoveModifier.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraAction/CameraViewOffsetEffect.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraViewOffsetEffect.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraViewOffsetEffect.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraAction/CameraZoomAction.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraZoomAction.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraZoomAction.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraAction/KGCameraAnimationModifier.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KGCameraAnimationModifier.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KGCameraAnimationModifier.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraArmComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraArmComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraArmComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraContainer/ChthollyTree.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/ChthollyTree.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/ChthollyTree.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraEffect.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraEffect.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraEffect.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraManager.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraManager.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraManager.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraManagerExtension.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraManagerExtension.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraManagerExtension.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraMode/ThirdCameraMode.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/ThirdCameraMode.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/ThirdCameraMode.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraShake/BaseCameraShake.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BaseCameraShake.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BaseCameraShake.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraShake/WaveOscillatorCameraShakePatternV2.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/WaveOscillatorCameraShakePatternV2.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/WaveOscillatorCameraShakePatternV2.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraUtil/CameraBlend.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraBlend.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraBlend.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraUtil/CameraEase.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraEase.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraEase.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/CameraUtil/CameraUtils.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraUtils.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CameraUtils.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/KgCameraMode.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KgCameraMode.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KgCameraMode.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/PostProcessNew/PPCommon.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPCommon.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPCommon.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/PostProcessNew/PPPriorityQueue.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPPriorityQueue.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPPriorityQueue.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/PostProcessNew/PostProcessInstance/PPBase.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPBase.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPBase.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/PostProcessNew/PostProcessInstance/PPDarken.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPDarken.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPDarken.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/PostProcessNew/PostProcessInstance/PPDepthOfField.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPDepthOfField.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPDepthOfField.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/PostProcessNew/PostProcessInstance/PPDummy.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPDummy.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPDummy.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/PostProcessNew/PostProcessInstance/PPMaterialBase.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPMaterialBase.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPMaterialBase.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/PostProcessNew/PostProcessInstance/PPMaterialClip.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPMaterialClip.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPMaterialClip.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/PostProcessNew/PostProcessInstance/PPMaterialFog.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPMaterialFog.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPMaterialFog.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/PostProcessNew/PostProcessInstance/PPMaterialPhantom.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPMaterialPhantom.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPMaterialPhantom.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/PostProcessNew/PostProcessInstance/PPMaterialSketch.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPMaterialSketch.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPMaterialSketch.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/PostProcessNew/PostProcessInstance/PPNonMaterialBase.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPNonMaterialBase.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPNonMaterialBase.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/PostProcessNew/PostProcessInstance/PPPlaneMeshHandler.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPPlaneMeshHandler.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPPlaneMeshHandler.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/PostProcessNew/PostProcessManager.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PostProcessManager.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PostProcessManager.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/PostProcess/PPClasses.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPClasses.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPClasses.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/PostProcess/PPDynamicMaterial.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPDynamicMaterial.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPDynamicMaterial.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Camera/PostProcess/PPManager.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPManager.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PPManager.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Character/BSABullet.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BSABullet.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BSABullet.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Character/BSADecalActor.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BSADecalActor.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BSADecalActor.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Character/BSAGhostActor.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BSAGhostActor.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BSAGhostActor.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Character/BSForewarnActor.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BSForewarnActor.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BSForewarnActor.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Character/BSUnit.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BSUnit.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BSUnit.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Character/BaseCharacter.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BaseCharacter.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BaseCharacter.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Character/BriefCharacter.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BriefCharacter.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BriefCharacter.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Character/C7Actor.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/C7Actor.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/C7Actor.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Component/EstatePortalComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/EstatePortalComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/EstatePortalComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Component/KGWaterWaveEmitterComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KGWaterWaveEmitterComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KGWaterWaveEmitterComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Component/ThirdPersonAimComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/ThirdPersonAimComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/ThirdPersonAimComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Controller/BasePlayerController.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BasePlayerController.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BasePlayerController.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Core/AttachFloatComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AttachFloatComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AttachFloatComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Core/AttachJointComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AttachJointComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AttachJointComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Core/AttachJointComponent_V2.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AttachJointComponent_V2.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AttachJointComponent_V2.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Core/AttachJointHelper.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AttachJointHelper.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AttachJointHelper.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Core/AutoRotateComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AutoRotateComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AutoRotateComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Core/InteractiveTriggerComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/InteractiveTriggerComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/InteractiveTriggerComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Core/KGUEActorLoader.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KGUEActorLoader.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KGUEActorLoader.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Core/KGUEActorManager.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KGUEActorManager.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KGUEActorManager.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Core/LuaHelper.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/LuaHelper.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/LuaHelper.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Core/MeshPropController.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/MeshPropController.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/MeshPropController.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Core/ResizeBoundsScaleComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/ResizeBoundsScaleComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/ResizeBoundsScaleComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Core/ShadowControlComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/ShadowControlComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/ShadowControlComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Core/SkeletalMeshParamsComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/SkeletalMeshParamsComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/SkeletalMeshParamsComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Core/TrackSplineComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/TrackSplineComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/TrackSplineComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Debug/SceneDrawerInterface.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/SceneDrawerInterface.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/SceneDrawerInterface.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Effect/KGEffectManager.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KGEffectManager.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KGEffectManager.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Effect/KGNiagaraParamUpdateTask.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KGNiagaraParamUpdateTask.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KGNiagaraParamUpdateTask.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Input/InputActionAdaptor.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/InputActionAdaptor.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/InputActionAdaptor.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Input/InputControlDispatcher.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/InputControlDispatcher.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/InputControlDispatcher.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Interactor/C7SceneTextGameActor.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/C7SceneTextGameActor.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/C7SceneTextGameActor.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Interactor/CommonInteractorBase.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CommonInteractorBase.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CommonInteractorBase.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Interactor/Components/BattleZoneVisibilityComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BattleZoneVisibilityComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BattleZoneVisibilityComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Interactor/Components/BookCorridorComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BookCorridorComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BookCorridorComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Interactor/Components/BookFloorComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BookFloorComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BookFloorComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Interactor/Components/C7SimulatePhysicsBoxComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/C7SimulatePhysicsBoxComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/C7SimulatePhysicsBoxComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Interactor/Components/C7TrackSplineComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/C7TrackSplineComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/C7TrackSplineComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Interactor/Components/CardScrollComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CardScrollComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CardScrollComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Interactor/Components/MoveActorComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/MoveActorComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/MoveActorComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Interactor/Components/SplineMoveComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/SplineMoveComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/SplineMoveComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Interactor/Components/SpotLightControlComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/SpotLightControlComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/SpotLightControlComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Interactor/Components/StreetlightTODControlComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/StreetlightTODControlComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/StreetlightTODControlComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Interactor/Components/TimeChessMoveComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/TimeChessMoveComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/TimeChessMoveComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Interactor/HomelandFogBase.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/HomelandFogBase.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/HomelandFogBase.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Interactor/PhotoStudio.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PhotoStudio.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PhotoStudio.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Interactor/RubiksCubeSpaceDivision.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/RubiksCubeSpaceDivision.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/RubiksCubeSpaceDivision.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Interactor/SceneActorBase.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/SceneActorBase.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/SceneActorBase.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Interactor/SceneEnvironmentActor.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/SceneEnvironmentActor.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/SceneEnvironmentActor.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Interactor/SceneVolumeFogBase.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/SceneVolumeFogBase.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/SceneVolumeFogBase.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Interactor/WorldManager.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/WorldManager.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/WorldManager.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Light/CharacterLightFixController.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CharacterLightFixController.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CharacterLightFixController.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Light/CharacterLightManager.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CharacterLightManager.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CharacterLightManager.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Material/KGMaterialCache.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KGMaterialCache.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KGMaterialCache.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Material/KGMaterialCommon.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KGMaterialCommon.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KGMaterialCommon.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Material/KGMaterialManager.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KGMaterialManager.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KGMaterialManager.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Material/KGMaterialParamCache.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KGMaterialParamCache.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KGMaterialParamCache.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Movement/BriefMovementComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BriefMovementComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/BriefMovementComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Movement/C7RootMotionSource.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/C7RootMotionSource.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/C7RootMotionSource.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Movement/CurveMovementComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CurveMovementComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/CurveMovementComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Movement/MovementPipeline/MovementCaculator/GravationalThrusterMC.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/GravationalThrusterMC.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/GravationalThrusterMC.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Movement/MovementPipeline/MovementCaculator/InputThrusterMC.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/InputThrusterMC.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/InputThrusterMC.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Movement/MovementPipeline/MovementCaculator/MovementCalculatorBase.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/MovementCalculatorBase.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/MovementCalculatorBase.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Movement/MovementPipeline/MovementCorrector/DestSmoothCorrector.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/DestSmoothCorrector.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/DestSmoothCorrector.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Movement/MovementPipeline/MovementCorrector/MotionWarpCorrector.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/MotionWarpCorrector.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/MotionWarpCorrector.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Movement/MovementPipeline/MovementCorrector/MovementCorrectorBase.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/MovementCorrectorBase.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/MovementCorrectorBase.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Movement/MovementPipeline/MovementCorrector/MovementCorrectorManager.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/MovementCorrectorManager.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/MovementCorrectorManager.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Movement/MovementPipeline/MovementCorrector/OnGroundMovementCorrector.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/OnGroundMovementCorrector.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/OnGroundMovementCorrector.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Movement/MovementPipeline/MovementCorrector/OnRideMountMovementCorrector.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/OnRideMountMovementCorrector.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/OnRideMountMovementCorrector.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Movement/MovementPipeline/MovementCorrector/OnWaterMovementCorrector.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/OnWaterMovementCorrector.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/OnWaterMovementCorrector.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Movement/MovementPipeline/MovementCorrector/PostureCorrectorBase.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PostureCorrectorBase.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PostureCorrectorBase.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Movement/MovementPipeline/MovementCorrector/PostureCorrectorManager.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PostureCorrectorManager.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/PostureCorrectorManager.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Movement/MovementPipeline/RoleMovementPipeline.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/RoleMovementPipeline.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/RoleMovementPipeline.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Movement/MovementPipeline/RotationCalculator/RotationCalculatorBase.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/RotationCalculatorBase.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/RotationCalculatorBase.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Movement/MovementPipeline/RotationCalculator/YawController.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/YawController.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/YawController.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Movement/PathFollow/C7PathFollowComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/C7PathFollowComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/C7PathFollowComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Movement/RMFunctionLibrary.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/RMFunctionLibrary.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/RMFunctionLibrary.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Movement/RoleMovementComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/RoleMovementComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/RoleMovementComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Movement/RootMotion/C7RootMotion.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/C7RootMotion.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/C7RootMotion.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Movement/ScenePerception/ScenePerceptionDetector.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/ScenePerceptionDetector.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/ScenePerceptionDetector.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Movement/SimpleMovementComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/SimpleMovementComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/SimpleMovementComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Movement/TentacleMoveComponent.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/TentacleMoveComponent.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/TentacleMoveComponent.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/RoleComposite/KGUECompositeOperateLib.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KGUECompositeOperateLib.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KGUECompositeOperateLib.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/RoleComposite/RoleCompositeFunc.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/RoleCompositeFunc.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/RoleCompositeFunc.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/RoleComposite/RoleCompositeManager.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/RoleCompositeManager.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/RoleCompositeManager.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/SyncProtocol/HeartbeatManager.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/HeartbeatManager.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/HeartbeatManager.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/SyncProtocol/NetSyncManager.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/NetSyncManager.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/NetSyncManager.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/SyncProtocol/SyncProtocol.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/SyncProtocol.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/SyncProtocol.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Util/3CMathUtil.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/3CMathUtil.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/3CMathUtil.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/3C/Util/AbilityCollisionUtil.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AbilityCollisionUtil.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/AbilityCollisionUtil.cpp.obj"
+  },
+  {
+    "file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter/Private/KGCharacterModule.cpp",
+    "command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KGCharacterModule.cpp.obj.rsp\"",
+    "directory": "N:/c7_enginedev/Engine/Source",
+    "output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditorGCD/Development/KGCharacter/KGCharacterModule.cpp.obj"
   }
 ]

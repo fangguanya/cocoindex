@@ -14,6 +14,7 @@ C++ 项目分析脚本
 
 import sys
 import time
+import argparse
 from pathlib import Path
 
 # 将项目根目录添加到 sys.path
@@ -25,30 +26,43 @@ from cpp_clang.analyzer.cpp_analyzer import CppAnalyzer, AnalysisConfig
 
 def main():
     """主函数 - 执行 C++ 项目分析"""
+    # ========== 参数解析 ==========
+    parser = argparse.ArgumentParser(description="C++ 项目分析工具")
+    parser.add_argument("--project_root", default="N:/c7_enginedev/Engine", help="项目根目录")
+    # N:/c7_enginedev/Client
+    #parser.add_argument("--scan_directory", default="N:/c7_enginedev/Client/Plugins/KGCharacter", help="要分析的代码目录 (仅用于过滤)")
+    parser.add_argument("--scan_directory", default="N:/c7_enginedev/Client", help="要分析的代码目录 (仅用于过滤)")
+    #parser.add_argument("--compile_commands_path", default="N:/c7_enginedev/compile_commands.json", help="compile_commands.json 文件的路径")
+    parser.add_argument("--compile_commands_path", default="L:/ai-cocoindex-clangcpp/cpp_clang/compile_commands.json", help="compile_commands.json 文件的路径")
+    parser.add_argument("--output_file", default="cpp_analysis_result.json", help="输出 JSON 文件路径")
+    parser.add_argument("--verbose", action="store_true", help="显示详细输出")
+    parser.add_argument("--max_files", type=int, default=None, help="限制处理的文件数量，None 表示不限制")
+    parser.add_argument("-j", "--jobs", type=int, default=0, help="并行处理任务数 (0 表示使用所有CPU核心)")
+    args = parser.parse_args()
+    
     console = Console()
     console.print("[bold green]C++ 项目分析工具[/bold green]")
     console.print("正在启动分析...")
     
     # ========== 配置参数 ==========
-    # 请根据实际项目修改以下路径
     
     # 项目根目录（用于 include 搜索和路径映射）
-    PROJECT_ROOT = "D:/c7_i9_EngineDev/Engine"
+    PROJECT_ROOT = args.project_root
     
     # 要分析的代码目录 (注意：在新流程中，此参数仅用于语义，分析范围由 compile_commands 决定)
-    SCAN_DIRECTORY = "D:/c7_i9_EngineDev/Client"
+    SCAN_DIRECTORY = args.scan_directory
     
     # compile_commands.json 文件的具体路径
-    #COMPILE_COMMANDS_PATH = "E:/mcp/codebase_index/cocoindex/cpp_clang/compile_commands.json"
-    COMPILE_COMMANDS_PATH = "D:/c7_i9_EngineDev/compile_commands.json"
+    COMPILE_COMMANDS_PATH = args.compile_commands_path
     
     # 输出 JSON 文件路径
-    OUTPUT_FILE = "cpp_analysis_result.json"
+    OUTPUT_FILE = args.output_file
     
     # 其他选项
-    VERBOSE = False  # 是否显示详细输出
-    MAX_FILES = None  # 限制处理的文件数量，None 表示不限制
-    
+    VERBOSE = args.verbose
+    MAX_FILES = args.max_files
+    NUM_JOBS = args.jobs
+
     # ========== 配置结束 ==========
     
     console.print("\n[bold blue]分析配置:[/bold blue]")
@@ -56,6 +70,7 @@ def main():
     console.print(f"扫描目录 (参考): {SCAN_DIRECTORY}")
     console.print(f"编译命令文件: {COMPILE_COMMANDS_PATH}")
     console.print(f"输出文件: {OUTPUT_FILE}")
+    console.print(f"并行任务数: {NUM_JOBS if NUM_JOBS > 0 else '自动 (所有核心)'}")
     
     # 检查路径是否存在
     if not Path(PROJECT_ROOT).exists():
@@ -76,7 +91,8 @@ def main():
             compile_commands_path=COMPILE_COMMANDS_PATH,
             output_path=OUTPUT_FILE,
             verbose=VERBOSE,
-            max_files=MAX_FILES
+            max_files=MAX_FILES,
+            num_jobs=NUM_JOBS
         )
 
         # 执行分析
