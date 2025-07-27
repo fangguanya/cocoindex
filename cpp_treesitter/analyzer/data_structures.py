@@ -20,6 +20,7 @@ import os
 import threading
 from threading import RLock, Lock
 from contextlib import contextmanager
+import logging
 
 # ==============================================================================
 # 线程安全支持
@@ -249,6 +250,8 @@ class Function(Entity):
     is_override: bool = False
     is_final: bool = False
     is_const: bool = False
+    is_template: bool = False
+    template_params: List[str] = field(default_factory=list)
     access_specifier: str = "default"
     parent_class: Optional[str] = None # USR of parent class
     code_content: str = ""  # 函数体源代码
@@ -422,22 +425,27 @@ class NodeRepository:
 
     def generate_usr(self, entity_type: str, qualified_name: str, signature: Optional[str] = None, file_path: str = "", template_params: List[str] = None) -> str:
         """
-        生成全局唯一的USR ID - 修复版：移除file_hash确保跨文件唯一性
+        生成USR (Unified Symbol Resolution) - 增强版
         
-        格式规范：
-        - 函数: c:@F@<qualified_name>@<normalized_signature>@<template_info>
-        - 类/结构: c:@S@<qualified_name>@<template_info>
-        - 命名空间: c:@N@<qualified_name>
-        - 变量: c:@V@<qualified_name>@<scope_info>
-        - 枚举: c:@E@<qualified_name>
+        支持功能:
+        - 函数重载区分（通过增强的函数签名）
+        - 模板参数编码（增强版）
+        - 文件作用域处理
+        - 多种实体类型支持
         
         Args:
             entity_type: 实体类型
-            qualified_name: 限定名
-            signature: 函数签名（仅函数需要）
-            file_path: 文件路径（仅用于静态函数区分，不影响USR唯一性）
-            template_params: 模板参数列表
+            qualified_name: 限定名称
+            signature: 函数签名（可选）
+            file_path: 文件路径（可选）
+            template_params: 模板参数（可选）
+            
+        Returns:
+            USR字符串
         """
+        if not qualified_name:
+            return ""
+
         
         with self._lock.read_lock(): # 使用读锁
             if entity_type == 'function':
@@ -480,16 +488,40 @@ class NodeRepository:
                     base_usr = f"c:@V@{qualified_name}"
                 
             elif entity_type == 'enum':
-                # 枚举USR: c:@E@qualified_name
+                # 枚举USR: c:@E@namespace::enum
                 base_usr = f"c:@E@{qualified_name}"
                 
+            elif entity_type == 'typedef':
+                # 类型别名USR: c:@T@namespace::typedef
+                base_usr = f"c:@T@{qualified_name}"
+                
+            elif entity_type == 'macro':
+                # 宏USR: c:@M@macro_name
+                base_usr = f"c:@M@{qualified_name}"
+                
             else:
-                # 备用方案：通用USR格式
-                content_hash = hashlib.md5(f"{qualified_name}::{entity_type}".encode('utf-8')).hexdigest()[:8]
-                base_usr = f"c:@U@{qualified_name}@{content_hash}"
-
-        # 检查USR冲突并解决
-        return self._resolve_usr_conflict(base_usr, entity_type, qualified_name, file_path)
+                # 通用USR
+                base_usr = f"c:@{entity_type}@{qualified_name}"
+            
+            # USR安全性验证：确保只包含可打印字符
+            try:
+                # 移除任何不可打印字符，但保留基本符号
+                safe_usr = ''.join(char for char in base_usr if char.isprintable() and ord(char) < 127)
+                
+                # 验证USR格式的基本正确性
+                if not safe_usr.startswith('c:@'):
+                    logging.warning(f"Generated USR format invalid: {base_usr[:50]}...")
+                    # 重新构建安全的USR
+                    safe_qualified_name = ''.join(char for char in qualified_name if char.isprintable() and ord(char) < 127)
+                    safe_usr = f"c:@{entity_type}@{safe_qualified_name}"
+                
+                return safe_usr
+                
+            except Exception as e:
+                # 如果USR安全化失败，返回最基本的USR
+                logging.warning(f"USR safety validation failed: {e}, using basic USR")
+                safe_name = ''.join(char for char in str(qualified_name) if char.isalnum() or char in '_:')
+                return f"c:@{entity_type}@{safe_name}"
 
     def _is_static_function_context(self, qualified_name: str, file_path: str) -> bool:
         """检查是否是需要文件区分的静态函数上下文 - 增强版"""
@@ -619,38 +651,156 @@ class NodeRepository:
         """
         增强版函数签名标准化 - 支持现代C++特性
         
+        新增支持:
+        - const/volatile cv限定符
+        - 引用限定符 (&, &&)
+        - noexcept规范
+        - 返回类型
+        - requires约束
+        - 指针/数组维度区分
+        
         Args:
             signature: 原始函数签名
             
         Returns:
-            标准化后的签名
+            标准化后的签名，格式: (params)@cv_quals@ref_qual@noexcept@return_type@requires
         """
         if not signature:
             return "()"
         
-        # 提取参数列表
-        match = re.search(r'\((.*?)\)', signature)
-        if not match:
-            return "()"
+        # 分离函数签名的各个组件
+        components = self._parse_function_signature_components(signature)
         
-        params_str = match.group(1).strip()
+        # 标准化参数列表
+        normalized_params = self._normalize_parameter_list_enhanced(components['parameters'])
+        
+        # 构建完整的签名字符串
+        sig_parts = [f"({normalized_params})"]
+        
+        # 添加CV限定符
+        if components['cv_qualifiers']:
+            sig_parts.append(f"cv:{components['cv_qualifiers']}")
+        
+        # 添加引用限定符
+        if components['ref_qualifier']:
+            sig_parts.append(f"ref:{components['ref_qualifier']}")
+        
+        # 添加noexcept规范
+        if components['noexcept_spec']:
+            sig_parts.append(f"noexcept:{components['noexcept_spec']}")
+        
+        # 添加返回类型（用于区分重载）
+        if components['return_type']:
+            sig_parts.append(f"ret:{components['return_type']}")
+        
+        # 添加requires约束摘要
+        if components['requires_clause']:
+            requires_hash = hashlib.md5(components['requires_clause'].encode('utf-8')).hexdigest()[:8]
+            sig_parts.append(f"req:{requires_hash}")
+        
+        return "@".join(sig_parts)
+
+    def _parse_function_signature_components(self, signature: str) -> Dict[str, str]:
+        """
+        解析函数签名的各个组件
+        
+        Args:
+            signature: 完整的函数签名
+            
+        Returns:
+            包含各个组件的字典
+        """
+        components = {
+            'return_type': '',
+            'parameters': '',
+            'cv_qualifiers': '',
+            'ref_qualifier': '',
+            'noexcept_spec': '',
+            'requires_clause': ''
+        }
+        
+        # 移除多余空格并清理
+        signature = re.sub(r'\s+', ' ', signature.strip())
+        
+        # 1. 提取requires子句（在最后）
+        requires_match = re.search(r'\s+requires\s+(.+)$', signature)
+        if requires_match:
+            components['requires_clause'] = requires_match.group(1).strip()
+            signature = signature[:requires_match.start()]
+        
+        # 2. 提取noexcept规范
+        noexcept_patterns = [
+            r'\s+noexcept\(([^)]+)\)',  # noexcept(expression)
+            r'\s+noexcept\s*$',         # noexcept
+            r'\s+noexcept\s+',          # noexcept后面还有其他
+        ]
+        
+        for pattern in noexcept_patterns:
+            match = re.search(pattern, signature)
+            if match:
+                if match.groups():
+                    components['noexcept_spec'] = match.group(1).strip()
+                else:
+                    components['noexcept_spec'] = 'true'
+                signature = signature[:match.start()] + signature[match.end():]
+                break
+        
+        # 3. 提取引用限定符 (& 或 &&)
+        ref_qual_match = re.search(r'\)\s*(&&?)\s*(?:const|volatile|\s)*$', signature)
+        if ref_qual_match:
+            components['ref_qualifier'] = ref_qual_match.group(1)
+            signature = signature[:ref_qual_match.start(1)] + signature[ref_qual_match.end(1):]
+        
+        # 4. 提取CV限定符
+        cv_match = re.search(r'\)\s*((?:const|volatile|\s)+)(?:&&?|\s)*$', signature)
+        if cv_match:
+            cv_text = cv_match.group(1).strip()
+            cv_quals = []
+            if 'const' in cv_text:
+                cv_quals.append('const')
+            if 'volatile' in cv_text:
+                cv_quals.append('volatile')
+            components['cv_qualifiers'] = ','.join(cv_quals)
+            signature = signature[:cv_match.start(1)] + signature[cv_match.end(1):]
+        
+        # 5. 提取参数列表
+        param_match = re.search(r'\(([^)]*)\)', signature)
+        if param_match:
+            components['parameters'] = param_match.group(1).strip()
+            # 移除参数部分，留下返回类型
+            return_type_part = signature[:param_match.start()].strip()
+            if return_type_part:
+                components['return_type'] = self._normalize_type_name_enhanced(return_type_part)
+        
+        return components
+
+    def _normalize_parameter_list_enhanced(self, params_str: str) -> str:
+        """
+        增强版参数列表标准化
+        
+        Args:
+            params_str: 参数列表字符串
+            
+        Returns:
+            标准化的参数列表
+        """
         if not params_str:
-            return "()"
+            return ""
         
         # 解析参数，支持复杂类型
-        params = self._parse_parameter_list(params_str)
+        params = self._parse_parameter_list_enhanced(params_str)
         
         # 标准化每个参数类型
         normalized_params = []
         for param in params:
-            normalized_type = self._normalize_type_name_enhanced(param)
+            normalized_type = self._normalize_parameter_type_enhanced(param)
             normalized_params.append(normalized_type)
         
-        return f"({','.join(normalized_params)})"
+        return ','.join(normalized_params)
 
-    def _parse_parameter_list(self, params_str: str) -> List[str]:
+    def _parse_parameter_list_enhanced(self, params_str: str) -> List[str]:
         """
-        解析参数列表，正确处理嵌套的模板和函数指针
+        增强版参数列表解析 - 支持更复杂的类型
         
         Args:
             params_str: 参数列表字符串
@@ -662,6 +812,7 @@ class NodeRepository:
         current_param = ""
         depth = 0
         in_string = False
+        bracket_depth = 0
         
         i = 0
         while i < len(params_str):
@@ -673,14 +824,20 @@ class NodeRepository:
                 current_param += char
             
             elif not in_string:
-                # 处理括号和模板参数
-                if char in '(<[':
+                # 处理各种括号
+                if char in '(<':
                     depth += 1
                     current_param += char
-                elif char in ')>]':
+                elif char in '[':
+                    bracket_depth += 1
+                    current_param += char
+                elif char in ')>':
                     depth -= 1
                     current_param += char
-                elif char == ',' and depth == 0:
+                elif char in ']':
+                    bracket_depth -= 1
+                    current_param += char
+                elif char == ',' and depth == 0 and bracket_depth == 0:
                     # 找到参数分隔符
                     if current_param.strip():
                         param_type = self._extract_parameter_type_enhanced(current_param.strip())
@@ -759,6 +916,83 @@ class NodeRepository:
         
         return ' '.join(result_tokens)
 
+    def _normalize_parameter_type_enhanced(self, param_type: str) -> str:
+        """
+        增强版参数类型标准化 - 区分指针/引用/数组
+        
+        Args:
+            param_type: 参数类型字符串
+            
+        Returns:
+            标准化的参数类型，包含指针/引用/数组信息
+        """
+        if not param_type:
+            return "void"
+        
+        # 基础类型标准化
+        normalized = self._normalize_type_name_enhanced(param_type)
+        
+        # 分析指针/引用/数组维度
+        type_category = self._analyze_type_category(normalized)
+        
+        # 构建标准化格式: base_type@category
+        if isinstance(type_category, dict):
+            return f"{type_category['base_type']}@{type_category['category']}"
+        
+        return normalized
+
+    def _analyze_type_category(self, type_str: str) -> Union[str, Dict[str, str]]:
+        """
+        分析类型的类别（值/指针/引用/数组）
+        
+        Args:
+            type_str: 类型字符串
+            
+        Returns:
+            类型类别信息
+        """
+        if not type_str:
+            return 'value'
+        
+        # 移除空格进行分析
+        clean_type = re.sub(r'\s+', '', type_str)
+        
+        # 分析数组维度
+        array_matches = re.findall(r'\[([^\]]*)\]', clean_type)
+        if array_matches:
+            base_type = re.sub(r'\[[^\]]*\]', '', clean_type)
+            array_dims = len(array_matches)
+            return {
+                'base_type': base_type,
+                'category': f'array[{array_dims}]'
+            }
+        
+        # 分析指针层数
+        pointer_count = clean_type.count('*')
+        if pointer_count > 0:
+            base_type = clean_type.replace('*', '')
+            return {
+                'base_type': base_type,
+                'category': f'ptr[{pointer_count}]'
+            }
+        
+        # 分析引用类型
+        if clean_type.endswith('&&'):
+            base_type = clean_type[:-2]
+            return {
+                'base_type': base_type,
+                'category': 'rref'
+            }
+        elif clean_type.endswith('&'):
+            base_type = clean_type[:-1]
+            return {
+                'base_type': base_type,
+                'category': 'lref'
+            }
+        
+        # 值类型
+        return 'value'
+
     def _normalize_type_name_enhanced(self, type_name: str) -> str:
         """
         增强版类型名称标准化
@@ -771,6 +1005,16 @@ class NodeRepository:
         """
         if not type_name:
             return "void"
+        
+        # 确保输入是字符串类型
+        if not isinstance(type_name, str):
+            type_name = str(type_name)
+        
+        # 移除不可见字符和控制字符，保留基本的ASCII和UTF-8字符
+        type_name = ''.join(char for char in type_name if char.isprintable() or char.isspace())
+        
+        # 移除换行符和其他控制字符
+        type_name = type_name.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
         
         # 移除多余空格
         type_name = re.sub(r'\s+', ' ', type_name.strip())
@@ -795,30 +1039,385 @@ class NodeRepository:
 
     def _encode_template_params(self, template_params: List[str]) -> str:
         """
-        编码模板参数为USR组件
+        编码模板参数为USR组件 - 增强版
+        
+        新增支持:
+        - 模板参数种类区分 (typename/class vs int vs auto vs template template)
+        - 实例化参数vs声明参数区分
+        - 偏特化模式识别
+        - 约束/概念摘要
+        - 安全的特殊字符处理
         
         Args:
             template_params: 模板参数列表
             
         Returns:
-            编码后的模板参数字符串
+            编码后的模板参数字符串，格式: tpl_<kind_hash>_<params_hash>
         """
         if not template_params:
             return ""
         
-        # 标准化每个模板参数
-        normalized_params = []
+        try:
+            # 预处理模板参数，确保安全的字符串处理
+            safe_template_params = []
+            for param in template_params:
+                if not isinstance(param, str):
+                    param = str(param)
+                
+                # 移除不可见字符和控制字符
+                safe_param = ''.join(char for char in param if char.isprintable() or char.isspace())
+                safe_template_params.append(safe_param)
+            
+            # 分析模板参数种类和特性
+            param_analysis = self._analyze_template_parameters(safe_template_params)
+            
+            # 生成参数种类摘要
+            kind_signature = self._generate_template_kind_signature(param_analysis)
+            
+            # 生成参数内容摘要  
+            content_signature = self._generate_template_content_signature(param_analysis)
+            
+            # 安全的字符串编码：确保输入是有效的UTF-8
+            try:
+                kind_bytes = kind_signature.encode('utf-8', errors='replace')
+                content_bytes = content_signature.encode('utf-8', errors='replace')
+            except UnicodeError:
+                # 如果编码失败，使用ASCII安全模式
+                kind_bytes = kind_signature.encode('ascii', errors='ignore')
+                content_bytes = content_signature.encode('ascii', errors='ignore')
+            
+            # 结合种类和内容生成最终hash
+            kind_hash = hashlib.md5(kind_bytes).hexdigest()[:8]
+            content_hash = hashlib.md5(content_bytes).hexdigest()[:8]
+            
+            return f"tpl_{kind_hash}_{content_hash}"
+            
+        except Exception as e:
+            # 如果模板参数处理失败，返回安全的默认值
+            logging.warning(f"Template parameter encoding failed: {e}, using fallback")
+            fallback_signature = "".join(str(p) for p in template_params if p)
+            fallback_hash = hashlib.md5(fallback_signature.encode('ascii', errors='ignore')).hexdigest()[:8]
+            return f"tpl_fallback_{fallback_hash}"
+
+    def _analyze_template_parameters(self, template_params: List[str]) -> List[Dict[str, Any]]:
+        """
+        分析模板参数的详细特性
+        
+        Args:
+            template_params: 模板参数列表
+            
+        Returns:
+            参数分析结果列表
+        """
+        analysis_results = []
+        
         for param in template_params:
-            normalized = self._normalize_type_name_enhanced(param)
-            normalized_params.append(normalized)
+            param_info = {
+                'raw_param': param.strip(),
+                'kind': 'unknown',
+                'name': '',
+                'default_value': '',
+                'constraints': '',
+                'is_pack': False,
+                'is_specialized': False
+            }
+            
+            # 标准化参数
+            normalized_param = re.sub(r'\s+', ' ', param.strip())
+            
+            # 检查是否有默认值
+            if '=' in normalized_param:
+                param_part, default_part = normalized_param.split('=', 1)
+                param_info['default_value'] = default_part.strip()
+                normalized_param = param_part.strip()
+            
+            # 检查是否是参数包 (...)
+            if '...' in normalized_param:
+                param_info['is_pack'] = True
+                normalized_param = normalized_param.replace('...', '').strip()
+            
+            # 分析参数种类
+            param_info.update(self._classify_template_parameter(normalized_param))
+            
+            analysis_results.append(param_info)
         
-        # 生成紧凑的模板签名
-        template_sig = f"template<{','.join(normalized_params)}>"
+        return analysis_results
+
+    def _classify_template_parameter(self, param_str: str) -> Dict[str, str]:
+        """
+        分类模板参数种类
         
-        # 对模板签名进行哈希以保持USR长度合理
-        template_hash = hashlib.md5(template_sig.encode('utf-8')).hexdigest()[:12]
+        Args:
+            param_str: 模板参数字符串
+            
+        Returns:
+            分类结果
+        """
+        result = {
+            'kind': 'unknown',
+            'name': '',
+            'constraints': ''
+        }
         
-        return f"tpl_{template_hash}"
+        # 移除多余空格
+        param_str = re.sub(r'\s+', ' ', param_str.strip())
+        
+        # 1. 类型参数 (typename/class)
+        typename_match = re.match(r'^(typename|class)\s+([A-Za-z_][A-Za-z0-9_]*)', param_str)
+        if typename_match:
+            result['kind'] = 'type'
+            result['name'] = typename_match.group(2)
+            
+            # 检查约束 (C++20 concepts)
+            remaining = param_str[typename_match.end():].strip()
+            if remaining:
+                result['constraints'] = remaining
+            
+            return result
+        
+        # 2. 非类型参数 (int, bool, etc.)
+        nontype_match = re.match(r'^([^=\s]+)\s+([A-Za-z_][A-Za-z0-9_]*)', param_str)
+        if nontype_match:
+            type_part = nontype_match.group(1)
+            name_part = nontype_match.group(2)
+            
+            # 检查是否是已知的非类型参数类型
+            nontype_keywords = ['int', 'bool', 'char', 'size_t', 'auto', 'decltype']
+            for keyword in nontype_keywords:
+                if keyword in type_part:
+                    result['kind'] = 'nontype'
+                    result['name'] = name_part
+                    result['constraints'] = type_part
+                    return result
+        
+        # 3. 模板模板参数
+        template_template_match = re.match(r'^template\s*<([^>]*)>\s*(typename|class)\s+([A-Za-z_][A-Za-z0-9_]*)', param_str)
+        if template_template_match:
+            result['kind'] = 'template_template'
+            result['name'] = template_template_match.group(3)
+            result['constraints'] = template_template_match.group(1)
+            return result
+        
+        # 4. C++20 概念约束参数
+        concept_match = re.match(r'^([A-Za-z_][A-Za-z0-9_:]*)\s+([A-Za-z_][A-Za-z0-9_]*)', param_str)
+        if concept_match and not typename_match:
+            # 可能是概念约束
+            result['kind'] = 'concept'
+            result['name'] = concept_match.group(2)
+            result['constraints'] = concept_match.group(1)
+            return result
+        
+        # 5. auto参数 (C++17/20)
+        if param_str.startswith('auto'):
+            auto_match = re.match(r'^auto\s+([A-Za-z_][A-Za-z0-9_]*)', param_str)
+            if auto_match:
+                result['kind'] = 'auto'
+                result['name'] = auto_match.group(1)
+                return result
+        
+        # 6. 特化参数（具体实例化值）
+        if not any(keyword in param_str for keyword in ['typename', 'class', 'template', 'auto']):
+            # 可能是特化参数
+            result['kind'] = 'specialized'
+            result['name'] = param_str
+            return result
+        
+        # 默认情况
+        result['name'] = param_str
+        return result
+
+    def _generate_template_kind_signature(self, param_analysis: List[Dict[str, Any]]) -> str:
+        """
+        生成模板参数种类签名
+        
+        Args:
+            param_analysis: 参数分析结果
+            
+        Returns:
+            种类签名字符串
+        """
+        kind_parts = []
+        
+        for param in param_analysis:
+            kind_part = param['kind']
+            
+            # 添加修饰符
+            if param['is_pack']:
+                kind_part += '_pack'
+            
+            if param['is_specialized']:
+                kind_part += '_spec'
+            
+            if param['constraints']:
+                # 对约束进行安全的摘要处理
+                try:
+                    constraint_str = str(param['constraints'])
+                    # 移除特殊字符
+                    safe_constraint = ''.join(char for char in constraint_str if char.isprintable())
+                    constraint_hash = hashlib.md5(safe_constraint.encode('utf-8', errors='replace')).hexdigest()[:4]
+                    kind_part += f'_c{constraint_hash}'
+                except Exception:
+                    # 如果约束处理失败，忽略约束
+                    pass
+            
+            kind_parts.append(kind_part)
+        
+        return '|'.join(kind_parts)
+
+    def _generate_template_content_signature(self, param_analysis: List[Dict[str, Any]]) -> str:
+        """
+        生成模板参数内容签名
+        
+        Args:
+            param_analysis: 参数分析结果
+            
+        Returns:
+            内容签名字符串
+        """
+        content_parts = []
+        
+        for param in param_analysis:
+            content_part = str(param['name'])
+            
+            # 对于特化参数，包含完整内容
+            if param['is_specialized']:
+                content_part = str(param['raw_param'])
+            
+            # 安全处理默认值
+            if param['default_value']:
+                try:
+                    default_str = str(param['default_value'])
+                    # 移除特殊字符
+                    safe_default = ''.join(char for char in default_str if char.isprintable())
+                    default_hash = hashlib.md5(safe_default.encode('utf-8', errors='replace')).hexdigest()[:4]
+                    content_part += f'_d{default_hash}'
+                except Exception:
+                    # 如果默认值处理失败，忽略默认值
+                    pass
+            
+            # 确保content_part是安全的字符串
+            safe_content = ''.join(char for char in content_part if char.isprintable())
+            content_parts.append(safe_content)
+        
+        return '|'.join(content_parts)
+
+    def generate_template_instantiation_usr(self, base_usr: str, instantiation_args: List[str]) -> str:
+        """
+        为模板实例化生成专用USR
+        
+        Args:
+            base_usr: 基础模板USR
+            instantiation_args: 实例化参数列表
+            
+        Returns:
+            实例化USR
+        """
+        if not instantiation_args:
+            return base_usr
+        
+        try:
+            # 标准化实例化参数
+            normalized_args = []
+            for arg in instantiation_args:
+                # 确保参数是字符串且安全
+                if not isinstance(arg, str):
+                    arg = str(arg)
+                
+                # 移除特殊字符
+                safe_arg = ''.join(char for char in arg if char.isprintable() or char.isspace())
+                normalized_arg = self._normalize_type_name_enhanced(safe_arg.strip())
+                normalized_args.append(normalized_arg)
+            
+            # 生成实例化签名
+            inst_signature = f"<{','.join(normalized_args)}>"
+            
+            # 安全编码
+            try:
+                inst_bytes = inst_signature.encode('utf-8', errors='replace')
+            except UnicodeError:
+                inst_bytes = inst_signature.encode('ascii', errors='ignore')
+            
+            inst_hash = hashlib.md5(inst_bytes).hexdigest()[:12]
+            
+            # 附加到基础USR
+            return f"{base_usr}@inst_{inst_hash}"
+            
+        except Exception as e:
+            # 如果处理失败，返回基础USR
+            logging.warning(f"Template instantiation USR generation failed: {e}")
+            return base_usr
+
+    def generate_template_specialization_usr(self, base_usr: str, specialization_pattern: str) -> str:
+        """
+        为模板特化生成专用USR
+        
+        Args:
+            base_usr: 基础模板USR
+            specialization_pattern: 特化模式
+            
+        Returns:
+            特化USR
+        """
+        if not specialization_pattern:
+            return base_usr
+        
+        try:
+            # 确保输入是安全的字符串
+            if not isinstance(specialization_pattern, str):
+                specialization_pattern = str(specialization_pattern)
+            
+            # 移除特殊字符
+            safe_pattern = ''.join(char for char in specialization_pattern if char.isprintable() or char.isspace())
+            
+            # 标准化特化模式
+            normalized_pattern = self._normalize_specialization_pattern(safe_pattern)
+            
+            # 安全编码
+            try:
+                pattern_bytes = normalized_pattern.encode('utf-8', errors='replace')
+            except UnicodeError:
+                pattern_bytes = normalized_pattern.encode('ascii', errors='ignore')
+            
+            # 生成特化签名
+            spec_hash = hashlib.md5(pattern_bytes).hexdigest()[:12]
+            
+            return f"{base_usr}@spec_{spec_hash}"
+            
+        except Exception as e:
+            # 如果处理失败，返回基础USR
+            logging.warning(f"Template specialization USR generation failed: {e}")
+            return base_usr
+
+    def _normalize_specialization_pattern(self, pattern: str) -> str:
+        """
+        标准化模板特化模式
+        
+        Args:
+            pattern: 特化模式字符串
+            
+        Returns:
+            标准化后的模式
+        """
+        # 移除多余空格
+        pattern = re.sub(r'\s+', ' ', pattern.strip())
+        
+        # 标准化模板参数格式
+        pattern = re.sub(r'<\s+', '<', pattern)
+        pattern = re.sub(r'\s+>', '>', pattern)
+        pattern = re.sub(r',\s+', ',', pattern)
+        
+        # 标准化类型名
+        if '<' in pattern and '>' in pattern:
+            # 提取模板参数并标准化
+            match = re.search(r'<([^>]+)>', pattern)
+            if match:
+                args_str = match.group(1)
+                args = [arg.strip() for arg in args_str.split(',')]
+                normalized_args = [self._normalize_type_name_enhanced(arg) for arg in args]
+                normalized_template = f"<{','.join(normalized_args)}>"
+                pattern = pattern[:match.start()] + normalized_template + pattern[match.end():]
+        
+        return pattern
 
     def generate_signature_key(self, entity_type: str, qualified_name: str, 
                              signature: Optional[str] = None, 
@@ -862,7 +1461,7 @@ class NodeRepository:
         if match:
             params_str = match.group(1).strip()
             if params_str:
-                params = self._parse_parameter_list(params_str)
+                params = self._parse_parameter_list_enhanced(params_str)
                 param_types = [self._simplify_type_for_key(p) for p in params]
         
         # 构建签名键值
@@ -1379,3 +1978,196 @@ class KeyGenerator:
     def for_class(cls, qualified_name: str, file_id: str) -> str:
         """生成类签名键值（用于向后兼容）"""
         return f"{cls._simplify_type(qualified_name)}_{file_id}" 
+
+    def generate_lambda_usr(self, file_path: str, line: int, column: int, capture_signature: str = "") -> str:
+        """
+        为Lambda表达式生成唯一USR
+        
+        格式: c:@L@<file_id>@<line>@<col>[@capture_<hash>]
+        
+        Args:
+            file_path: 文件路径
+            line: 行号
+            column: 列号
+            capture_signature: 捕获列表签名（可选）
+            
+        Returns:
+            Lambda USR
+        """
+        file_id = self._get_file_identifier(file_path)
+        base_usr = f"c:@L@{file_id}@{line}@{column}"
+        
+        # 如果有捕获列表，添加捕获签名
+        if capture_signature:
+            capture_hash = hashlib.md5(capture_signature.encode('utf-8')).hexdigest()[:8]
+            base_usr += f"@cap_{capture_hash}"
+        
+        return base_usr
+
+    def generate_lambda_operator_call_usr(self, lambda_usr: str, operator_signature: str = "") -> str:
+        """
+        为Lambda的operator()生成USR
+        
+        Args:
+            lambda_usr: Lambda表达式的USR
+            operator_signature: operator()的签名
+            
+        Returns:
+            Lambda operator() USR
+        """
+        if operator_signature:
+            normalized_sig = self._normalize_function_signature_enhanced(operator_signature)
+            return f"{lambda_usr}@op{normalized_sig}"
+        
+        return f"{lambda_usr}@op()"
+
+    def generate_lambda_capture_info(self, capture_list_node: Optional[Any]) -> Dict[str, Any]:
+        """
+        分析Lambda捕获列表信息
+        
+        Args:
+            capture_list_node: tree-sitter捕获列表节点
+            
+        Returns:
+            捕获信息字典
+        """
+        capture_info = {
+            'has_captures': False,
+            'capture_default': None,  # None, 'by_copy', 'by_reference'
+            'explicit_captures': [],
+            'signature': ''
+        }
+        
+        if not capture_list_node:
+            return capture_info
+        
+        # 解析捕获列表的文本
+        capture_text = self._extract_node_text(capture_list_node)
+        if not capture_text or capture_text == '[]':
+            return capture_info
+        
+        capture_info['has_captures'] = True
+        
+        # 移除方括号
+        capture_content = capture_text.strip()[1:-1].strip()
+        
+        if not capture_content:
+            return capture_info
+        
+        # 分析捕获模式
+        if capture_content.startswith('='):
+            capture_info['capture_default'] = 'by_copy'
+            remaining = capture_content[1:].strip()
+            if remaining.startswith(','):
+                remaining = remaining[1:].strip()
+        elif capture_content.startswith('&'):
+            capture_info['capture_default'] = 'by_reference'
+            remaining = capture_content[1:].strip()
+            if remaining.startswith(','):
+                remaining = remaining[1:].strip()
+        else:
+            remaining = capture_content
+        
+        # 解析显式捕获
+        if remaining:
+            captures = [c.strip() for c in remaining.split(',')]
+            for capture in captures:
+                if capture:
+                    capture_info['explicit_captures'].append(self._parse_lambda_capture(capture))
+        
+        # 生成签名
+        capture_info['signature'] = self._generate_capture_signature(capture_info)
+        
+        return capture_info
+
+    def _parse_lambda_capture(self, capture_str: str) -> Dict[str, str]:
+        """
+        解析单个Lambda捕获项
+        
+        Args:
+            capture_str: 捕获字符串
+            
+        Returns:
+            捕获项信息
+        """
+        capture_info = {
+            'name': '',
+            'mode': 'by_copy',  # 'by_copy', 'by_reference', 'init_capture'
+            'type': '',
+            'init_expression': ''
+        }
+        
+        capture_str = capture_str.strip()
+        
+        # 检查是否是引用捕获
+        if capture_str.startswith('&'):
+            capture_info['mode'] = 'by_reference'
+            capture_str = capture_str[1:].strip()
+        
+        # 检查是否是初始化捕获 (C++14)
+        if '=' in capture_str:
+            parts = capture_str.split('=', 1)
+            var_part = parts[0].strip()
+            init_part = parts[1].strip()
+            
+            capture_info['mode'] = 'init_capture'
+            capture_info['init_expression'] = init_part
+            
+            # 变量部分可能包含类型
+            if ' ' in var_part:
+                # 可能是 "auto x" 或 "int& y" 等
+                tokens = var_part.split()
+                capture_info['type'] = ' '.join(tokens[:-1])
+                capture_info['name'] = tokens[-1]
+            else:
+                capture_info['name'] = var_part
+        else:
+            capture_info['name'] = capture_str
+        
+        return capture_info
+
+    def _generate_capture_signature(self, capture_info: Dict[str, Any]) -> str:
+        """
+        生成捕获列表签名
+        
+        Args:
+            capture_info: 捕获信息
+            
+        Returns:
+            捕获签名字符串
+        """
+        if not capture_info['has_captures']:
+            return ''
+        
+        sig_parts = []
+        
+        # 默认捕获模式
+        if capture_info['capture_default']:
+            sig_parts.append(capture_info['capture_default'])
+        
+        # 显式捕获
+        for capture in capture_info['explicit_captures']:
+            capture_sig = f"{capture['mode']}:{capture['name']}"
+            if capture['type']:
+                capture_sig += f"[{capture['type']}]"
+            if capture['init_expression']:
+                # 对初始化表达式进行哈希
+                init_hash = hashlib.md5(capture['init_expression'].encode('utf-8')).hexdigest()[:4]
+                capture_sig += f"={init_hash}"
+            sig_parts.append(capture_sig)
+        
+        return '|'.join(sig_parts)
+
+    def _extract_node_text(self, node: Any) -> str:
+        """
+        从tree-sitter节点提取文本
+        
+        Args:
+            node: tree-sitter节点
+            
+        Returns:
+            节点文本
+        """
+        if hasattr(node, 'text'):
+            return node.text.decode('utf-8')
+        return ''

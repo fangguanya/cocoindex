@@ -19,6 +19,7 @@ from dataclasses import asdict, is_dataclass, fields
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
+import re
 
 from .data_structures import Project, NodeRepository, Entity, Function, Class, Namespace
 
@@ -60,6 +61,9 @@ class CustomJsonEncoder(json.JSONEncoder):
                 result["base_classes"] = getattr(entity, 'base_classes', [])
             if hasattr(entity, 'methods'):
                 result["methods"] = getattr(entity, 'methods', [])
+            # ✅ 添加函数体内容导出
+            if hasattr(entity, 'code_content'):
+                result["code_content"] = getattr(entity, 'code_content', '')
             
             return result
         else:
@@ -432,8 +436,11 @@ class JsonExporter:
                             # 强制垃圾回收（更频繁）
                             gc.collect()
                         
+                        # 清理USR以防止JSON格式错误
+                        sanitized_usr = self._sanitize_usr_for_json_key(usr_id)
+                        
                         # 使用字符串拼接而不是JSON序列化
-                        f.write(f'    "{usr_id}": {{\n')
+                        f.write(f'    "{sanitized_usr}": {{\n')
                         f.write(f'      "type": "{entity.type}",\n')
                         f.write('      "data": ')
                         
@@ -1478,6 +1485,35 @@ class JsonExporter:
         quality_score = max(0.0, 1.0 - (total_issues / total_entities))
         return round(quality_score, 3) 
 
+    def _sanitize_usr_for_json_key(self, usr: str) -> str:
+        """
+        清理USR以用作JSON键值，移除可能破坏JSON格式的字符
+        
+        Args:
+            usr: 原始USR字符串
+            
+        Returns:
+            清理后的USR字符串，适合用作JSON键值
+        """
+        if not usr:
+            return "unknown_usr"
+        
+        # 移除或替换可能破坏JSON的字符
+        sanitized = usr.replace('\n', ' ')  # 将换行符替换为空格
+        sanitized = sanitized.replace('\r', ' ')  # 将回车符替换为空格
+        sanitized = sanitized.replace('\t', ' ')  # 将制表符替换为空格
+        sanitized = re.sub(r'\s+', ' ', sanitized)  # 将多个空格合并为单个空格
+        sanitized = sanitized.strip()  # 移除首尾空格
+        
+        # 移除可能的控制字符
+        sanitized = ''.join(char for char in sanitized if ord(char) >= 32 or char in [' '])
+        
+        # 确保不为空
+        if not sanitized:
+            return "unknown_usr"
+            
+        return sanitized
+
     def _write_functions_streaming(self, f, repo: NodeRepository):
         """流式写入函数实体，分批处理避免内存峰值"""
         from .logger import Logger
@@ -1500,7 +1536,9 @@ class JsonExporter:
                 remaining = (total_functions - i) / rate if rate > 0 else 0
                 logger.info(f"   📊 函数进度: {i}/{total_functions} ({i/total_functions*100:.1f}%) - 处理速度: {rate:.1f}/秒 - 预估剩余: {remaining:.1f}秒")
                 
-            f.write(f'      "{func.usr}": ')
+            # 清理USR以防止JSON格式错误
+            sanitized_usr = self._sanitize_usr_for_json_key(func.usr)
+            f.write(f'      "{sanitized_usr}": ')
             func_data = self._build_function_entity(func, repo)
             json.dump(func_data, f, cls=CustomJsonEncoder, ensure_ascii=False)
             
@@ -1518,7 +1556,7 @@ class JsonExporter:
         logger.info(f"   ✅ 函数实体写入完成: {total_functions} 个，耗时: {total_time:.2f}秒")
 
     def _write_classes_streaming(self, f, repo: NodeRepository):
-        """流式写入类实体"""
+        """流式写入类实体，分批处理避免内存峰值"""
         from .logger import Logger
         logger = Logger.get_logger()
         import time
@@ -1529,29 +1567,37 @@ class JsonExporter:
         
         logger.info(f"   📈 开始处理 {total_classes} 个类实体...")
         start_time = time.time()
+        batch_size = 50
         
         for i, cls in enumerate(classes):
-            # 每50个类输出一次进度
-            if i % 50 == 0 and i > 0:
+            # 批次进度日志
+            if i % batch_size == 0 and i > 0:
                 elapsed = time.time() - start_time
                 rate = i / elapsed if elapsed > 0 else 0
                 remaining = (total_classes - i) / rate if rate > 0 else 0
                 logger.info(f"   📊 类进度: {i}/{total_classes} ({i/total_classes*100:.1f}%) - 处理速度: {rate:.1f}/秒 - 预估剩余: {remaining:.1f}秒")
                 
-            f.write(f'      "{cls.usr}": ')
+            # 清理USR以防止JSON格式错误
+            sanitized_usr = self._sanitize_usr_for_json_key(cls.usr)
+            f.write(f'      "{sanitized_usr}": ')
             cls_data = self._build_class_entity(cls, repo)
             json.dump(cls_data, f, cls=CustomJsonEncoder, ensure_ascii=False)
             
             if i < total_classes - 1:
                 f.write(',')
             f.write('\n')
+            
+            # 内存管理
+            if i % 50 == 0:
+                import gc
+                gc.collect()
         
         f.write('    }')
         total_time = time.time() - start_time
         logger.info(f"   ✅ 类实体写入完成: {total_classes} 个，耗时: {total_time:.2f}秒")
 
     def _write_namespaces_streaming(self, f, repo: NodeRepository):
-        """流式写入命名空间实体"""
+        """流式写入命名空间实体，分批处理避免内存峰值"""
         from .logger import Logger
         logger = Logger.get_logger()
         import time
@@ -1564,7 +1610,9 @@ class JsonExporter:
         start_time = time.time()
         
         for i, ns in enumerate(namespaces):
-            f.write(f'      "{ns.usr}": ')
+            # 清理USR以防止JSON格式错误
+            sanitized_usr = self._sanitize_usr_for_json_key(ns.usr)
+            f.write(f'      "{sanitized_usr}": ')
             ns_data = self._build_namespace_entity(ns, repo)
             json.dump(ns_data, f, cls=CustomJsonEncoder, ensure_ascii=False)
             

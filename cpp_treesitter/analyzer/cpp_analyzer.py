@@ -171,6 +171,10 @@ class CppAnalyzer:
         self.cache_hits = 0
         self.cache_misses = 0
 
+        # 在分析过程中保存这些数据
+        self.file_contents: Dict[str, bytes] = {}  # 保存文件内容用于验证
+        self.parsed_trees: Dict[str, Any] = {}    # 保存解析的AST用于验证
+
     def analyze(self) -> Project:
         """
         执行C++项目的完整两阶段分析.
@@ -235,6 +239,29 @@ class CppAnalyzer:
                 self.logger.info(f"预估节省时间: {estimated_time_saved:.2f} 秒")
             
             self.logger.info("=" * 60)
+            
+            # 添加质量保证验证
+            self.logger.info("🎯 开始质量保证验证...")
+            from .quality_assurance import QualityAssuranceReporter
+            
+            qa_reporter = QualityAssuranceReporter()
+            qa_report = qa_reporter.generate_comprehensive_report(
+                self.repo, 
+                self.file_contents,
+                self.parsed_trees
+            )
+            
+            # 打印质量报告摘要
+            qa_reporter.print_summary(qa_report)
+            
+            # 导出质量保证报告
+            analysis_output_path = os.path.join(self.project_path, "analysis_results")
+            os.makedirs(analysis_output_path, exist_ok=True)
+            qa_report_path = os.path.join(analysis_output_path, "quality_assurance_report.json")
+            qa_reporter.export_report(qa_report, qa_report_path)
+            
+            self.logger.info(f"📊 总体质量评分: {qa_report.overall_quality_score}/100")
+            self.logger.info(f"🎯 质量保证报告已导出到: {qa_report_path}")
             
             return self.project
             
@@ -393,7 +420,11 @@ class CppAnalyzer:
         if not tree or not tree.root_node:
             self.logger.warning(f"无法解析文件: {file_path}")
             return
-        
+
+        # 保存文件内容和解析树用于质量保证验证
+        self.file_contents[file_path_str] = content.encode('utf-8')
+        self.parsed_trees[file_path_str] = tree.root_node
+
         # 创建实体提取器并执行第一阶段
         extractor = EntityExtractor(str(file_path), content, self.repo, file_id)
         extractor.phase_one_collect_declarations(tree.root_node)

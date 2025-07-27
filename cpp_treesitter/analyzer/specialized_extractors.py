@@ -274,8 +274,11 @@ class FunctionExtractor(BaseExtractor):
             # 提取函数签名
             signature = self._extract_function_signature(function_node)
             
-            # 创建USR
-            usr = self.repo.generate_usr('function', qualified_name, signature, self.file_path)
+            # 检测并提取模板参数
+            template_params = self._extract_template_parameters(node)
+            
+            # 创建USR，包含模板参数
+            usr = self.repo.generate_usr('function', qualified_name, signature, self.file_path, template_params)
             
             # 创建函数实体
             function = Function(
@@ -289,6 +292,11 @@ class FunctionExtractor(BaseExtractor):
                 is_definition=is_definition,
                 parent_class=self.repo.generate_usr('class', self._get_current_class()) if self.current_class_stack else None
             )
+            
+            # 如果是模板函数，标记并保存模板参数
+            if template_params:
+                function.is_template = True
+                function.template_params = template_params
             
             # 设置位置信息
             if is_definition:
@@ -310,11 +318,85 @@ class FunctionExtractor(BaseExtractor):
             if is_definition:
                 function.code_content = self._extract_function_body(node)
                 
-            self.logger.debug(f"提取函数: {function.qualified_name} ({'定义' if is_definition else '声明'})")
+            self.logger.debug(f"提取函数: {function.qualified_name} ({'定义' if is_definition else '声明'}) {'(模板)' if template_params else ''}")
             return function
             
         except Exception as e:
             self.logger.error(f"函数提取失败 {node.start_point}: {e}")
+            return None
+
+    def _extract_template_parameters(self, node: Node) -> Optional[List[str]]:
+        """
+        检测并提取模板参数
+        
+        Args:
+            node: 函数节点
+            
+        Returns:
+            模板参数列表，如果不是模板函数则返回None
+        """
+        try:
+            # 检查父节点是否为template_declaration
+            parent = node.parent
+            if not parent or parent.type != 'template_declaration':
+                return None
+            
+            # 查找template_parameter_list
+            template_params_node = None
+            for child in parent.children:
+                if child.type == 'template_parameter_list':
+                    template_params_node = child
+                    break
+            
+            if not template_params_node:
+                return None
+            
+            # 提取模板参数名称
+            template_params = []
+            for param_node in template_params_node.children:
+                if param_node.type in ['type_parameter_declaration', 'parameter_declaration']:
+                    param_name = self._extract_template_param_name(param_node)
+                    if param_name:
+                        template_params.append(param_name)
+            
+            return template_params if template_params else None
+            
+        except Exception as e:
+            self.logger.warning(f"模板参数提取失败: {e}")
+            return None
+
+    def _extract_template_param_name(self, param_node: Node) -> Optional[str]:
+        """
+        提取模板参数名称
+        
+        Args:
+            param_node: 模板参数节点
+            
+        Returns:
+            参数名称
+        """
+        try:
+            # 处理 typename T 或 class T 类型的参数
+            if param_node.type == 'type_parameter_declaration':
+                for child in param_node.children:
+                    if child.type == 'type_identifier':
+                        return self._get_text(child)
+            
+            # 处理 int N 类型的非类型参数
+            elif param_node.type == 'parameter_declaration':
+                # 查找参数名（最后一个identifier通常是参数名）
+                identifiers = []
+                for child in param_node.children:
+                    if child.type == 'identifier':
+                        identifiers.append(self._get_text(child))
+                
+                if identifiers:
+                    return identifiers[-1]  # 返回最后一个identifier作为参数名
+            
+            return None
+            
+        except Exception as e:
+            self.logger.warning(f"模板参数名提取失败: {e}")
             return None
     
     def _extract_function_name(self, declarator: Node) -> Optional[str]:
@@ -336,7 +418,11 @@ class FunctionExtractor(BaseExtractor):
             # 查找参数列表
             params = declarator.child_by_field_name('parameters')
             if params:
-                return self._get_text(params)
+                signature = self._get_text(params)
+                # 标准化签名，移除换行符和多余空格
+                signature = signature.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
+                signature = ' '.join(signature.split())  # 移除多余空格
+                return signature
         return "()"
     
     def _extract_return_type(self, node: Node) -> Optional[str]:
