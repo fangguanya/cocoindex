@@ -514,28 +514,54 @@ class JsonExporter:
         logger.info(f"      📈 开始处理 {total_files} 个文件的模块信息...")
         
         start_time = time.time()
-        batch_size = 50
+        batch_size = 200  # 增加批次大小以减少日志频率
         
         f.write('{\n')
         
-        # 按文件组织模块
-        for i, file_path in enumerate(project.files):
-            # 批次进度日志
-            if i % batch_size == 0 and i > 0:
-                elapsed = time.time() - start_time
-                rate = i / elapsed if elapsed > 0 else 0
-                remaining = (total_files - i) / rate if rate > 0 else 0
-                logger.info(f"      📊 模块文件进度: {i}/{total_files} ({i/total_files*100:.1f}%) - 处理速度: {rate:.1f}/秒 - 预估剩余: {remaining:.1f}秒")
-            
-            file_id = self._get_file_id_for_path(file_path)
+        # 高性能预处理：构建所有必要的映射
+        logger.info(f"      🔄 高性能预处理实体数据...")
+        preprocess_start = time.time()
+        
+        # 1. 预建文件ID映射 - 避免重复的路径查找
+        file_id_map = {}
+        sorted_files = sorted(project.files)  # 排序确保一致性
+        for i, file_path in enumerate(sorted_files):
+            file_id_map[file_path] = f"f{i+1:03d}"  # f001, f002, f003...
+        
+        # 2. 批量获取所有实体数据
+        file_entities_map = {}
+        entities_processed = 0
+        for file_path in project.files:
             entities = repo.get_nodes_by_file(file_path)
-            
-            # 直接构建并写入模块信息，不使用CustomJsonEncoder
-            module_info = {
-                "file_path": file_path,
+            entities_processed += len(entities)
+            file_entities_map[file_path] = {
                 "functions": [e.usr for e in entities if isinstance(e, Function)],
                 "classes": [e.usr for e in entities if isinstance(e, Class)],
                 "namespaces": [e.usr for e in entities if isinstance(e, Namespace)]
+            }
+        
+        preprocess_time = time.time() - preprocess_start
+        logger.info(f"      ✅ 预处理完成: {entities_processed} 个实体，耗时: {preprocess_time:.2f}秒")
+        
+        # 高速写入阶段
+        write_start = time.time()
+        
+        # 按文件顺序快速写入
+        for i, file_path in enumerate(project.files):
+            # 减少日志频率以提高性能
+            if i % batch_size == 0 and i > 0:
+                elapsed = time.time() - write_start
+                rate = i / elapsed if elapsed > 0 else 0
+                remaining = (total_files - i) / rate if rate > 0 else 0
+                logger.info(f"      📊 写入进度: {i}/{total_files} ({i/total_files*100:.1f}%) - 速度: {rate:.1f}/秒 - 剩余: {remaining:.1f}秒")
+            
+            # 使用预建的映射，避免昂贵的路径查找
+            file_id = file_id_map.get(file_path, f"f{i+1:03d}")
+            
+            # 使用预处理的数据
+            module_info = {
+                "file_path": file_path,
+                **file_entities_map[file_path]
             }
             
             f.write(f'      "{file_id}": ')
@@ -544,16 +570,12 @@ class JsonExporter:
             if i < total_files - 1:
                 f.write(',')
             f.write('\n')
-            
-            # 定期释放内存
-            if i % 100 == 0:
-                import gc
-                gc.collect()
         
         f.write('    }')
         
         total_time = time.time() - start_time
-        logger.info(f"      ✅ 模块信息处理完成: {total_files} 个文件，耗时: {total_time:.2f}秒")
+        write_time = time.time() - write_start
+        logger.info(f"      ✅ 模块信息完成: {total_files} 个文件，总耗时: {total_time:.2f}秒，写入耗时: {write_time:.2f}秒")
 
     def _build_modules_info(self, project: Project, repo: NodeRepository) -> Dict[str, Any]:
         """构建模块信息（保留用于向后兼容）"""
@@ -779,24 +801,40 @@ class JsonExporter:
         }
 
     def _get_file_id_for_path(self, file_path: str) -> str:
-        """修复：为文件路径生成正确的文件ID"""
+        """优化的文件路径到ID映射方法"""
         # 确保文件映射已初始化
         if not self._reverse_file_mappings:
-            # 如果映射未初始化，返回默认值并记录警告
             return "f001"
         
-        # 从反向映射中查找文件ID
+        # 快速查找 - 直接键匹配
         file_id = self._reverse_file_mappings.get(file_path)
         if file_id:
             return file_id
         
-        # 如果找不到，尝试标准化路径后再查找
-        normalized_path = str(Path(file_path).resolve()).replace('\\', '/')
-        for path, fid in self._reverse_file_mappings.items():
-            if str(Path(path).resolve()).replace('\\', '/') == normalized_path:
-                return fid
+        # 如果直接查找失败，使用缓存的标准化路径查找
+        if not hasattr(self, '_normalized_path_cache'):
+            self._normalized_path_cache = {}
         
-        # 如果仍然找不到，返回默认值
+        # 检查缓存
+        if file_path in self._normalized_path_cache:
+            return self._normalized_path_cache[file_path]
+        
+        # 标准化当前路径并查找
+        try:
+            normalized_path = str(Path(file_path).resolve()).replace('\\', '/')
+            for path, fid in self._reverse_file_mappings.items():
+                # 只有在必要时才标准化映射中的路径
+                if '\\' in path or not path.startswith('/'):
+                    mapped_normalized = str(Path(path).resolve()).replace('\\', '/')
+                    if mapped_normalized == normalized_path:
+                        self._normalized_path_cache[file_path] = fid
+                        return fid
+        except (OSError, ValueError):
+            # 路径标准化失败，继续使用默认值
+            pass
+        
+        # 缓存未找到的结果，避免重复计算
+        self._normalized_path_cache[file_path] = "f001"
         return "f001"
 
     def _get_entities_from_usrs(self, usrs: List[str], repo: NodeRepository) -> List[Dict[str, Any]]:
