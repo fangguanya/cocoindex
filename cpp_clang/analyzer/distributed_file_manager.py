@@ -54,8 +54,8 @@ class DistributedFileIdManager:
         
         normalized_path = self._normalize_path(file_path)
         file_id = self._path_to_id.get(normalized_path)
-        if not file_id:
-            self.logger.warning(f"未找到文件 '{normalized_path}' 的预分配ID。该文件可能未包含在初始文件列表中。")
+        # if not file_id:
+        #     self.logger.warning(f"未找到文件 '{normalized_path}' 的预分配ID。该文件可能未包含在初始文件列表中。")
         return file_id
 
     def _normalize_path(self, file_path: str) -> str:
