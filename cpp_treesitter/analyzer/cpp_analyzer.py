@@ -150,9 +150,11 @@ class CppAnalyzer:
         self.repo.clear()  # 确保从一个干净的状态开始
         self.call_analyzer = CallRelationshipAnalyzer(self.repo)
         
-        # 初始化文件管理器
-        self.file_manager = get_file_manager()
+        # 初始化文件管理器 - 传入project_root
+        self.file_manager = get_file_manager(str(self.project_path))
         self.file_manager.clear()  # 重置文件管理器
+        # 重新设置project_root（因为clear()不会重置它）
+        self.file_manager.project_root = self.project_path
         
         # 初始化模板分析器
         self.template_analyzer = TemplateAnalyzer(self.repo)

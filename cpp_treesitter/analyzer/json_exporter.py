@@ -61,9 +61,39 @@ class CustomJsonEncoder(json.JSONEncoder):
                 result["base_classes"] = getattr(entity, 'base_classes', [])
             if hasattr(entity, 'methods'):
                 result["methods"] = getattr(entity, 'methods', [])
-            # ✅ 添加函数体内容导出
-            if hasattr(entity, 'code_content'):
-                result["code_content"] = getattr(entity, 'code_content', '')
+            
+            # 对于函数类型，检查是否为定义，只为定义添加location和code_content
+            if getattr(entity, 'type', '') == 'function':
+                is_definition = getattr(entity, 'is_definition', False)
+                if is_definition:
+                    # 添加location字段（函数体的起始和结束地址）
+                    definition_location = getattr(entity, 'definition_location', None)
+                    if definition_location:
+                        result["location"] = {
+                            "start": {
+                                "line": getattr(entity, 'start_line', 0),
+                                "column": getattr(definition_location, 'column', 0)
+                            },
+                            "end": {
+                                "line": getattr(entity, 'end_line', 0),
+                                "column": 0
+                            }
+                        }
+                    else:
+                        # 备用方案：使用start_line和end_line
+                        result["location"] = {
+                            "start": {
+                                "line": getattr(entity, 'start_line', 0),
+                                "column": 0
+                            },
+                            "end": {
+                                "line": getattr(entity, 'end_line', 0),
+                                "column": 0
+                            }
+                        }
+                    
+                    # 添加函数体内容
+                    result["code_content"] = getattr(entity, 'code_content', '')
             
             return result
         else:
@@ -343,9 +373,23 @@ class JsonExporter:
                 
                 f.write('  },\n')
                 
-                # 简化的其他部分
-                f.write('  "oop_analysis": {},\n')
-                f.write('  "cpp_analysis": {},\n')
+                # OOP 分析
+                logger.info("🔗 构建 OOP 分析...")
+                oop_start = time.time()
+                f.write('  "oop_analysis": ')
+                oop_analysis = self._build_oop_analysis(repo)
+                json.dump(oop_analysis, f, cls=CustomJsonEncoder, ensure_ascii=False)
+                f.write(',\n')
+                oop_time = time.time() - oop_start
+                logger.info(f"   ✅ OOP 分析完成，耗时: {oop_time:.2f}秒")
+                
+                # C++ 分析
+                logger.info("🔧 构建 C++ 分析...")
+                cpp_start = time.time()
+                f.write('  "cpp_analysis": ')
+                cpp_analysis = self._build_cpp_analysis(repo)
+                json.dump(cpp_analysis, f, cls=CustomJsonEncoder, ensure_ascii=False)
+                f.write(',\n')
                 
                 # 摘要
                 f.write('  "summary": ')
@@ -487,13 +531,13 @@ class JsonExporter:
             raise
 
     def _initialize_file_mappings(self, repo: NodeRepository):
-        """初始化文件映射缓存"""
+        """初始化文件映射缓存 - 使用相对路径"""
         if self.file_manager:
-            # 使用文件管理器的映射
+            # 使用文件管理器的映射（已经是相对路径）
             self._file_mappings = self.file_manager.get_file_mappings()
             self._reverse_file_mappings = self.file_manager.get_reverse_mappings()
         else:
-            # 备用方案：从repo中收集文件
+            # 备用方案：从repo中收集文件并转换为相对路径
             files = set()
             
             # 收集所有文件路径
@@ -501,14 +545,37 @@ class JsonExporter:
                 if hasattr(entity, 'file_path') and entity.file_path:
                     files.add(entity.file_path)
             
-            # 生成文件ID映射
+            # 生成文件ID映射 - 转换为相对路径
             self._file_mappings.clear()
             self._reverse_file_mappings.clear()
             
+            # 尝试从第一个实体推断project_root
+            project_root = None
+            if files:
+                first_file = next(iter(files))
+                if hasattr(repo, 'project_root') and repo.project_root:
+                    project_root = Path(repo.project_root)
+                elif '\\' in first_file or '/' in first_file:
+                    # 尝试推断一个合理的项目根目录
+                    project_root = Path(first_file).parent.parent
+            
             for i, file_path in enumerate(sorted(files), 1):
                 file_id = f"f{i:03d}"
-                self._file_mappings[file_id] = file_path
-                self._reverse_file_mappings[file_path] = file_id
+                
+                # 转换为相对路径
+                if project_root:
+                    try:
+                        abs_path = Path(file_path).resolve()
+                        rel_path = abs_path.relative_to(project_root.resolve())
+                        relative_path = str(rel_path).replace('\\', '/')
+                    except (ValueError, OSError):
+                        # 转换失败，使用原路径
+                        relative_path = file_path.replace('\\', '/')
+                else:
+                    relative_path = file_path.replace('\\', '/')
+                
+                self._file_mappings[file_id] = relative_path
+                self._reverse_file_mappings[file_path] = file_id  # 保持原路径作为key
 
     def _build_file_mappings(self, repo: NodeRepository) -> Dict[str, str]:
         """构建文件ID映射（保持向后兼容）"""
@@ -1088,7 +1155,23 @@ class JsonExporter:
         
         for usr_id, entity in repo.nodes.items():
             if isinstance(entity, Function) and entity.calls_to:
+                caller_info = repo.get_node(usr_id)
+                caller_name = caller_info.name if caller_info else "Unknown"
+                caller_class_name = None
+                if caller_info and caller_info.parent_class:
+                    caller_class_node = repo.get_node(caller_info.parent_class)
+                    if caller_class_node:
+                        caller_class_name = caller_class_node.name
+
                 for callee_usr in entity.calls_to:
+                    callee_info = repo.get_node(callee_usr)
+                    callee_name = callee_info.name if callee_info else "Unknown"
+                    callee_class_name = None
+                    if callee_info and callee_info.parent_class:
+                        callee_class_node = repo.get_node(callee_info.parent_class)
+                        if callee_class_node:
+                            callee_class_name = callee_class_node.name
+                    
                     # 查找详细的调用信息
                     call_detail = None
                     for call_info in getattr(entity, 'call_details', []):
@@ -1099,6 +1182,10 @@ class JsonExporter:
                     relation = {
                         "caller_usr": usr_id,
                         "callee_usr": callee_usr,
+                        "caller_function_name": caller_name,
+                        "callee_function_name": callee_name,
+                        "caller_class_name": caller_class_name,
+                        "callee_class_name": callee_class_name,
                         "call_type": call_detail.type if call_detail else "direct",
                         "line": call_detail.line if call_detail else entity.start_line,
                         "column": call_detail.column if call_detail else 0
@@ -1659,12 +1746,33 @@ class JsonExporter:
         call_relations = []
         for node in repo.nodes.values():
             if hasattr(node, 'calls_to') and node.calls_to:
+                caller_info = repo.get_node(node.usr)
+                caller_name = caller_info.name if caller_info else "Unknown"
+                caller_class_name = None
+                if caller_info and caller_info.parent_class:
+                    caller_class_node = repo.get_node(caller_info.parent_class)
+                    if caller_class_node:
+                        caller_class_name = caller_class_node.name
+
                 for callee_usr in node.calls_to:
-                    call_relations.append({
+                    callee_info = repo.get_node(callee_usr)
+                    callee_name = callee_info.name if callee_info else "Unknown"
+                    callee_class_name = None
+                    if callee_info and callee_info.parent_class:
+                        callee_class_node = repo.get_node(callee_info.parent_class)
+                        if callee_class_node:
+                            callee_class_name = callee_class_node.name
+                    
+                    call_relation = {
                         "caller_usr": node.usr,
                         "callee_usr": callee_usr,
-                        "call_type": "direct"
-                    })
+                        "caller_function_name": caller_name,
+                        "callee_function_name": callee_name,
+                        "caller_class_name": caller_class_name,
+                        "callee_class_name": callee_class_name,
+                        "call_type": "direct"  # 流式模式下简化
+                    }
+                    call_relations.append(call_relation)
         
         collect_time = time.time() - collect_start
         total_relations = len(call_relations)
@@ -1807,7 +1915,7 @@ class JsonExporter:
 
     def _build_function_entity(self, func_node, repo: NodeRepository) -> Dict[str, Any]:
         """构建单个函数实体数据"""
-        return {
+        result = {
             "usr": func_node.usr,
             "name": func_node.name,
             "signature": getattr(func_node, 'signature', ''),
@@ -1819,6 +1927,39 @@ class JsonExporter:
             "calls_to": list(getattr(func_node, 'calls_to', [])),
             "called_by": list(getattr(func_node, 'called_by', []))
         }
+        
+        # 只有函数定义才包含 location 和 code_content
+        is_definition = getattr(func_node, 'is_definition', False)
+        if is_definition:
+            # 添加 location 字段
+            definition_location = getattr(func_node, 'definition_location', None)
+            if definition_location:
+                result["location"] = {
+                    "start": {
+                        "line": getattr(func_node, 'start_line', 0),
+                        "column": getattr(definition_location, 'column', 0)
+                    },
+                    "end": {
+                        "line": getattr(func_node, 'end_line', 0),
+                        "column": 0
+                    }
+                }
+            else:
+                result["location"] = {
+                    "start": {
+                        "line": getattr(func_node, 'start_line', 0),
+                        "column": 0
+                    },
+                    "end": {
+                        "line": getattr(func_node, 'end_line', 0),
+                        "column": 0
+                    }
+                }
+            
+            # 添加 code_content 字段
+            result["code_content"] = getattr(func_node, 'code_content', '')
+        
+        return result
 
     def _build_class_entity(self, class_node, repo: NodeRepository) -> Dict[str, Any]:
         """构建单个类实体数据"""
@@ -1860,7 +2001,7 @@ class JsonExporter:
         
         # 只为特定类型添加额外字段
         if isinstance(entity, Function):
-            entity_dict.update({
+            function_data = {
                 "signature": entity.signature,
                 "return_type": entity.return_type,
                 "parameters": entity.parameters,
@@ -1871,7 +2012,6 @@ class JsonExporter:
                 "is_virtual": entity.is_virtual,
                 "access_specifier": entity.access_specifier,
                 "parent_class": entity.parent_class,
-                "code_content": getattr(entity, 'code_content', ''),  # ✅ 添加函数体内容
                 "cpp_extensions": {
                     "qualified_name": entity.qualified_name,
                     "namespace": "::".join(entity.qualified_name.split("::")[:-1]) if "::" in entity.qualified_name else "",
@@ -1880,7 +2020,39 @@ class JsonExporter:
                     "return_type": entity.return_type or "",
                     "usr": entity.usr
                 }
-            })
+            }
+            
+            # 只为函数定义添加location字段和code_content
+            if entity.is_definition:
+                # 添加location字段（函数体的起始和结束地址）
+                if hasattr(entity, 'definition_location') and entity.definition_location:
+                    function_data["location"] = {
+                        "start": {
+                            "line": entity.start_line,
+                            "column": entity.definition_location.column if entity.definition_location else 0
+                        },
+                        "end": {
+                            "line": entity.end_line,
+                            "column": 0  # 结束列通常设为0，因为一般以行为准
+                        }
+                    }
+                else:
+                    # 备用方案：使用start_line和end_line
+                    function_data["location"] = {
+                        "start": {
+                            "line": entity.start_line,
+                            "column": 0
+                        },
+                        "end": {
+                            "line": entity.end_line,
+                            "column": 0
+                        }
+                    }
+                
+                # 添加函数体内容
+                function_data["code_content"] = getattr(entity, 'code_content', '')
+            
+            entity_dict.update(function_data)
         elif isinstance(entity, Class):
             entity_dict.update({
                 "base_classes": entity.base_classes,
@@ -1898,4 +2070,103 @@ class JsonExporter:
                 "children": getattr(entity, 'children', [])
             })
         
-        return entity_dict 
+        return entity_dict
+
+    def _build_oop_analysis(self, repo: NodeRepository) -> Dict[str, Any]:
+        """构建 OOP 分析信息"""
+        # 收集所有类
+        classes = {}
+        for usr_id, entity in repo.nodes.items():
+            if isinstance(entity, Class):
+                classes[usr_id] = entity
+        
+        # 构建继承图
+        inheritance_graph = self._build_inheritance_graph(repo)
+        
+        # 计算方法解析顺序（简化版）
+        method_resolution_orders = {}
+        for usr_id, class_entity in classes.items():
+            if class_entity.base_classes:
+                # 简单的线性化：基类优先
+                mro = [usr_id] + class_entity.base_classes
+                method_resolution_orders[usr_id] = mro
+        
+        return {
+            "total_classes": len(classes),
+            "class_references": list(classes.keys()),
+            "inheritance_graph": inheritance_graph,
+            "method_resolution_orders": method_resolution_orders,
+            "abstract_classes": [
+                usr_id for usr_id, cls in classes.items() 
+                if cls.is_abstract
+            ],
+            "struct_classes": [
+                usr_id for usr_id, cls in classes.items() 
+                if cls.is_struct
+            ],
+            "template_classes": [
+                usr_id for usr_id, cls in classes.items() 
+                if cls.is_template
+            ]
+        }
+
+    def _build_cpp_analysis(self, repo: NodeRepository) -> Dict[str, Any]:
+        """构建 C++ 分析信息"""
+        # 收集所有命名空间
+        namespaces = {}
+        for usr_id, entity in repo.nodes.items():
+            if isinstance(entity, Namespace):
+                namespaces[usr_id] = entity
+        
+        # 收集模板信息
+        templates = {}
+        for usr_id, entity in repo.nodes.items():
+            if isinstance(entity, (Function, Class)) and entity.is_template:
+                template_info = {
+                    "name": entity.name,
+                    "type": "function" if isinstance(entity, Function) else "class",
+                    "qualified_name": entity.qualified_name,
+                    "template_parameters": getattr(entity, 'template_parameters', [])
+                }
+                templates[usr_id] = template_info
+        
+        # 收集函数重载信息
+        function_overloads = {}
+        function_groups = {}
+        for usr_id, entity in repo.nodes.items():
+            if isinstance(entity, Function):
+                base_name = entity.name
+                if base_name not in function_groups:
+                    function_groups[base_name] = []
+                function_groups[base_name].append(usr_id)
+        
+        # 找出重载的函数
+        for base_name, usrs in function_groups.items():
+            if len(usrs) > 1:
+                function_overloads[base_name] = usrs
+        
+        return {
+            "total_namespaces": len(namespaces),
+            "namespace_references": list(namespaces.keys()),
+            "templates": templates,
+            "function_overloads": function_overloads,
+            "preprocessor": {},  # 预处理器信息（暂时为空）
+            "operators": self._collect_operator_overloads(repo),
+            "total_functions": len([
+                usr for usr, entity in repo.nodes.items() 
+                if isinstance(entity, Function)
+            ])
+        }
+
+    def _collect_operator_overloads(self, repo: NodeRepository) -> Dict[str, List[str]]:
+        """收集操作符重载信息"""
+        operators = {}
+        
+        for usr_id, entity in repo.nodes.items():
+            if isinstance(entity, Function) and entity.name.startswith('operator'):
+                operator_name = entity.name
+                if operator_name not in operators:
+                    operators[operator_name] = []
+                operators[operator_name].append(usr_id)
+        
+        return operators

@@ -17,7 +17,7 @@ Tree-sitter Entity Extractor Module
 """
 # type: ignore
 from tree_sitter import Node
-from typing import List, Optional, Dict, Tuple
+from typing import List, Optional, Dict, Tuple, Any
 import re
 
 from .logger import Logger
@@ -84,12 +84,13 @@ class EntityExtractor:
         self._traverse_for_definitions(root_node)
 
     def _traverse_for_declarations(self, node: Node):
-        """第一阶段遍历：只收集声明"""
-        node_stack = [(node, [])]  # (node, namespace_stack)
+        """第一阶段遍历：只收集声明 - 修复上下文传递"""
+        node_stack = [(node, [], [])]  # (node, namespace_stack, class_stack)
         
         while node_stack:
-            current_node, ns_stack = node_stack.pop()
-            self.current_namespace_stack = ns_stack.copy()
+            current_node, ns_stack, class_stack = node_stack.pop()
+            self.current_namespace_stack = ns_stack
+            self.current_class_stack = class_stack
             
             # 更新调用分析器的上下文
             self.call_analyzer.set_context(self.current_namespace_stack, self.current_class_stack)
@@ -104,16 +105,25 @@ class EntityExtractor:
                 self._extract_declaration_node(current_node)
             elif current_node.type == 'enum_specifier':
                 self._extract_enum_declaration(current_node)
+            elif current_node.type == 'template_declaration':
+                self._extract_template_declaration(current_node)
             
-            # 将子节点逆序入栈，传播命名空间上下文
+            # 将子节点逆序入栈，传播命名空间和类上下文
             if hasattr(current_node, 'children'):
                 for child in reversed(current_node.children):
                     child_ns_stack = ns_stack.copy()
+                    child_class_stack = class_stack.copy()
+
                     if current_node.type == 'namespace_definition':
                         name_node = current_node.child_by_field_name('name')
                         if name_node:
                             child_ns_stack.append(self._get_text(name_node))
-                    node_stack.append((child, child_ns_stack))
+                    elif current_node.type in ['class_specifier', 'struct_specifier']:
+                        name_node = current_node.child_by_field_name('name')
+                        if name_node:
+                            child_class_stack.append(self._get_text(name_node))
+                    
+                    node_stack.append((child, child_ns_stack, child_class_stack))
 
     def _traverse_for_definitions(self, node: Node):
         """第二阶段遍历：处理定义和调用关系"""
@@ -184,6 +194,10 @@ class EntityExtractor:
 
         has_body = node.child_by_field_name('body') is not None
         
+        # 检查是否有模板信息
+        template_params = getattr(self, '_current_template_params', None)
+        is_template_specialization = getattr(self, '_current_is_template_specialization', False)
+        
         class_obj = Class(
             usr=usr,
             name=name,
@@ -195,6 +209,12 @@ class EntityExtractor:
             is_definition=has_body,
             is_declaration=not has_body
         )
+        
+        # 添加模板信息
+        if template_params is not None:
+            class_obj.is_template = True
+            class_obj.template_parameters = template_params
+            class_obj.is_template_specialization = is_template_specialization
 
         # 提取基类信息
         base_clause = None
@@ -257,6 +277,26 @@ class EntityExtractor:
             is_definition=is_definition,
             is_declaration=not is_definition
         )
+
+        # 修复：为类成员函数设置parent_class
+        if self.current_class_stack:
+            parent_class_name = "::".join(self.current_namespace_stack + self.current_class_stack)
+            parent_class_usr = self._generate_usr('class', parent_class_name)
+            function_obj.parent_class = parent_class_usr
+            
+            # 同时将此方法添加到类的methods列表中
+            parent_class_obj = self.repo.get_node(parent_class_usr)
+            if parent_class_obj and isinstance(parent_class_obj, Class):
+                if function_obj.usr not in parent_class_obj.methods:
+                    parent_class_obj.methods.append(function_obj.usr)
+        
+        # 添加模板信息
+        template_params = getattr(self, '_current_template_params', None)
+        is_template_specialization = getattr(self, '_current_is_template_specialization', False)
+        if template_params is not None:
+            function_obj.is_template = True
+            function_obj.template_params = [param['name'] for param in template_params]  # 转换为字符串列表
+            function_obj.is_template_specialization = is_template_specialization
 
         if is_definition:
             body_node = node.child_by_field_name('body')
@@ -1211,4 +1251,153 @@ class EntityExtractor:
             destructor.code_content = self._extract_function_body(body_node)
         
         self.repo.register_entity(destructor)
-        return destructor 
+        return destructor
+    
+    def _extract_template_declaration(self, template_node: Node):
+        """提取模板声明"""
+        try:
+            # 获取模板参数
+            template_params = self._extract_template_parameters(template_node)
+            
+            # 获取模板声明的主体
+            declaration_body = self._get_template_declaration_body(template_node)
+            if not declaration_body:
+                return
+            
+            # 根据主体类型处理不同的模板
+            if declaration_body.type in ['class_specifier', 'struct_specifier']:
+                # 模板类
+                self._extract_template_class_declaration(template_node, declaration_body, template_params)
+            elif declaration_body.type == 'function_definition':
+                # 模板函数定义
+                self._extract_template_function_declaration(template_node, declaration_body, template_params, is_definition=True)
+            elif declaration_body.type == 'declaration':
+                # 模板函数声明或其他模板声明
+                self._extract_template_function_declaration(template_node, declaration_body, template_params, is_definition=False)
+                
+        except Exception as e:
+            self.logger.warning(f"模板声明提取失败: {e}")
+    
+    def _extract_template_parameters(self, template_node: Node) -> List[Dict[str, Any]]:
+        """提取模板参数列表"""
+        template_params = []
+        
+        # 查找 template_parameter_list
+        param_list_node = template_node.child_by_field_name('parameters')
+        if not param_list_node:
+            return template_params
+        
+        for child in param_list_node.children:
+            if child.type == 'type_parameter_declaration':
+                # typename T 或 class T
+                param_text = self._get_text(child)
+                param_name = self._extract_parameter_name_from_text(param_text)
+                template_params.append({
+                    'name': param_name,
+                    'kind': 'type',
+                    'default': None,
+                    'is_variadic': '...' in param_text
+                })
+            elif child.type == 'parameter_declaration':
+                # 非类型参数：int N, size_t Size等
+                param_text = self._get_text(child)
+                param_name = self._extract_parameter_name_from_text(param_text)
+                # 提取参数类型
+                param_type = self._extract_parameter_type_from_text(param_text)
+                template_params.append({
+                    'name': param_name,
+                    'kind': 'non_type',
+                    'type': param_type,
+                    'default': None
+                })
+            elif child.type == 'template_template_parameter_declaration':
+                # 模板模板参数
+                param_text = self._get_text(child)
+                param_name = self._extract_parameter_name_from_text(param_text)
+                template_params.append({
+                    'name': param_name,
+                    'kind': 'template',
+                    'default': None
+                })
+        
+        return template_params
+    
+    def _extract_parameter_name_from_text(self, param_text: str) -> str:
+        """从参数文本中提取参数名"""
+        # 移除关键字和标点
+        words = param_text.replace(',', ' ').replace('>', ' ').replace('...', ' ').split()
+        # 找到最后一个标识符作为参数名
+        for word in reversed(words):
+            if word.isidentifier() and word not in ['typename', 'class', 'template']:
+                return word
+        return 'unknown'
+    
+    def _extract_parameter_type_from_text(self, param_text: str) -> str:
+        """从参数文本中提取参数类型"""
+        # 简化实现：取第一个单词作为类型
+        words = param_text.strip().split()
+        if words:
+            return words[0]
+        return 'unknown'
+    
+    def _get_template_declaration_body(self, template_node: Node) -> Optional[Node]:
+        """获取模板声明的主体"""
+        for child in template_node.children:
+            if child.type in ['class_specifier', 'struct_specifier', 'function_definition', 'declaration']:
+                return child
+        return None
+    
+    def _extract_template_class_declaration(self, template_node: Node, class_node: Node, template_params: List[Dict[str, Any]]):
+        """提取模板类声明"""
+        # 检查是否为模板特化
+        is_specialization = self._is_template_specialization(template_node)
+        
+        # 使用现有的类声明提取逻辑，但增加模板信息
+        original_extract = self._extract_class_declaration
+        
+        # 临时保存模板信息供类提取器使用
+        self._current_template_params = template_params
+        self._current_is_template_specialization = is_specialization
+        
+        try:
+            # 调用原有的类声明提取
+            self._extract_class_declaration(class_node)
+        finally:
+            # 清理临时变量
+            self._current_template_params = None
+            self._current_is_template_specialization = None
+    
+    def _extract_template_function_declaration(self, template_node: Node, func_node: Node, template_params: List[Dict[str, Any]], is_definition: bool):
+        """提取模板函数声明"""
+        # 检查是否为模板特化
+        is_specialization = self._is_template_specialization(template_node)
+        
+        # 临时保存模板信息供函数提取器使用
+        self._current_template_params = template_params
+        self._current_is_template_specialization = is_specialization
+        
+        try:
+            if is_definition and func_node.type == 'function_definition':
+                self._extract_function_declaration(func_node, is_definition=True)
+            else:
+                # 处理函数声明
+                self._extract_declaration_node(func_node)
+        finally:
+            # 清理临时变量
+            self._current_template_params = None
+            self._current_is_template_specialization = None
+    
+    def _is_template_specialization(self, template_node: Node) -> bool:
+        """检查是否为模板特化"""
+        param_list_node = template_node.child_by_field_name('parameters')
+        if not param_list_node:
+            return True  # template<> 表示特化
+        
+        # 检查参数列表是否为空或只包含非模板参数
+        has_template_params = False
+        for child in param_list_node.children:
+            if child.type in ['type_parameter_declaration', 'template_template_parameter_declaration']:
+                has_template_params = True
+                break
+        
+        return not has_template_params 

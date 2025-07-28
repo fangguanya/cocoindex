@@ -1,0 +1,117 @@
+{
+  "meta": {
+    "timestamp": "2025-07-28 19:04:56",
+    "analysis_time_seconds": 0.006170034408569336,
+    "overall_quality_score": 90.63
+  },
+  "completeness": {
+    "ast_statistics": {
+      "function_definitions": 175,
+      "function_declarations": 166,
+      "class_definitions": 26,
+      "class_declarations": 8,
+      "call_expressions": 249,
+      "inheritance_declarations": 10
+    },
+    "extraction_statistics": {
+      "extracted_functions": 181,
+      "extracted_classes": 32,
+      "extracted_call_relationships": 119,
+      "extracted_inheritance_relationships": 13
+    },
+    "coverage_rates": {
+      "function_extraction_rate": 0.530791788856305,
+      "class_extraction_rate": 0.9411764705882353,
+      "call_extraction_rate": 0.4779116465863454,
+      "inheritance_extraction_rate": 1.3
+    },
+    "missing_entities": {
+      "functions": [
+        {
+          "count": 160,
+          "details": "具体遗漏函数需要进一步分析"
+        }
+      ],
+      "classes": [
+        {
+          "count": 2,
+          "details": "具体遗漏类需要进一步分析"
+        }
+      ],
+      "calls": [],
+      "inheritance": []
+    }
+  },
+  "function_bodies": {
+    "statistics": {
+      "total_function_definitions": 153,
+      "functions_with_body": 147,
+      "functions_without_body": 6,
+      "empty_function_bodies": 0,
+      "body_preservation_rate": 0.9607843137254902
+    },
+    "issues": {
+      "functions_missing_body": [
+        {
+          "usr": "c:@F@Printable::~Printable@()@ret:~Printable",
+          "qualified_name": "Printable::~Printable",
+          "file_path": "rich_demo\\advanced\\multiple_inheritance.h",
+          "line": 11
+        },
+        {
+          "usr": "c:@F@Serializable::~Serializable@()@ret:~Serializable",
+          "qualified_name": "Serializable::~Serializable",
+          "file_path": "rich_demo\\advanced\\multiple_inheritance.h",
+          "line": 19
+        },
+        {
+          "usr": "c:@F@Storable::~Storable@()@ret:~Storable",
+          "qualified_name": "Storable::~Storable",
+          "file_path": "rich_demo\\advanced\\multiple_inheritance.h",
+          "line": 28
+        },
+        {
+          "usr": "c:@F@Identifiable::~Identifiable@()@ret:~Identifiable",
+          "qualified_name": "Identifiable::~Identifiable",
+          "file_path": "rich_demo\\advanced\\multiple_inheritance.h",
+          "line": 42
+        },
+        {
+          "usr": "c:@F@Base::~Base@()@ret:~Base",
+          "qualified_name": "Base::~Base",
+          "file_path": "rich_demo\\advanced\\multiple_inheritance.h",
+          "line": 113
+        },
+        {
+          "usr": "c:@F@Shape::~Shape@()@ret:~Shape",
+          "qualified_name": "Shape::~Shape",
+          "file_path": "rich_demo\\geometry.h",
+          "line": 14
+        }
+      ],
+      "functions_with_empty_body": []
+    }
+  },
+  "relationships": {
+    "call_relationships": {
+      "total": 119,
+      "bidirectional_consistent": 119,
+      "orphaned_references": 0,
+      "consistency_rate": 1.0,
+      "orphaned_calls": []
+    },
+    "inheritance_relationships": {
+      "total": 13,
+      "valid_references": 13,
+      "orphaned_references": 0,
+      "validity_rate": 1.0,
+      "invalid_inheritance": []
+    }
+  },
+  "recommendations": [
+    "函数提取覆盖率仅为 53.1%，建议检查函数提取器的匹配规则",
+    "类提取覆盖率仅为 94.1%，建议检查类提取器的匹配规则",
+    "调用关系提取覆盖率仅为 47.8%，建议增强调用分析器",
+    "发现 6 个函数定义缺少函数体，需要调查原因"
+  ]
+}

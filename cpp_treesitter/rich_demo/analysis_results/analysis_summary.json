@@ -1,0 +1,21 @@
+{
+  "project_name": "rich_demo",
+  "project_path": "rich_demo",
+  "analysis_timestamp": "2025-07-28T19:04:56.606886",
+  "total_files": 12,
+  "total_entities": 217,
+  "entities_by_type": {
+    "function": 181,
+    "class": 32,
+    "namespace": 4
+  },
+  "call_relationships": 119,
+  "files_analyzed": 12,
+  "file_mappings": {
+    "total_files": 12,
+    "max_file_id": 12,
+    "cache_size": 12
+  },
+  "parser_type": "tree-sitter",
+  "version": "2.3"
+}

@@ -1,0 +1,88 @@
+{
+  "meta": {
+    "timestamp": "2025-07-28 19:04:56",
+    "analysis_time_seconds": 0.0,
+    "overall_quality_score": 88.67
+  },
+  "completeness": {
+    "ast_statistics": {
+      "function_definitions": 16,
+      "function_declarations": 2,
+      "class_definitions": 5,
+      "class_declarations": 0,
+      "call_expressions": 12,
+      "inheritance_declarations": 2
+    },
+    "extraction_statistics": {
+      "extracted_functions": 10,
+      "extracted_classes": 5,
+      "extracted_call_relationships": 7,
+      "extracted_inheritance_relationships": 3
+    },
+    "coverage_rates": {
+      "function_extraction_rate": 0.5555555555555556,
+      "class_extraction_rate": 1.0,
+      "call_extraction_rate": 0.5833333333333334,
+      "inheritance_extraction_rate": 1.5
+    },
+    "missing_entities": {
+      "functions": [
+        {
+          "count": 8,
+          "details": "具体遗漏函数需要进一步分析"
+        }
+      ],
+      "classes": [],
+      "calls": [],
+      "inheritance": []
+    }
+  },
+  "function_bodies": {
+    "statistics": {
+      "total_function_definitions": 10,
+      "functions_with_body": 8,
+      "functions_without_body": 2,
+      "empty_function_bodies": 0,
+      "body_preservation_rate": 0.8
+    },
+    "issues": {
+      "functions_missing_body": [
+        {
+          "usr": "c:@F@Base::~Base@()@ret:~Base",
+          "qualified_name": "Base::~Base",
+          "file_path": "test_demo\\demo_test.cpp",
+          "line": 8
+        },
+        {
+          "usr": "c:@F@Another::~Another@()@ret:~Another",
+          "qualified_name": "Another::~Another",
+          "file_path": "test_demo\\demo_test.cpp",
+          "line": 21
+        }
+      ],
+      "functions_with_empty_body": []
+    }
+  },
+  "relationships": {
+    "call_relationships": {
+      "total": 7,
+      "bidirectional_consistent": 7,
+      "orphaned_references": 0,
+      "consistency_rate": 1.0,
+      "orphaned_calls": []
+    },
+    "inheritance_relationships": {
+      "total": 3,
+      "valid_references": 3,
+      "orphaned_references": 0,
+      "validity_rate": 1.0,
+      "invalid_inheritance": []
+    }
+  },
+  "recommendations": [
+    "函数提取覆盖率仅为 55.6%，建议检查函数提取器的匹配规则",
+    "调用关系提取覆盖率仅为 58.3%，建议增强调用分析器",
+    "函数体保存率仅为 80.0%，建议检查函数体提取逻辑",
+    "发现 2 个函数定义缺少函数体，需要调查原因"
+  ]
+}

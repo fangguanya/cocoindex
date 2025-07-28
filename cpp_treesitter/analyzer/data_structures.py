@@ -252,6 +252,7 @@ class Function(Entity):
     is_const: bool = False
     is_template: bool = False
     template_params: List[str] = field(default_factory=list)
+    is_template_specialization: bool = False
     access_specifier: str = "default"
     parent_class: Optional[str] = None # USR of parent class
     code_content: str = ""  # 函数体源代码
@@ -289,6 +290,7 @@ class Class(Entity):
     is_struct: bool = False
     is_abstract: bool = False
     is_template: bool = False
+    is_template_specialization: bool = False
     parent_namespace: Optional[str] = None # USR of parent namespace
     
     # 新增：声明vs定义的处理

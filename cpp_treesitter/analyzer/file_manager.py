@@ -21,12 +21,15 @@ from threading import RLock
 class FileManager:
     """文件 ID 映射管理器"""
     
-    def __init__(self):
+    def __init__(self, project_root: Optional[str] = None):
         self.file_to_id: Dict[str, str] = {}  # 标准化路径 -> 文件ID
         self.id_to_file: Dict[str, str] = {}  # 文件ID -> 标准化路径
         self._counter = 0
         self._path_cache: Dict[str, str] = {}  # 原始路径 -> 标准化路径的缓存
         self._lock = RLock() # 添加锁
+        
+        # 新增：项目根目录设置
+        self.project_root: Optional[Path] = Path(project_root).resolve() if project_root else None
     
     def get_or_create_file_id(self, file_path: str) -> str:
         """
@@ -125,13 +128,13 @@ class FileManager:
     
     def _normalize_path(self, file_path: str) -> str:
         """
-        标准化文件路径
+        标准化文件路径 - 如果设置了project_root，则生成相对路径
         
         Args:
             file_path: 原始文件路径
             
         Returns:
-            标准化的文件路径
+            标准化的文件路径（相对于project_root或绝对路径）
         """
         with self._lock: # 使用锁保护共享数据
             # 检查缓存
@@ -145,7 +148,19 @@ class FileManager:
                 # 如果是绝对路径，尝试解析
                 if path_obj.is_absolute():
                     try:
-                        normalized = str(path_obj.resolve())
+                        resolved_path = path_obj.resolve()
+                        
+                        # 如果设置了project_root，尝试生成相对路径
+                        if self.project_root:
+                            try:
+                                relative_path = resolved_path.relative_to(self.project_root)
+                                normalized = str(relative_path)
+                            except ValueError:
+                                # 文件不在project_root下，使用绝对路径
+                                normalized = str(resolved_path)
+                        else:
+                            normalized = str(resolved_path)
+                            
                     except (OSError, RuntimeError):
                         # 如果解析失败，使用原始路径
                         normalized = str(path_obj)
@@ -231,11 +246,11 @@ class FileManager:
 _global_file_manager: Optional[FileManager] = None
 
 
-def get_file_manager() -> FileManager:
+def get_file_manager(project_root: Optional[str] = None) -> FileManager:
     """获取全局文件管理器实例"""
     global _global_file_manager
     if _global_file_manager is None:
-        _global_file_manager = FileManager()
+        _global_file_manager = FileManager(project_root)
     return _global_file_manager
 
 

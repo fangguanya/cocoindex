@@ -1,0 +1,23 @@
+{
+  "version": "2.3",
+  "total_files": 12,
+  "file_mappings": {
+    "f001": "rich_demo/advanced/multiple_inheritance.cpp",
+    "f002": "rich_demo/advanced/multiple_inheritance.h",
+    "f003": "rich_demo/advanced/template_container.cpp",
+    "f004": "rich_demo/advanced/template_container.h",
+    "f005": "rich_demo/data/person.cpp",
+    "f006": "rich_demo/data/person.h",
+    "f007": "rich_demo/geometry.cpp",
+    "f008": "rich_demo/geometry.h",
+    "f009": "rich_demo/interactions.h",
+    "f010": "rich_demo/main.cpp",
+    "f011": "rich_demo/utils/math_utils.cpp",
+    "f012": "rich_demo/utils/math_utils.h"
+  },
+  "mapping_statistics": {
+    "total_files": 12,
+    "max_file_id": 12,
+    "cache_size": 12
+  }
+}

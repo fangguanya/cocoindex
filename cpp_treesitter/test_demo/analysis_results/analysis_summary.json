@@ -1,0 +1,21 @@
+{
+  "project_name": "test_demo",
+  "project_path": "test_demo",
+  "analysis_timestamp": "2025-07-28T19:04:56.102068",
+  "total_files": 1,
+  "total_entities": 16,
+  "entities_by_type": {
+    "class": 5,
+    "function": 10,
+    "namespace": 1
+  },
+  "call_relationships": 7,
+  "files_analyzed": 1,
+  "file_mappings": {
+    "total_files": 1,
+    "max_file_id": 1,
+    "cache_size": 1
+  },
+  "parser_type": "tree-sitter",
+  "version": "2.3"
+}

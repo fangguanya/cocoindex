@@ -1,0 +1,12 @@
+{
+  "version": "2.3",
+  "total_files": 1,
+  "file_mappings": {
+    "f001": "test_demo/demo_test.cpp"
+  },
+  "mapping_statistics": {
+    "total_files": 1,
+    "max_file_id": 1,
+    "cache_size": 1
+  }
+}
