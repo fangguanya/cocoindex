@@ -16,18 +16,39 @@ JSON Exporter (符合 json_format.md v2.4)
 import json
 from datetime import datetime, timezone
 from typing import Dict, Any
-from dataclasses import asdict, is_dataclass
+# 移除dataclass依赖，使用自定义序列化
 from pathlib import Path
 
 from .logger import get_logger
 
 
 class CustomJsonEncoder(json.JSONEncoder):
-    """自定义JSON编码器，用于处理 dataclass"""
+    """自定义JSON编码器，用于处理自定义数据结构 - 性能优化版"""
     def default(self, o: Any) -> Any:
-        if is_dataclass(o) and not isinstance(o, type):
-            return asdict(o)
+        # 处理我们的自定义数据结构
+        if hasattr(o, '__dict__'):
+            # 将对象转换为字典，递归处理嵌套对象
+            result = {}
+            for key, value in o.__dict__.items():
+                if isinstance(value, list):
+                    result[key] = [self._serialize_item(item) for item in value]
+                elif isinstance(value, dict):
+                    result[key] = {k: self._serialize_item(v) for k, v in value.items()}
+                else:
+                    result[key] = self._serialize_item(value)
+            return result
         return super().default(o)
+    
+    def _serialize_item(self, item):
+        """序列化单个项目"""
+        if hasattr(item, '__dict__'):
+            return item.__dict__
+        elif isinstance(item, (list, tuple)):
+            return [self._serialize_item(i) for i in item]
+        elif isinstance(item, dict):
+            return {k: self._serialize_item(v) for k, v in item.items()}
+        else:
+            return item
 
 
 class JsonExporter:

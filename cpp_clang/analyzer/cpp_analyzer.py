@@ -12,7 +12,7 @@ import platform
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set
 
-from dataclasses import dataclass, field
+# 移除dataclass依赖以提升性能
 from rich.console import Console
 from rich.progress import Progress
 
@@ -30,29 +30,39 @@ if platform.system() == 'Windows':
     multiprocessing.set_start_method('spawn', force=True)
 
 
-@dataclass
 class AnalysisConfig:
-    """分析配置类"""
-    project_root: str
-    scan_directory: str
-    output_path: str = "cpp_analysis_result.json"
-    compile_commands_path: Optional[str] = None
-    max_files: Optional[int] = None
-    verbose: bool = False
-    num_jobs: int = 0  # 0 表示自动确定
-    include_extensions: set = field(default_factory=lambda: {'.h', '.hpp', '.cpp', '.cc', '.cxx', '.c'})
-    exclude_patterns: set = field(default_factory=set)
+    """分析配置类 - 性能优化版"""
+    def __init__(self, project_root: str, scan_directory: str, 
+                 output_path: str = "cpp_analysis_result.json",
+                 compile_commands_path: Optional[str] = None,
+                 max_files: Optional[int] = None,
+                 verbose: bool = False,
+                 num_jobs: int = 0,  # 0 表示自动确定
+                 include_extensions: Optional[set] = None,
+                 exclude_patterns: Optional[set] = None):
+        self.project_root = project_root
+        self.scan_directory = scan_directory
+        self.output_path = output_path
+        self.compile_commands_path = compile_commands_path
+        self.max_files = max_files
+        self.verbose = verbose
+        self.num_jobs = num_jobs
+        self.include_extensions = include_extensions or {'.h', '.hpp', '.cpp', '.cc', '.cxx', '.c'}
+        self.exclude_patterns = exclude_patterns or set()
 
 
-@dataclass
 class AnalysisResult:
-    """分析结果类"""
-    success: bool
-    output_path: Optional[str] = None
-    statistics: Dict[str, Any] = field(default_factory=dict)
-    files_processed: int = 0
-    files_parsed: int = 0
-    parsing_errors: List[str] = field(default_factory=list)
+    """分析结果类 - 性能优化版"""
+    def __init__(self, success: bool, output_path: Optional[str] = None,
+                 statistics: Optional[Dict[str, Any]] = None,
+                 files_processed: int = 0, files_parsed: int = 0,
+                 parsing_errors: Optional[List[str]] = None):
+        self.success = success
+        self.output_path = output_path
+        self.statistics = statistics or {}
+        self.files_processed = files_processed
+        self.files_parsed = files_parsed
+        self.parsing_errors = parsing_errors or []
 
 # 全局变量用于多进程worker
 g_parser: Optional[ClangParser] = None
@@ -63,11 +73,11 @@ g_file_manager: Optional[DistributedFileIdManager] = None
 g_compile_commands: Optional[Dict[str, Any]] = None
 
 def _init_worker(compile_commands: Dict[str, Any], project_root: str, file_id_manager: DistributedFileIdManager):
-    """初始化工作进程"""
+    """初始化工作进程 - 性能优化版"""
     global g_parser, g_extractor, g_project_root, g_file_manager, g_compile_commands
     try:
-        # 不传递Console对象到子进程，避免多进程冲突，关闭详细输出
-        g_parser = ClangParser(console=None, verbose=False)
+        # 启用缓存的解析器，关闭详细输出以提升性能
+        g_parser = ClangParser(console=None, verbose=False, enable_cache=True)
         
         # 直接接收编译命令，而不是重新加载
         g_compile_commands = compile_commands
@@ -77,6 +87,8 @@ def _init_worker(compile_commands: Dict[str, Any], project_root: str, file_id_ma
         g_project_root = project_root
         g_file_manager = file_id_manager
         g_extractor = EntityExtractor(g_file_manager)
+        
+        print(f"Worker initialized successfully with cache enabled")
         
     except Exception as e:
         print(f"ERROR: Failed to initialize worker: {e}")
@@ -180,8 +192,8 @@ class CppAnalyzer:
                 self.logger.error(msg)
                 return self._create_failure_result("Configuration", msg)
             
-            # 临时解析器，仅用于获取文件列表和编译命令
-            temp_parser = ClangParser(verbose=config.verbose)
+            # 临时解析器，仅用于获取文件列表和编译命令 - 启用缓存优化
+            temp_parser = ClangParser(verbose=config.verbose, enable_cache=True)
             temp_parser.load_compile_commands(config.compile_commands_path)
             
             # ClangParser现在返回规范化的绝对路径，所以直接使用即可

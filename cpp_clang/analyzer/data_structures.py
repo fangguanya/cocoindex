@@ -1,5 +1,5 @@
 """
-C++ 代码分析器数据结构 (版本 2.4)
+C++ 代码分析器数据结构 (版本 2.4 - 性能优化版)
 
 该模块定义了用于表示C++代码实体的所有数据结构，
 严格遵循 `json_format.md` v2.3 规范，并添加USR ID支持。
@@ -9,9 +9,9 @@ C++ 代码分析器数据结构 (版本 2.4)
 - 引入 `cpp_extensions` 结构来封装C++特有属性。
 - 支持函数签名键值和文件ID映射。
 - 函数体代码内容提取支持
+- 性能优化：移除@dataclass装饰器，使用普通类以提升性能
 """
 
-from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Tuple, Union
 import re
 
@@ -61,195 +61,253 @@ class SpecialMethodStatusFlags:
     SPECIAL_IS_DEFAULTED        = 1 << 3
 
 # ==============================================================================
-# 核心数据结构
+# 核心数据结构 - 性能优化版本
 # ==============================================================================
 
-@dataclass(frozen=True)
 class Location:
-    """代码位置信息 (使用文件ID)"""
-    file_id: str
-    line: int
-    column: int
+    """代码位置信息 (使用文件ID) - 性能优化版"""
+    def __init__(self, file_id: str, line: int, column: int):
+        self.file_id = file_id
+        self.line = line
+        self.column = column
+    
+    def __eq__(self, other):
+        if not isinstance(other, Location):
+            return False
+        return (self.file_id == other.file_id and 
+                self.line == other.line and 
+                self.column == other.column)
+    
+    def __hash__(self):
+        return hash((self.file_id, self.line, self.column))
 
-@dataclass
 class Parameter:
-    """函数参数"""
-    name: str
-    type: str  # 简化后的类型名
-    default_value: Optional[str] = None
+    """函数参数 - 性能优化版"""
+    def __init__(self, name: str, type: str, default_value: Optional[str] = None):
+        self.name = name
+        self.type = type  # 简化后的类型名
+        self.default_value = default_value
 
-@dataclass
 class TemplateParameter:
-    """模板参数"""
-    name: str
-    type: str # e.g., "typename", "int"
+    """模板参数 - 性能优化版"""
+    def __init__(self, name: str, type: str):
+        self.name = name
+        self.type = type  # e.g., "typename", "int"
 
-@dataclass
 class ResolvedDefinitionLocation:
-    file_id: str
-    line: int
-    column: int
+    """解析的定义位置 - 性能优化版"""
+    def __init__(self, file_id: str, line: int, column: int):
+        self.file_id = file_id
+        self.line = line
+        self.column = column
 
-@dataclass
 class CppCallInfo:
-    """C++ 调用关系扩展信息"""
-    call_status_flags: int = 0
-    call_type: str = "method_call"
-    template_args: List[str] = field(default_factory=list)
-    operator_type: str = ""
-    calling_object: str = ""
-    argument_types: List[str] = field(default_factory=list)
-    resolved_overload: str = "" # 解析到的重载函数的USR ID
-    resolved_definition_location: Optional[ResolvedDefinitionLocation] = None
+    """C++ 调用关系扩展信息 - 性能优化版"""
+    def __init__(self, call_status_flags: int = 0, call_type: str = "method_call",
+                 template_args: Optional[List[str]] = None, operator_type: str = "",
+                 calling_object: str = "", argument_types: Optional[List[str]] = None,
+                 resolved_overload: str = "", 
+                 resolved_definition_location: Optional[ResolvedDefinitionLocation] = None):
+        self.call_status_flags = call_status_flags
+        self.call_type = call_type
+        self.template_args = template_args or []
+        self.operator_type = operator_type
+        self.calling_object = calling_object
+        self.argument_types = argument_types or []
+        self.resolved_overload = resolved_overload
+        self.resolved_definition_location = resolved_definition_location
 
-@dataclass
 class CallInfo:
-    """函数调用信息 - 详细的调用信息"""
-    to_usr_id: str  # 被调用函数的USR ID
-    line: int
-    column: int
-    type: str = "direct"  # e.g., direct, virtual_call
-    resolved_definition_file_id: Optional[str] = None
-    cpp_call_info: CppCallInfo = field(default_factory=CppCallInfo)
+    """函数调用信息 - 详细的调用信息 - 性能优化版"""
+    def __init__(self, to_usr_id: str, line: int, column: int, type: str = "direct",
+                 resolved_definition_file_id: Optional[str] = None,
+                 cpp_call_info: Optional[CppCallInfo] = None):
+        self.to_usr_id = to_usr_id  # 被调用函数的USR ID
+        self.line = line
+        self.column = column
+        self.type = type  # e.g., direct, virtual_call
+        self.resolved_definition_file_id = resolved_definition_file_id
+        self.cpp_call_info = cpp_call_info or CppCallInfo()
 
-@dataclass
 class CppExtensions:
-    """函数/方法 C++ 扩展字段"""
-    qualified_name: str
-    namespace: str = ""
-    function_status_flags: int = 0
-    access_specifier: str = "public"
-    storage_class: str = "none"
-    calling_convention: str = "default"
-    return_type: str = "void"
-    parameter_types: Dict[str, str] = field(default_factory=dict)
-    template_parameters: List[TemplateParameter] = field(default_factory=list)
-    exception_specification: str = ""
-    attributes: List[str] = field(default_factory=list)
-    mangled_name: str = ""
-    usr: Optional[str] = None # USR作为内部关联和调试使用
+    """函数/方法 C++ 扩展字段 - 性能优化版"""
+    def __init__(self, qualified_name: str, namespace: str = "",
+                 function_status_flags: int = 0, access_specifier: str = "public",
+                 storage_class: str = "none", calling_convention: str = "default",
+                 return_type: str = "void", parameter_types: Optional[Dict[str, str]] = None,
+                 template_parameters: Optional[List[TemplateParameter]] = None,
+                 exception_specification: str = "", attributes: Optional[List[str]] = None,
+                 mangled_name: str = "", usr: Optional[str] = None):
+        self.qualified_name = qualified_name
+        self.namespace = namespace
+        self.function_status_flags = function_status_flags
+        self.access_specifier = access_specifier
+        self.storage_class = storage_class
+        self.calling_convention = calling_convention
+        self.return_type = return_type
+        self.parameter_types = parameter_types or {}
+        self.template_parameters = template_parameters or []
+        self.exception_specification = exception_specification
+        self.attributes = attributes or []
+        self.mangled_name = mangled_name
+        self.usr = usr  # USR作为内部关联和调试使用
 
-@dataclass
 class Function:
-    """函数/方法实体 (符合 json_format.md v2.4 - USR ID支持)"""
-    # 顶层字段
-    name: str
-    signature: str  # 完整函数签名
-    usr_id: str  # 新增：USR ID作为唯一标识
-    definition_file_id: Optional[str] = None
-    declaration_file_id: Optional[str] = None
-    start_line: int = 0
-    end_line: int = 0
-    is_local: bool = False
-    parameters: List[Parameter] = field(default_factory=list)
-    
-    # 新增：函数体代码内容
-    code_content: str = ""
-    
-    # 新增：声明vs定义的处理
-    declaration_locations: List[Location] = field(default_factory=list)
-    definition_location: Optional[Location] = None
-    is_declaration: bool = False
-    is_definition: bool = False
-    
-    # 修改：调用关系使用USR ID列表
-    calls_to: List[str] = field(default_factory=list)  # USR ID列表
-    called_by: List[str] = field(default_factory=list)  # USR ID列表
-    call_details: List[CallInfo] = field(default_factory=list)  # 详细调用信息
-    
-    # C++ 扩展
-    cpp_extensions: CppExtensions = field(default_factory=CppExtensions)
+    """函数/方法实体 (符合 json_format.md v2.4 - USR ID支持) - 性能优化版"""
+    def __init__(self, name: str, signature: str, usr_id: str,
+                 definition_file_id: Optional[str] = None, declaration_file_id: Optional[str] = None,
+                 start_line: int = 0, end_line: int = 0, is_local: bool = False,
+                 parameters: Optional[List[Parameter]] = None, code_content: str = "",
+                 declaration_locations: Optional[List[Location]] = None,
+                 definition_location: Optional[Location] = None,
+                 is_declaration: bool = False, is_definition: bool = False,
+                 calls_to: Optional[List[str]] = None, called_by: Optional[List[str]] = None,
+                 call_details: Optional[List[CallInfo]] = None,
+                 cpp_extensions: Optional[CppExtensions] = None):
+        # 顶层字段
+        self.name = name
+        self.signature = signature  # 完整函数签名
+        self.usr_id = usr_id  # USR ID作为唯一标识
+        self.definition_file_id = definition_file_id
+        self.declaration_file_id = declaration_file_id
+        self.start_line = start_line
+        self.end_line = end_line
+        self.is_local = is_local
+        self.parameters = parameters or []
+        
+        # 函数体代码内容
+        self.code_content = code_content
+        
+        # 声明vs定义的处理
+        self.declaration_locations = declaration_locations or []
+        self.definition_location = definition_location
+        self.is_declaration = is_declaration
+        self.is_definition = is_definition
+        
+        # 调用关系使用USR ID列表
+        self.calls_to = calls_to or []  # USR ID列表
+        self.called_by = called_by or []  # USR ID列表
+        self.call_details = call_details or []  # 详细调用信息
+        
+        # C++ 扩展
+        self.cpp_extensions = cpp_extensions or CppExtensions(qualified_name=name)
 
-@dataclass
 class InheritanceInfo:
-    """继承信息"""
-    base_class_usr_id: str # 基类的USR ID
-    access_specifier: str = "public"
-    is_virtual: bool = False
+    """继承信息 - 性能优化版"""
+    def __init__(self, base_class_usr_id: str, access_specifier: str = "public",
+                 is_virtual: bool = False):
+        self.base_class_usr_id = base_class_usr_id  # 基类的USR ID
+        self.access_specifier = access_specifier
+        self.is_virtual = is_virtual
 
-@dataclass
 class SpecialMethodInfo:
-    """构造/析构函数信息"""
-    special_method_status_flags: int = 0
-    access: str = "public"
+    """构造/析构函数信息 - 性能优化版"""
+    def __init__(self, special_method_status_flags: int = 0, access: str = "public"):
+        self.special_method_status_flags = special_method_status_flags
+        self.access = access
 
-@dataclass
 class CppOopExtensions:
-    """类/结构体 C++ OOP 扩展字段"""
-    qualified_name: str
-    namespace: str = ""
-    type: str = "class"  # class or struct
-    class_status_flags: int = 0
-    inheritance_list: List[InheritanceInfo] = field(default_factory=list)
-    template_parameters: List[TemplateParameter] = field(default_factory=list)
-    template_specialization_args: List[str] = field(default_factory=list)
-    nested_types: List[str] = field(default_factory=list)
-    friend_declarations: List[str] = field(default_factory=list)
-    size_in_bytes: int = 0
-    alignment: int = 0
-    virtual_table_info: Dict[str, Any] = field(default_factory=dict)
-    constructors: Dict[str, SpecialMethodInfo] = field(default_factory=dict)
-    destructor: Optional[SpecialMethodInfo] = None
-    usr: Optional[str] = None # USR作为内部关联和调试使用
+    """类/结构体 C++ OOP 扩展字段 - 性能优化版"""
+    def __init__(self, qualified_name: str, namespace: str = "", type: str = "class",
+                 class_status_flags: int = 0, inheritance_list: Optional[List[InheritanceInfo]] = None,
+                 template_parameters: Optional[List[TemplateParameter]] = None,
+                 template_specialization_args: Optional[List[str]] = None,
+                 nested_types: Optional[List[str]] = None,
+                 friend_declarations: Optional[List[str]] = None,
+                 size_in_bytes: int = 0, alignment: int = 0,
+                 virtual_table_info: Optional[Dict[str, Any]] = None,
+                 constructors: Optional[Dict[str, SpecialMethodInfo]] = None,
+                 destructor: Optional[SpecialMethodInfo] = None,
+                 usr: Optional[str] = None):
+        self.qualified_name = qualified_name
+        self.namespace = namespace
+        self.type = type  # class or struct
+        self.class_status_flags = class_status_flags
+        self.inheritance_list = inheritance_list or []
+        self.template_parameters = template_parameters or []
+        self.template_specialization_args = template_specialization_args or []
+        self.nested_types = nested_types or []
+        self.friend_declarations = friend_declarations or []
+        self.size_in_bytes = size_in_bytes
+        self.alignment = alignment
+        self.virtual_table_info = virtual_table_info or {}
+        self.constructors = constructors or {}
+        self.destructor = destructor
+        self.usr = usr  # USR作为内部关联和调试使用
 
-@dataclass
 class Class:
-    """类/结构体实体 (符合 json_format.md v2.4 - USR ID支持)"""
-    name: str
-    qualified_name: str
-    usr_id: str  # 新增：USR ID作为唯一标识
-    definition_file_id: Optional[str] = None
-    declaration_file_id: Optional[str] = None
-    line: int = 0
-    
-    # 新增：声明vs定义的处理
-    declaration_locations: List[Location] = field(default_factory=list)
-    definition_location: Optional[Location] = None
-    is_declaration: bool = False
-    is_definition: bool = False
-    
-    parent_classes: List[str] = field(default_factory=list) # 基类的USR ID
-    is_abstract: bool = False # 将从 status_flags 解析
-    is_mixin: bool = False
-    documentation: str = ""
-    methods: List[str] = field(default_factory=list) # 方法的USR ID
-    fields: Dict[str, Any] = field(default_factory=dict)
-    cpp_oop_extensions: CppOopExtensions = field(default_factory=CppOopExtensions)
+    """类/结构体实体 (符合 json_format.md v2.4 - USR ID支持) - 性能优化版"""
+    def __init__(self, name: str, qualified_name: str, usr_id: str,
+                 definition_file_id: Optional[str] = None, declaration_file_id: Optional[str] = None,
+                 line: int = 0, declaration_locations: Optional[List[Location]] = None,
+                 definition_location: Optional[Location] = None,
+                 is_declaration: bool = False, is_definition: bool = False,
+                 parent_classes: Optional[List[str]] = None, is_abstract: bool = False,
+                 is_mixin: bool = False, documentation: str = "",
+                 methods: Optional[List[str]] = None, fields: Optional[Dict[str, Any]] = None,
+                 cpp_oop_extensions: Optional[CppOopExtensions] = None):
+        self.name = name
+        self.qualified_name = qualified_name
+        self.usr_id = usr_id  # USR ID作为唯一标识
+        self.definition_file_id = definition_file_id
+        self.declaration_file_id = declaration_file_id
+        self.line = line
+        
+        # 声明vs定义的处理
+        self.declaration_locations = declaration_locations or []
+        self.definition_location = definition_location
+        self.is_declaration = is_declaration
+        self.is_definition = is_definition
+        
+        self.parent_classes = parent_classes or []  # 基类的USR ID
+        self.is_abstract = is_abstract  # 将从 status_flags 解析
+        self.is_mixin = is_mixin
+        self.documentation = documentation
+        self.methods = methods or []  # 方法的USR ID
+        self.fields = fields or {}
+        self.cpp_oop_extensions = cpp_oop_extensions or CppOopExtensions(qualified_name=qualified_name)
 
-@dataclass
 class Namespace:
-    """命名空间实体"""
-    name: str
-    qualified_name: str
-    usr_id: str  # 新增：USR ID作为唯一标识
-    definition_file_id: str
-    line: int
-    
-    # 新增：声明vs定义的处理（命名空间可能在多个文件中）
-    declaration_locations: List[Location] = field(default_factory=list)
-    definition_location: Optional[Location] = None
-    
-    is_anonymous: bool = False
-    is_inline: bool = False
-    parent_namespace: str = "global"
-    nested_namespaces: List[str] = field(default_factory=list)  # USR ID列表
-    classes: List[str] = field(default_factory=list)  # USR ID列表
-    functions: List[str] = field(default_factory=list)  # USR ID列表
-    variables: List[str] = field(default_factory=list)  # USR ID列表
-    aliases: Dict[str, str] = field(default_factory=dict)
-    using_declarations: List[str] = field(default_factory=list)
-    usr: Optional[str] = None # USR作为内部关联和调试使用
+    """命名空间实体 - 性能优化版"""
+    def __init__(self, name: str, qualified_name: str, usr_id: str, definition_file_id: str,
+                 line: int, declaration_locations: Optional[List[Location]] = None,
+                 definition_location: Optional[Location] = None,
+                 is_anonymous: bool = False, is_inline: bool = False,
+                 parent_namespace: str = "global", nested_namespaces: Optional[List[str]] = None,
+                 classes: Optional[List[str]] = None, functions: Optional[List[str]] = None,
+                 variables: Optional[List[str]] = None, aliases: Optional[Dict[str, str]] = None,
+                 using_declarations: Optional[List[str]] = None, usr: Optional[str] = None):
+        self.name = name
+        self.qualified_name = qualified_name
+        self.usr_id = usr_id  # USR ID作为唯一标识
+        self.definition_file_id = definition_file_id
+        self.line = line
+        
+        # 声明vs定义的处理（命名空间可能在多个文件中）
+        self.declaration_locations = declaration_locations or []
+        self.definition_location = definition_location
+        
+        self.is_anonymous = is_anonymous
+        self.is_inline = is_inline
+        self.parent_namespace = parent_namespace
+        self.nested_namespaces = nested_namespaces or []  # USR ID列表
+        self.classes = classes or []  # USR ID列表
+        self.functions = functions or []  # USR ID列表
+        self.variables = variables or []  # USR ID列表
+        self.aliases = aliases or {}
+        self.using_declarations = using_declarations or []
+        self.usr = usr  # USR作为内部关联和调试使用
 
 # ==============================================================================
-# 新增：全局节点系统
+# 全局节点系统 - 性能优化版本
 # ==============================================================================
 
-@dataclass
 class EntityNode:
-    """统一的实体节点，支持多种类型"""
-    usr_id: str
-    entity_type: str  # "function", "class", "namespace", "variable"
-    entity_data: Union[Function, Class, Namespace]
+    """统一的实体节点，支持多种类型 - 性能优化版"""
+    def __init__(self, usr_id: str, entity_type: str, entity_data: Union[Function, Class, Namespace]):
+        self.usr_id = usr_id
+        self.entity_type = entity_type  # "function", "class", "namespace", "variable"
+        self.entity_data = entity_data
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典格式用于JSON序列化"""

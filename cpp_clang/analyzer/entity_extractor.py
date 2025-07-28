@@ -15,6 +15,7 @@ Entity Extractor (符合 json_format.md v2.4)
 
 from pathlib import Path
 import re
+import threading
 from typing import List, Dict, Set, Any, Optional, Tuple
 
 import clang.cindex as clang
@@ -59,18 +60,24 @@ class CodeExtractor:
 
 
 class EntityExtractor:
-    """从 Clang AST 提取实体 (v2.5 - 模板支持)"""
+    """从 Clang AST 提取实体 (v2.5 - 模板支持 + 性能优化)"""
 
     def __init__(self, file_id_manager: DistributedFileIdManager):
         self.logger = get_logger()
         self.file_id_manager = file_id_manager
         self.code_extractor = CodeExtractor()
         
+        # 线程安全的数据结构
+        self._lock = threading.RLock()
         self.functions: Dict[str, Function] = {}
         self.classes: Dict[str, Class] = {}
         self.namespaces: Dict[str, Namespace] = {}
         self.global_nodes: Dict[str, EntityNode] = {}
         self._processed_usrs: Set[str] = set()
+        
+        # 性能优化：缓存常用查询结果
+        self._cursor_cache: Dict[str, Any] = {}
+        self._qualified_name_cache: Dict[str, str] = {}
 
     def extract_from_files(self, parsed_files: List[Any], config: Any) -> Dict[str, Any]:
         self.logger.info("开始实体提取 (v2.5 - 模板支持)...")
@@ -100,11 +107,15 @@ class EntityExtractor:
         }
 
     def _reset_state(self):
-        self.functions.clear()
-        self.classes.clear()
-        self.namespaces.clear()
-        self.global_nodes.clear()
-        self._processed_usrs.clear()
+        """重置状态 - 线程安全版本"""
+        with self._lock:
+            self.functions.clear()
+            self.classes.clear()
+            self.namespaces.clear()
+            self.global_nodes.clear()
+            self._processed_usrs.clear()
+            self._cursor_cache.clear()
+            self._qualified_name_cache.clear()
 
     def _first_pass_visitor(self, cursor: clang.Cursor):
         if cursor.kind == clang.CursorKind.TRANSLATION_UNIT:
@@ -164,63 +175,73 @@ class EntityExtractor:
             self.logger.warning(f"Pass 2 - Error processing cursor {cursor.spelling}: {e}")
 
     def _process_function_cursor(self, cursor: clang.Cursor):
+        """处理函数游标 - 线程安全和性能优化版"""
         usr = cursor.get_usr()
-        if not usr: return
+        if not usr or usr in self._processed_usrs: 
+            return
             
         file_path = cursor.location.file.name
         file_id = self.file_id_manager.get_file_id(file_path)
         if not file_id: return
 
-        if usr in self.functions:
-            existing_func = self.functions[usr]
-            if cursor.is_definition() and not existing_func.is_definition:
-                self._update_function_with_definition(existing_func, cursor)
-            elif not cursor.is_definition():
-                location = Location(file_id=file_id, line=cursor.location.line, column=cursor.location.column)
-                if location not in existing_func.declaration_locations:
-                    existing_func.declaration_locations.append(location)
-        else:
-            func = self._create_function_from_cursor(cursor)
-            self.functions[usr] = func
-            self.global_nodes[usr] = EntityNode(usr, "function", func)
+        with self._lock:
+            if usr in self.functions:
+                existing_func = self.functions[usr]
+                if cursor.is_definition() and not existing_func.is_definition:
+                    self._update_function_with_definition(existing_func, cursor)
+                elif not cursor.is_definition():
+                    location = Location(file_id=file_id, line=cursor.location.line, column=cursor.location.column)
+                    if location not in existing_func.declaration_locations:
+                        existing_func.declaration_locations.append(location)
+            else:
+                func = self._create_function_from_cursor(cursor)
+                self.functions[usr] = func
+                self.global_nodes[usr] = EntityNode(usr, "function", func)
+                self._processed_usrs.add(usr)
 
     def _process_class_cursor(self, cursor: clang.Cursor):
+        """处理类游标 - 线程安全和性能优化版"""
         usr = cursor.get_usr()
-        if not usr: return
+        if not usr or usr in self._processed_usrs: 
+            return
             
         file_path = cursor.location.file.name
         file_id = self.file_id_manager.get_file_id(file_path)
         if not file_id: return
 
-        if usr in self.classes:
-            existing_class = self.classes[usr]
-            if cursor.is_definition() and not existing_class.is_definition:
-                self._update_class_with_definition(existing_class, cursor)
-            elif not cursor.is_definition():
-                location = Location(file_id=file_id, line=cursor.location.line, column=cursor.location.column)
-                if location not in existing_class.declaration_locations:
-                    existing_class.declaration_locations.append(location)
-        else:
-            cls = self._create_class_from_cursor(cursor)
-            self.classes[usr] = cls
-            self.global_nodes[usr] = EntityNode(usr, "class", cls)
+        with self._lock:
+            if usr in self.classes:
+                existing_class = self.classes[usr]
+                if cursor.is_definition() and not existing_class.is_definition:
+                    self._update_class_with_definition(existing_class, cursor)
+                elif not cursor.is_definition():
+                    location = Location(file_id=file_id, line=cursor.location.line, column=cursor.location.column)
+                    if location not in existing_class.declaration_locations:
+                        existing_class.declaration_locations.append(location)
+            else:
+                cls = self._create_class_from_cursor(cursor)
+                self.classes[usr] = cls
+                self.global_nodes[usr] = EntityNode(usr, "class", cls)
+                self._processed_usrs.add(usr)
 
     def _process_namespace_cursor(self, cursor: clang.Cursor):
+        """处理命名空间游标 - 线程安全和性能优化版"""
         usr = cursor.get_usr()
         if not usr: return
             
         file_id = self.file_id_manager.get_file_id(cursor.location.file.name)
         if not file_id: return
 
-        if usr in self.namespaces:
-            existing_ns = self.namespaces[usr]
-            location = Location(file_id=file_id, line=cursor.location.line, column=cursor.location.column)
-            if location not in existing_ns.declaration_locations:
-                existing_ns.declaration_locations.append(location)
-        else:
-            ns = self._create_namespace_from_cursor(cursor)
-            self.namespaces[usr] = ns
-            self.global_nodes[usr] = EntityNode(usr, "namespace", ns)
+        with self._lock:
+            if usr in self.namespaces:
+                existing_ns = self.namespaces[usr]
+                location = Location(file_id=file_id, line=cursor.location.line, column=cursor.location.column)
+                if location not in existing_ns.declaration_locations:
+                    existing_ns.declaration_locations.append(location)
+            else:
+                ns = self._create_namespace_from_cursor(cursor)
+                self.namespaces[usr] = ns
+                self.global_nodes[usr] = EntityNode(usr, "namespace", ns)
 
     def _create_function_from_cursor(self, cursor: clang.Cursor) -> Function:
         usr = cursor.get_usr()
@@ -390,9 +411,22 @@ class EntityExtractor:
         return self.file_id_manager.get_file_id(cursor.location.file.name) is not None
 
     def _get_qualified_name(self, cursor: clang.Cursor) -> str:
-        if cursor.kind.is_translation_unit(): return ""
-        parent_name = self._get_qualified_name(cursor.semantic_parent)
-        return f"{parent_name}::{cursor.spelling}" if parent_name else cursor.spelling
+        """获取限定名称 - 缓存优化版"""
+        cursor_key = f"{cursor.get_usr()}:{cursor.spelling}"
+        
+        # 检查缓存
+        if cursor_key in self._qualified_name_cache:
+            return self._qualified_name_cache[cursor_key]
+        
+        if cursor.kind.is_translation_unit():
+            result = ""
+        else:
+            parent_name = self._get_qualified_name(cursor.semantic_parent)
+            result = f"{parent_name}::{cursor.spelling}" if parent_name else cursor.spelling
+        
+        # 缓存结果
+        self._qualified_name_cache[cursor_key] = result
+        return result
         
     def _get_namespace_str(self, cursor: clang.Cursor) -> str:
         parts = []
