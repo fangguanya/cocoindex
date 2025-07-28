@@ -377,27 +377,30 @@ class EnhancedTypeInferenceEngine:
     
     def _infer_variable_type(self, var_name: str, context_function_usr: str = None) -> Optional[str]:
         """推断变量类型"""
-        # 1. 检查函数参数和局部变量
-        if context_function_usr:
-            full_var_name = f"{context_function_usr}::{var_name}"
-            if full_var_name in self.variable_types:
-                return self.variable_types[full_var_name]
-        
-        # 2. 检查类成员变量
-        if self.current_class_usr:
-            class_entity = self.repo.get_node(self.current_class_usr)
-            if isinstance(class_entity, Class):
-                for field_usr in class_entity.fields:
-                    field_entity = self.repo.get_node(field_usr)
-                    if isinstance(field_entity, Variable) and field_entity.name == var_name:
-                        return field_entity.var_type
-        
-        # 3. 检查全局变量
-        global_vars = self.repo.find_by_qualified_name(var_name, 'variable')
-        if global_vars:
-            return global_vars[0].var_type
-        
-        return None
+        with self.repo._lock.read_lock():
+            # 1. 检查函数参数和局部变量
+            if context_function_usr:
+                full_var_name = f"{context_function_usr}::{var_name}"
+                if full_var_name in self.variable_types:
+                    return self.variable_types[full_var_name]
+            
+            # 2. 检查类成员变量
+            if self.current_class_usr:
+                class_entity = self.repo.get_node(self.current_class_usr)
+                if isinstance(class_entity, Class):
+                    for field_usr in class_entity.fields:
+                        field_entity = self.repo.get_node(field_usr)
+                        if isinstance(field_entity, Variable) and field_entity.name == var_name:
+                            return field_entity.var_type
+            
+            # 3. 检查全局变量
+            global_vars = self.repo.find_by_qualified_name(var_name, 'variable')
+            if global_vars:
+                return global_vars[0].var_type
+            
+            return None
+    
+
     
     def _infer_member_access_type(self, expression: str, context_function_usr: str = None) -> Optional[str]:
         """推断成员访问表达式的类型"""
@@ -437,21 +440,22 @@ class EnhancedTypeInferenceEngine:
             return stl_method_type
         
         # 2. 检查用户定义类型
-        class_entities = self.repo.find_by_qualified_name(class_type, 'class')
-        if class_entities:
-            class_entity = class_entities[0]
-            
-            # 检查方法
-            for method_usr in class_entity.methods:
-                method_entity = self.repo.get_node(method_usr)
-                if isinstance(method_entity, Function) and method_entity.name == member_name:
-                    return method_entity.return_type
-            
-            # 检查字段
-            for field_usr in class_entity.fields:
-                field_entity = self.repo.get_node(field_usr)
-                if isinstance(field_entity, Variable) and field_entity.name == member_name:
-                    return field_entity.var_type
+        with self.repo._lock.read_lock():
+            class_entities = self.repo.find_by_qualified_name(class_type, 'class')
+            if class_entities:
+                class_entity = class_entities[0]
+                
+                # 检查方法
+                for method_usr in class_entity.methods:
+                    method_entity = self.repo.get_node(method_usr)
+                    if isinstance(method_entity, Function) and method_entity.name == member_name:
+                        return method_entity.return_type
+                
+                # 检查字段
+                for field_usr in class_entity.fields:
+                    field_entity = self.repo.get_node(field_usr)
+                    if isinstance(field_entity, Variable) and field_entity.name == member_name:
+                        return field_entity.var_type
         
         return None
     
@@ -530,15 +534,16 @@ class EnhancedTypeInferenceEngine:
             return self._infer_member_access_type(func_expr, context_function_usr)
         
         # 处理普通函数调用
-        func_entities = self.repo.find_by_qualified_name(func_expr, 'function')
-        if func_entities:
-            # 优先选择定义而不是声明
-            for func in func_entities:
-                if func.is_definition and func.return_type:
-                    return func.return_type
-            # 如果没有定义，使用第一个声明
-            if func_entities[0].return_type:
-                return func_entities[0].return_type
+        with self.repo._lock.read_lock():
+            func_entities = self.repo.find_by_qualified_name(func_expr, 'function')
+            if func_entities:
+                # 优先选择定义而不是声明
+                for func in func_entities:
+                    if func.is_definition and func.return_type:
+                        return func.return_type
+                # 如果没有定义，使用第一个声明
+                if func_entities[0].return_type:
+                    return func_entities[0].return_type
         
         return None
     
@@ -624,9 +629,10 @@ class EnhancedTypeInferenceEngine:
         ]
         
         candidates = []
-        for name in possible_names:
-            functions = self.repo.find_by_qualified_name(name, 'function')
-            candidates.extend(functions)
+        with self.repo._lock.read_lock():
+            for name in possible_names:
+                functions = self.repo.find_by_qualified_name(name, 'function')
+                candidates.extend(functions)
         
         if not candidates:
             return None

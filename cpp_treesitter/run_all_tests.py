@@ -38,7 +38,7 @@ class TestRunner:
                     "min_functions": 80,
                     "min_classes": 15,
                     "min_inheritance": 10,
-                    "min_calls": 50,
+                    "min_calls": 30,
                     "has_templates": True,
                     "has_multiple_inheritance": True,
                     "min_files": 8

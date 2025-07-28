@@ -624,30 +624,31 @@ class NodeRepository:
 
     def _resolve_usr_conflict(self, base_usr: str, entity_type: str, qualified_name: str, file_path: str = "") -> str:
         """解决USR冲突"""
-        # 检查是否已存在
-        if base_usr not in self.nodes:
-            return base_usr
-        
-        existing_entity = self.nodes[base_usr]
-        
-        # 如果是同一类型且qualified_name相同，这可能是合法的声明/定义对
-        if (existing_entity.type == entity_type and 
-            existing_entity.qualified_name == qualified_name):
-            return base_usr  # 允许合并
-        
-        # 检查是否是ODR违规（One Definition Rule）
-        if entity_type in ['function', 'class', 'variable']:
-            # 记录ODR违规警告
-            from .logger import Logger
-            logger = Logger.get_logger()
-            logger.warning(f"潜在ODR违规: {qualified_name} 在多处定义 - {file_path}")
-        
-        # 生成冲突解决后缀
-        conflict_suffix = 1
-        while f"{base_usr}@ODR{conflict_suffix}" in self.nodes:
-            conflict_suffix += 1
-        
-        return f"{base_usr}@ODR{conflict_suffix}"
+        with self._lock.read_lock():
+            # 检查是否已存在
+            if base_usr not in self.nodes:
+                return base_usr
+            
+            existing_entity = self.nodes[base_usr]
+            
+            # 如果是同一类型且qualified_name相同，这可能是合法的声明/定义对
+            if (existing_entity.type == entity_type and 
+                existing_entity.qualified_name == qualified_name):
+                return base_usr  # 允许合并
+            
+            # 检查是否是ODR违规（One Definition Rule）
+            if entity_type in ['function', 'class', 'variable']:
+                # 记录ODR违规警告
+                from .logger import Logger
+                logger = Logger.get_logger()
+                logger.warning(f"潜在ODR违规: {qualified_name} 在多处定义 - {file_path}")
+            
+            # 生成冲突解决后缀
+            conflict_suffix = 1
+            while f"{base_usr}@ODR{conflict_suffix}" in self.nodes:
+                conflict_suffix += 1
+            
+            return f"{base_usr}@ODR{conflict_suffix}"
 
     def _normalize_function_signature_enhanced(self, signature: str) -> str:
         """
@@ -1803,11 +1804,12 @@ class NodeRepository:
     def find_by_signature(self, signature: str) -> Optional[Entity]:
         """通过函数签名查找函数"""
         normalized_sig = self._normalize_signature(signature)
-        for usr_id, entity in self.nodes.items():
-            if isinstance(entity, Function) and hasattr(entity, 'signature'):
-                if self._normalize_signature(entity.signature) == normalized_sig:
-                    return entity
-        return None
+        with self._lock.read_lock():
+            for usr_id, entity in self.nodes.items():
+                if isinstance(entity, Function) and hasattr(entity, 'signature'):
+                    if self._normalize_signature(entity.signature) == normalized_sig:
+                        return entity
+            return None
 
     def resolve_function_call(self, called_name: str, context_namespace: str = "", context_class: str = "") -> Optional[str]:
         """解析函数调用，返回被调用函数的USR ID - 增强版：更好地处理复杂调用"""
@@ -1844,10 +1846,11 @@ class NodeRepository:
         if '::' not in called_name:
             # 查找所有同名函数
             matching_functions = []
-            for usr, entity in self.nodes.items():
-                if (hasattr(entity, 'type') and entity.type == 'function' and 
-                    hasattr(entity, 'name') and entity.name == called_name):
-                    matching_functions.append(entity)
+            with self._lock.read_lock():
+                for usr, entity in self.nodes.items():
+                    if (hasattr(entity, 'type') and entity.type == 'function' and 
+                        hasattr(entity, 'name') and entity.name == called_name):
+                        matching_functions.append(entity)
             
             if matching_functions:
                 # 优先返回定义

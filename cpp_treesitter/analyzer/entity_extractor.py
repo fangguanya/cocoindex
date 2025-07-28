@@ -69,6 +69,18 @@ class EntityExtractor:
             qualifier_parts.extend(self.current_class_stack)
         return "::".join(qualifier_parts) + "::" if qualifier_parts else ""
 
+    def _find_qualified_identifier(self, node: Node) -> Optional[Node]:
+        """在节点树中查找qualified_identifier节点"""
+        if node.type == 'qualified_identifier':
+            return node
+        
+        for child in node.children:
+            result = self._find_qualified_identifier(child)
+            if result:
+                return result
+        
+        return None
+
     def phase_one_collect_declarations(self, root_node: Node):
         """第一阶段：收集所有声明"""
         self.logger.info(f"Phase 1: Collecting declarations from {self.file_path}")
@@ -315,15 +327,41 @@ class EntityExtractor:
         name = self._extract_function_name(declarator_node, node)
         if not name:
             return
-            
-        qualifier = self._get_current_scope_qualifier()
-        qualified_name = f"{qualifier}{name}"
         
-        # 修复：检测类外成员函数定义（包含"::"的情况）
+        # 修复：对于类外成员函数定义，需要从declarator_node直接提取完整的qualified_name
+        qualified_name = ""
         is_out_of_class_method = False
         parent_class_usr = None
         
-        if "::" in qualified_name and not self.current_class_stack:
+        # 检查declarator_node是否包含qualified_identifier
+        qualified_identifier_node = self._find_qualified_identifier(declarator_node)
+        if qualified_identifier_node and not self.current_class_stack:
+            # 这是类外成员函数定义，如 Document::print()
+            full_qualified_name = self._get_text(qualified_identifier_node)
+            if "::" in full_qualified_name:
+                qualified_name = full_qualified_name
+                is_out_of_class_method = True
+                
+                # 提取类名
+                parts = full_qualified_name.split("::")
+                if len(parts) >= 2:
+                    class_qualified_name = "::".join(parts[:-1])
+                    parent_class_usr = self._generate_usr('class', class_qualified_name)
+                    parent_class = self.repo.get_node(parent_class_usr)
+                    
+                    if parent_class and isinstance(parent_class, Class):
+                        self.logger.info(f"发现类外成员函数定义: {qualified_name} -> 类 {class_qualified_name}")
+                    else:
+                        is_out_of_class_method = False
+                        parent_class_usr = None
+        
+        # 如果不是类外成员函数，使用常规方式生成qualified_name
+        if not qualified_name:
+            qualifier = self._get_current_scope_qualifier()
+            qualified_name = f"{qualifier}{name}"
+        
+        # 继续原有的逻辑
+        if "::" in qualified_name and not self.current_class_stack and not is_out_of_class_method:
             # 这是一个类外成员函数定义，如 A::foo()
             parts = qualified_name.split("::")
             if len(parts) >= 2:
@@ -411,64 +449,6 @@ class EntityExtractor:
             
             self.current_class_stack.pop()
 
-    def _process_method_definition(self, node: Node, parent_class_usr: str):
-        """处理类方法定义"""
-        declarator_node = node.child_by_field_name('declarator')
-        if not declarator_node:
-            return None
-
-        name = self._extract_function_name(declarator_node, node)
-        if not name:
-            return None
-            
-        qualifier = self._get_current_scope_qualifier()
-        qualified_name = f"{qualifier}{name}"
-        
-        type_node = node.child_by_field_name('type')
-        return_type = self._get_text(type_node) if type_node else "void"
-
-        parameters, signature = self._extract_parameters_and_signature(declarator_node, name)
-        usr = self._generate_usr('function', qualified_name, signature)
-        
-        # 检查是否已存在
-        existing = self.repo.get_node(usr)
-        if existing and isinstance(existing, Function):
-            method = existing
-            # 更新定义信息
-            method.is_definition = True
-            body_node = node.child_by_field_name('body')
-            if body_node:
-                method.code_content = self._extract_function_body(body_node)
-        else:
-            # 创建新方法
-            method = Function(
-                usr=usr,
-                name=name,
-                qualified_name=qualified_name,
-                file_path=self.file_path,
-                start_line=node.start_point[0] + 1,
-                end_line=node.end_point[0] + 1,
-                return_type=return_type,
-                parameters=parameters,
-                signature=signature,
-                is_definition=True,
-                parent_class=parent_class_usr
-            )
-            
-            body_node = node.child_by_field_name('body')
-            if body_node:
-                method.code_content = self._extract_function_body(body_node)
-            
-            self.repo.register_entity(method)
-        
-        # 分析方法调用关系
-        if method.code_content:
-            calls_to = self.call_analyzer.analyze_function_calls(node, usr, self.file_content)
-            # 🔧 修复：调用关系现在已经通过add_call_relationship正确添加到存储库
-            # method.calls_to会通过add_call_relationship自动同步更新
-        
-        return method
-
     def _extract_function_body(self, body_node: Node) -> str:
         """提取并格式化函数体代码内容 - 增强版"""
         if not body_node:
@@ -507,8 +487,8 @@ class EntityExtractor:
         result = '\n'.join(formatted_lines)
         
         # 大函数截断机制
-        MAX_LINES = 500
-        MAX_SIZE = 100 * 1024  # 100KB
+        MAX_LINES = 5000
+        MAX_SIZE = 1000 * 1024  # 100KB
         
         if len(formatted_lines) > MAX_LINES or len(result.encode('utf-8')) > MAX_SIZE:
             truncated_lines = formatted_lines[:MAX_LINES]
@@ -791,12 +771,6 @@ class EntityExtractor:
             if hasattr(current_node, 'children'):
                 queue.extend(current_node.children)
         return nodes
-
-    # 保留原有的traverse方法作为向后兼容
-    def traverse(self, node: Node):
-        """遍历AST节点以提取实体（向后兼容）"""
-        self.phase_one_collect_declarations(node)
-        self.phase_two_process_definitions(node) 
 
     def _analyze_class_members(self, body_node: Node, class_usr: str) -> Tuple[List[str], List[str]]:
         """分析类成员，返回方法和字段的USR列表"""
@@ -1351,9 +1325,6 @@ class EntityExtractor:
         """提取模板类声明"""
         # 检查是否为模板特化
         is_specialization = self._is_template_specialization(template_node)
-        
-        # 使用现有的类声明提取逻辑，但增加模板信息
-        original_extract = self._extract_class_declaration
         
         # 临时保存模板信息供类提取器使用
         self._current_template_params = template_params

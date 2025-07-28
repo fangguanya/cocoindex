@@ -31,7 +31,6 @@ from rich.console import Console
 
 from .data_structures import NodeRepository, Project
 from .entity_extractor import EntityExtractor  
-from .file_scanner import FileScanner
 from .logger import Logger
 from .file_filter import create_unreal_filter
 
@@ -377,8 +376,9 @@ class ParallelCppAnalyzer:
         project.files = [str(f) for f in files]
         
         # 从 repository 中收集实体
-        for usr, node in self.base_repo.nodes.items():
-            project.add_entity(node)
+        with self.base_repo._lock.read_lock():
+            for usr, node in self.base_repo.nodes.items():
+                project.add_entity(node)
         
         # 构建调用图和继承图
         project.build_graphs(self.base_repo)

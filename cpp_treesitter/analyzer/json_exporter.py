@@ -123,12 +123,13 @@ class JsonExporter:
         called_by = {}
         
         # 收集所有调用关系
-        for usr, entity in repo.nodes.items():
-            if isinstance(entity, Function):
-                if entity.calls_to:
-                    calls_to[usr] = entity.calls_to.copy()
-                if entity.called_by:
-                    called_by[usr] = entity.called_by.copy()
+        with repo._lock.read_lock():
+            for usr, entity in repo.nodes.items():
+                if isinstance(entity, Function):
+                    if entity.calls_to:
+                        calls_to[usr] = entity.calls_to.copy()
+                    if entity.called_by:
+                        called_by[usr] = entity.called_by.copy()
         
         # 确保双向对齐：∀callee∈called_by ⇒ caller∈calls_to
         inconsistencies_found = 0
@@ -166,31 +167,33 @@ class JsonExporter:
         }
         
         # 检查调用关系中的USR是否都存在
-        for usr, entity in repo.nodes.items():
-            if isinstance(entity, Function):
-                for callee_usr in entity.calls_to:
-                    if callee_usr not in repo.nodes:
-                        issues["orphaned_calls"].append({
-                            "caller": usr,
+        with repo._lock.read_lock():
+            for usr, entity in repo.nodes.items():
+                if isinstance(entity, Function):
+                    for callee_usr in entity.calls_to:
+                        if callee_usr not in repo.nodes:
+                            issues["orphaned_calls"].append({
+                                "caller": usr,
                             "missing_callee": callee_usr
                         })
-                
-                for caller_usr in entity.called_by:
-                    if caller_usr not in repo.nodes:
-                        issues["orphaned_calls"].append({
-                            "callee": usr,
-                            "missing_caller": caller_usr
-                        })
+                    
+                    for caller_usr in entity.called_by:
+                        if caller_usr not in repo.nodes:
+                            issues["orphaned_calls"].append({
+                                "callee": usr,
+                                "missing_caller": caller_usr
+                            })
         
         # 检查类方法引用
-        for usr, entity in repo.nodes.items():
-            if isinstance(entity, Class):
-                for method_usr in entity.methods:
-                    if method_usr not in repo.nodes:
-                        issues["invalid_references"].append({
-                            "class": usr,
-                            "missing_method": method_usr
-                        })
+        with repo._lock.read_lock():
+            for usr, entity in repo.nodes.items():
+                if isinstance(entity, Class):
+                    for method_usr in getattr(entity, 'methods', []):
+                        if method_usr not in repo.nodes:
+                            issues["invalid_references"].append({
+                                "class": usr,
+                                "missing_method": method_usr
+                            })
         
         # 统计信息
         issues["statistics"] = {
@@ -678,9 +681,10 @@ class JsonExporter:
         """构建全局调用图"""
         call_graph = {}
         
-        for usr_id, entity in repo.nodes.items():
-            if isinstance(entity, Function) and entity.calls_to:
-                call_graph[usr_id] = entity.calls_to
+        with repo._lock.read_lock():
+            for usr_id, entity in repo.nodes.items():
+                if isinstance(entity, Function) and entity.calls_to:
+                    call_graph[usr_id] = entity.calls_to
         
         return call_graph
 
@@ -688,9 +692,10 @@ class JsonExporter:
         """构建反向调用图"""
         reverse_call_graph = {}
         
-        for usr_id, entity in repo.nodes.items():
-            if isinstance(entity, Function) and entity.called_by:
-                reverse_call_graph[usr_id] = entity.called_by
+        with repo._lock.read_lock():
+            for usr_id, entity in repo.nodes.items():
+                if isinstance(entity, Function) and entity.called_by:
+                    reverse_call_graph[usr_id] = entity.called_by
         
         return reverse_call_graph
 
@@ -698,24 +703,25 @@ class JsonExporter:
         """构建类分析信息"""
         classes_analysis = {}
         
-        for usr_id, entity in repo.nodes.items():
-            if isinstance(entity, Class):
-                classes_analysis[usr_id] = {
-                    "name": entity.name,
-                    "qualified_name": entity.qualified_name,
-                    "signature": f"{entity.qualified_name}_{entity.file_path}",  # 向后兼容
-                    "definition_file_id": self._get_file_id_for_path(entity.file_path),
-                    "start_line": entity.start_line,
-                    "end_line": entity.end_line,
-                    "is_local": False,  # 简化处理
-                    "methods": entity.methods,
-                    "fields": getattr(entity, 'fields', []),
-                    "parent_classes": entity.base_classes,
-                    "derived_classes": entity.derived_classes,
-                    "is_abstract": entity.is_abstract,
-                    "documentation": getattr(entity, 'documentation', ""),
-                    "cpp_oop_extensions": self._build_cpp_oop_extensions(entity)
-                }
+        with repo._lock.read_lock():
+            for usr_id, entity in repo.nodes.items():
+                if isinstance(entity, Class):
+                    classes_analysis[usr_id] = {
+                        "name": entity.name,
+                        "qualified_name": entity.qualified_name,
+                        "signature": f"{entity.qualified_name}_{entity.file_path}",  # 向后兼容
+                        "definition_file_id": self._get_file_id_for_path(entity.file_path),
+                        "start_line": entity.start_line,
+                        "end_line": entity.end_line,
+                        "is_local": False,  # 简化处理
+                        "methods": entity.methods,
+                        "fields": getattr(entity, 'fields', []),
+                        "parent_classes": entity.base_classes,
+                        "derived_classes": entity.derived_classes,
+                        "is_abstract": entity.is_abstract,
+                        "documentation": getattr(entity, 'documentation', ""),
+                        "cpp_oop_extensions": self._build_cpp_oop_extensions(entity)
+                    }
         
         return classes_analysis
 
@@ -1026,57 +1032,58 @@ class JsonExporter:
         """构建 entities.functions 映射 - 修复关键缺失功能"""
         functions_entities = {}
         
-        for usr_id, entity in repo.nodes.items():
-            if isinstance(entity, Function):
-                # 生成符合v2.3规范的签名键值
-                file_id = self._get_file_id_for_path(entity.file_path)
-                signature_key = repo.generate_signature_key(
-                    'function', 
-                    entity.qualified_name, 
-                    entity.signature,
-                    getattr(entity, 'template_params', None),
-                    file_id
-                )
-                
-                # 构建符合规范的函数实体信息
-                function_data = {
-                    "name": entity.name,
-                    "qualified_name": entity.qualified_name,
-                    "signature": entity.signature,
-                    "return_type": entity.return_type or "void",
-                    "parameters": entity.parameters,
-                    "usr": entity.usr,
-                    "definition_file_id": file_id,
-                    "declaration_file_id": file_id,  # v2.3规范要求
-                    "start_line": entity.start_line,
-                    "end_line": entity.end_line,
-                    "is_definition": entity.is_definition,
-                    "is_declaration": getattr(entity, 'is_declaration', False),
-                    "is_local": False,  # 简化处理
-                    "documentation": entity.code_content if entity.code_content else "",
-                    "calls_to": entity.calls_to,
-                    "called_by": entity.called_by,
-                    "complexity": getattr(entity, 'complexity', 0),
-                    "cpp_extensions": {
+        with repo._lock.read_lock():
+            for usr_id, entity in repo.nodes.items():
+                if isinstance(entity, Function):
+                    # 生成符合v2.3规范的签名键值
+                    file_id = self._get_file_id_for_path(entity.file_path)
+                    signature_key = repo.generate_signature_key(
+                        'function', 
+                        entity.qualified_name, 
+                        entity.signature,
+                        getattr(entity, 'template_params', None),
+                        file_id
+                    )
+                    
+                    # 构建符合规范的函数实体信息
+                    function_data = {
+                        "name": entity.name,
                         "qualified_name": entity.qualified_name,
-                        "namespace": "::".join(entity.qualified_name.split("::")[:-1]) if "::" in entity.qualified_name else "",
-                        "function_status_flags": self._compute_function_status_flags(entity),
-                        "access_specifier": getattr(entity, 'access_specifier', 'public'),
-                        "storage_class": "none",
-                        "calling_convention": "default",
+                        "signature": entity.signature,
                         "return_type": entity.return_type or "void",
-                        "parameter_types": {p.get('name', f'param_{i}'): p.get('type', 'unknown') for i, p in enumerate(entity.parameters)},
-                        "template_parameters": getattr(entity, 'template_params', []),
-                        "exception_specification": "",
-                        "attributes": [],
-                        "mangled_name": "",
+                        "parameters": entity.parameters,
                         "usr": entity.usr,
-                        "signature_key": signature_key
+                        "definition_file_id": file_id,
+                        "declaration_file_id": file_id,  # v2.3规范要求
+                        "start_line": entity.start_line,
+                        "end_line": entity.end_line,
+                        "is_definition": entity.is_definition,
+                        "is_declaration": getattr(entity, 'is_declaration', False),
+                        "is_local": False,  # 简化处理
+                        "documentation": entity.code_content if entity.code_content else "",
+                        "calls_to": entity.calls_to,
+                        "called_by": entity.called_by,
+                        "complexity": getattr(entity, 'complexity', 0),
+                        "cpp_extensions": {
+                            "qualified_name": entity.qualified_name,
+                            "namespace": "::".join(entity.qualified_name.split("::")[:-1]) if "::" in entity.qualified_name else "",
+                            "function_status_flags": self._compute_function_status_flags(entity),
+                            "access_specifier": getattr(entity, 'access_specifier', 'public'),
+                            "storage_class": "none",
+                            "calling_convention": "default",
+                            "return_type": entity.return_type or "void",
+                            "parameter_types": {p.get('name', f'param_{i}'): p.get('type', 'unknown') for i, p in enumerate(entity.parameters)},
+                            "template_parameters": getattr(entity, 'template_params', []),
+                            "exception_specification": "",
+                            "attributes": [],
+                            "mangled_name": "",
+                            "usr": entity.usr,
+                            "signature_key": signature_key
+                        }
                     }
-                }
-                
-                # 使用签名键值作为主键（v2.3规范要求）
-                functions_entities[signature_key] = function_data
+                    
+                    # 使用签名键值作为主键（v2.3规范要求）
+                    functions_entities[signature_key] = function_data
         
         return functions_entities
 
@@ -1084,42 +1091,43 @@ class JsonExporter:
         """构建 entities.classes 映射"""
         classes_entities = {}
         
-        for usr_id, entity in repo.nodes.items():
-            if isinstance(entity, Class):
-                # 生成符合v2.3规范的签名键值
-                file_id = self._get_file_id_for_path(entity.file_path)
-                signature_key = repo.generate_signature_key(
-                    'class', 
-                    entity.qualified_name,
-                    None,  # 类没有函数签名
-                    getattr(entity, 'template_params', None),
-                    file_id
-                )
-                
-                class_data = {
-                    "name": entity.name,
-                    "qualified_name": entity.qualified_name,
-                    "usr": entity.usr,
-                    "definition_file_id": file_id,
-                    "declaration_file_id": file_id,  # v2.3规范要求
-                    "start_line": entity.start_line,
-                    "end_line": entity.end_line,
-                    "is_definition": entity.is_definition,
-                    "is_declaration": getattr(entity, 'is_declaration', False),
-                    "is_local": False,  # 简化处理
-                    "methods": entity.methods,
-                    "fields": getattr(entity, 'fields', []),
-                    "parent_classes": entity.base_classes,
-                    "derived_classes": entity.derived_classes,
-                    "is_abstract": entity.is_abstract,
-                    "is_mixin": False,  # v2.3规范要求
-                    "is_struct": entity.is_struct,
-                    "documentation": getattr(entity, 'documentation', ""),
-                    "cpp_oop_extensions": self._build_cpp_oop_extensions(entity)
-                }
-                
-                # 使用签名键值作为主键（v2.3规范要求）
-                classes_entities[signature_key] = class_data
+        with repo._lock.read_lock():
+            for usr_id, entity in repo.nodes.items():
+                if isinstance(entity, Class):
+                    # 生成符合v2.3规范的签名键值
+                    file_id = self._get_file_id_for_path(entity.file_path)
+                    signature_key = repo.generate_signature_key(
+                        'class', 
+                        entity.qualified_name,
+                        None,  # 类没有函数签名
+                        getattr(entity, 'template_params', None),
+                        file_id
+                    )
+                    
+                    class_data = {
+                        "name": entity.name,
+                        "qualified_name": entity.qualified_name,
+                        "usr": entity.usr,
+                        "definition_file_id": file_id,
+                        "declaration_file_id": file_id,  # v2.3规范要求
+                        "start_line": entity.start_line,
+                        "end_line": entity.end_line,
+                        "is_definition": entity.is_definition,
+                        "is_declaration": getattr(entity, 'is_declaration', False),
+                        "is_local": False,  # 简化处理
+                        "methods": getattr(entity, 'methods', []),
+                        "fields": getattr(entity, 'fields', []),
+                        "parent_classes": getattr(entity, 'base_classes', []),
+                        "derived_classes": getattr(entity, 'derived_classes', []),
+                        "is_abstract": getattr(entity, 'is_abstract', False),
+                        "is_mixin": False,  # v2.3规范要求
+                        "is_struct": getattr(entity, 'is_struct', False),
+                        "documentation": getattr(entity, 'documentation', ""),
+                        "cpp_oop_extensions": self._build_cpp_oop_extensions(entity)
+                    }
+                    
+                    # 使用签名键值作为主键（v2.3规范要求）
+                    classes_entities[signature_key] = class_data
         
         return classes_entities
 
@@ -1127,25 +1135,26 @@ class JsonExporter:
         """构建 entities.namespaces 映射"""
         namespaces_entities = {}
         
-        for usr_id, entity in repo.nodes.items():
-            if isinstance(entity, Namespace):
-                namespace_data = {
-                    "name": entity.name,
-                    "qualified_name": entity.qualified_name,
-                    "usr": entity.usr,
-                    "definition_file_id": self._get_file_id_for_path(entity.file_path),
-                    "start_line": entity.start_line,
-                    "end_line": entity.end_line,
-                    "is_anonymous": getattr(entity, 'is_anonymous', False),
-                    "is_inline": getattr(entity, 'is_inline', False),
-                    "parent_namespace": getattr(entity, 'parent_namespace', "global"),
-                    "nested_namespaces": getattr(entity, 'nested_namespaces', []),
-                    "classes": getattr(entity, 'classes', []),
-                    "functions": getattr(entity, 'functions', []),
-                    "variables": getattr(entity, 'variables', [])
-                }
-                
-                namespaces_entities[usr_id] = namespace_data
+        with repo._lock.read_lock():
+            for usr_id, entity in repo.nodes.items():
+                if isinstance(entity, Namespace):
+                    namespace_data = {
+                        "name": entity.name,
+                        "qualified_name": entity.qualified_name,
+                        "usr": entity.usr,
+                        "definition_file_id": self._get_file_id_for_path(entity.file_path),
+                        "start_line": entity.start_line,
+                        "end_line": entity.end_line,
+                        "is_anonymous": getattr(entity, 'is_anonymous', False),
+                        "is_inline": getattr(entity, 'is_inline', False),
+                        "parent_namespace": getattr(entity, 'parent_namespace', "global"),
+                        "nested_namespaces": getattr(entity, 'nested_namespaces', []),
+                        "classes": getattr(entity, 'classes', []),
+                        "functions": getattr(entity, 'functions', []),
+                        "variables": getattr(entity, 'variables', [])
+                    }
+                    
+                    namespaces_entities[usr_id] = namespace_data
         
         return namespaces_entities
 
@@ -1153,24 +1162,25 @@ class JsonExporter:
         """构建调用关系列表"""
         call_relations = []
         
-        for usr_id, entity in repo.nodes.items():
-            if isinstance(entity, Function) and entity.calls_to:
-                caller_info = repo.get_node(usr_id)
-                caller_name = caller_info.name if caller_info else "Unknown"
-                caller_class_name = None
-                if caller_info and caller_info.parent_class:
-                    caller_class_node = repo.get_node(caller_info.parent_class)
-                    if caller_class_node:
-                        caller_class_name = caller_class_node.name
+        with repo._lock.read_lock():
+            for usr_id, entity in repo.nodes.items():
+                if isinstance(entity, Function) and entity.calls_to:
+                    caller_info = repo.get_node(usr_id)
+                    caller_name = caller_info.name if caller_info else "Unknown"
+                    caller_class_name = None
+                    if caller_info and getattr(caller_info, 'parent_class', None):
+                        caller_class_node = repo.get_node(caller_info.parent_class)
+                        if caller_class_node:
+                            caller_class_name = caller_class_node.name
 
-                for callee_usr in entity.calls_to:
-                    callee_info = repo.get_node(callee_usr)
-                    callee_name = callee_info.name if callee_info else "Unknown"
-                    callee_class_name = None
-                    if callee_info and callee_info.parent_class:
-                        callee_class_node = repo.get_node(callee_info.parent_class)
-                        if callee_class_node:
-                            callee_class_name = callee_class_node.name
+                    for callee_usr in entity.calls_to:
+                        callee_info = repo.get_node(callee_usr)
+                        callee_name = callee_info.name if callee_info else "Unknown"
+                        callee_class_name = None
+                        if callee_info and getattr(callee_info, 'parent_class', None):
+                            callee_class_node = repo.get_node(callee_info.parent_class)
+                            if callee_class_node:
+                                callee_class_name = callee_class_node.name
                     
                     # 查找详细的调用信息
                     call_detail = None
@@ -1316,10 +1326,6 @@ class JsonExporter:
 
     def _build_templates_entities(self) -> Dict[str, Any]:
         """构建模板实体信息"""
-        # 从分析器获取模板信息（需要在主分析器中传递）
-        if hasattr(self, 'template_analyzer') and self.template_analyzer:
-            return self.template_analyzer.get_templates_json()
-        
         # 备用：从repo中查找模板相关实体
         templates = {}
         
@@ -1613,7 +1619,8 @@ class JsonExporter:
         import time
         
         f.write('{\n')
-        functions = [node for node in repo.nodes.values() if node.type == 'function']
+        with repo._lock.read_lock():
+            functions = [node for node in repo.nodes.values() if node.type == 'function']
         total_functions = len(functions)
         
         logger.info(f"   📈 开始处理 {total_functions} 个函数实体...")
@@ -1654,7 +1661,8 @@ class JsonExporter:
         import time
         
         f.write('{\n')
-        classes = [node for node in repo.nodes.values() if node.type == 'class']
+        with repo._lock.read_lock():
+            classes = [node for node in repo.nodes.values() if node.type == 'class']
         total_classes = len(classes)
         
         logger.info(f"   📈 开始处理 {total_classes} 个类实体...")
@@ -1695,7 +1703,8 @@ class JsonExporter:
         import time
         
         f.write('{\n')
-        namespaces = [node for node in repo.nodes.values() if node.type == 'namespace']
+        with repo._lock.read_lock():
+            namespaces = [node for node in repo.nodes.values() if node.type == 'namespace']
         total_namespaces = len(namespaces)
         
         logger.info(f"   📈 开始处理 {total_namespaces} 个命名空间实体...")
@@ -1744,35 +1753,36 @@ class JsonExporter:
         collect_start = time.time()
         
         call_relations = []
-        for node in repo.nodes.values():
-            if hasattr(node, 'calls_to') and node.calls_to:
-                caller_info = repo.get_node(node.usr)
-                caller_name = caller_info.name if caller_info else "Unknown"
-                caller_class_name = None
-                if caller_info and caller_info.parent_class:
-                    caller_class_node = repo.get_node(caller_info.parent_class)
-                    if caller_class_node:
-                        caller_class_name = caller_class_node.name
+        with repo._lock.read_lock():
+            for node in repo.nodes.values():
+                if hasattr(node, 'calls_to') and node.calls_to:
+                    caller_info = repo.get_node(node.usr)
+                    caller_name = caller_info.name if caller_info else "Unknown"
+                    caller_class_name = None
+                    if caller_info and caller_info.parent_class:
+                        caller_class_node = repo.get_node(caller_info.parent_class)
+                        if caller_class_node:
+                            caller_class_name = caller_class_node.name
 
-                for callee_usr in node.calls_to:
-                    callee_info = repo.get_node(callee_usr)
-                    callee_name = callee_info.name if callee_info else "Unknown"
-                    callee_class_name = None
-                    if callee_info and callee_info.parent_class:
-                        callee_class_node = repo.get_node(callee_info.parent_class)
-                        if callee_class_node:
-                            callee_class_name = callee_class_node.name
-                    
-                    call_relation = {
-                        "caller_usr": node.usr,
-                        "callee_usr": callee_usr,
-                        "caller_function_name": caller_name,
-                        "callee_function_name": callee_name,
-                        "caller_class_name": caller_class_name,
-                        "callee_class_name": callee_class_name,
-                        "call_type": "direct"  # 流式模式下简化
-                    }
-                    call_relations.append(call_relation)
+                    for callee_usr in node.calls_to:
+                        callee_info = repo.get_node(callee_usr)
+                        callee_name = callee_info.name if callee_info else "Unknown"
+                        callee_class_name = None
+                        if callee_info and callee_info.parent_class:
+                            callee_class_node = repo.get_node(callee_info.parent_class)
+                            if callee_class_node:
+                                callee_class_name = callee_class_node.name
+                        
+                        call_relation = {
+                            "caller_usr": node.usr,
+                            "callee_usr": callee_usr,
+                            "caller_function_name": caller_name,
+                            "callee_function_name": callee_name,
+                            "caller_class_name": caller_class_name,
+                            "callee_class_name": callee_class_name,
+                            "call_type": "direct"  # 流式模式下简化
+                        }
+                        call_relations.append(call_relation)
         
         collect_time = time.time() - collect_start
         total_relations = len(call_relations)

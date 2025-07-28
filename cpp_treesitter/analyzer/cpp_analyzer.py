@@ -28,12 +28,10 @@ from rich.console import Console
 from rich.progress import track, Progress
 
 # 使用本地的组件
-from .file_scanner import FileScanner, ScanResult
 from .json_exporter import JsonExporter
 from .entity_extractor import EntityExtractor
 from .call_relationship_analyzer import CallRelationshipAnalyzer
 from .file_manager import FileManager, get_file_manager
-from .template_analyzer import TemplateAnalyzer
 from .file_filter import UnifiedFileFilter, create_unreal_filter
 
 from pathlib import Path
@@ -155,9 +153,6 @@ class CppAnalyzer:
         self.file_manager.clear()  # 重置文件管理器
         # 重新设置project_root（因为clear()不会重置它）
         self.file_manager.project_root = self.project_path
-        
-        # 初始化模板分析器
-        self.template_analyzer = TemplateAnalyzer(self.repo)
         
         # 初始化项目结构
         self.project = Project(name=self.project_name)
@@ -463,8 +458,9 @@ class CppAnalyzer:
         self.logger.info("构建项目结构...")
         
         # 从repo中收集所有实体的USR
-        for usr, node in self.repo.nodes.items():
-            self.project.add_entity(node)
+        with self.repo._lock.read_lock():
+            for usr, node in self.repo.nodes.items():
+                self.project.add_entity(node)
         
         # 构建调用图和继承图
         self.project.build_graphs(self.repo)

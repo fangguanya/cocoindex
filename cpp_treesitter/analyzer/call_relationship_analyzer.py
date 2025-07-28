@@ -60,9 +60,12 @@ class CallRelationshipAnalyzer:
         # 查找所有函数调用表达式
         for call_node in self._find_call_expressions(body_node):
             called_usr_id = self._analyze_single_call_enhanced(call_node, function_usr_id)
-            if called_usr_id and called_usr_id not in calls_to:
-                calls_to.append(called_usr_id)
-                # 🔧 修复：立即建立调用关系到全局存储库
+            if called_usr_id:
+                # 🔧 修复：允许重复调用关系，因为同一函数可能被多次调用
+                # 或者重载函数可能有多个不同的调用
+                if called_usr_id not in calls_to:
+                    calls_to.append(called_usr_id)
+                # 始终建立调用关系到全局存储库（允许重复）
                 self.repo.add_call_relationship(function_usr_id, called_usr_id)
                 self.resolved_calls_count += 1
         
@@ -237,160 +240,11 @@ class CallRelationshipAnalyzer:
         
         return None
 
-    def _analyze_single_call(self, call_node: Node, caller_usr_id: str) -> Optional[str]:
-        """分析单个函数调用，返回被调用函数的USR ID（向后兼容）"""
-        return self._analyze_single_call_enhanced(call_node, caller_usr_id)
-    
-    def _analyze_direct_call(self, call_node: Node, caller_usr_id: str) -> Optional[str]:
-        """分析直接函数调用"""
-        function_node = call_node.child_by_field_name('function')
-        if not function_node:
-            return None
-        
-        function_name = self._get_text(function_node)
-        
-        # 处理命名空间限定的调用
-        if '::' in function_name:
-            qualified_name = function_name
-        else:
-            # 构建可能的qualified names
-            qualified_name = self._build_qualified_name(function_name)
-        
-        # 解析函数调用
-        return self.repo.resolve_function_call(
-            qualified_name,
-            self._get_current_namespace(),
-            self._get_current_class()
-        )
-    
-    def _analyze_member_call(self, field_node: Node, caller_usr_id: str) -> Optional[str]:
-        """分析成员函数调用"""
-        # 获取对象和方法名
-        object_node = field_node.child_by_field_name('argument')
-        field_name_node = field_node.child_by_field_name('field')
-        
-        if not field_name_node:
-            return None
-        
-        method_name = self._get_text(field_name_node)
-        
-        # 尝试确定对象类型
-        object_type = self._infer_object_type(object_node) if object_node else None
-        
-        if object_type:
-            qualified_method_name = f"{object_type}::{method_name}"
-        else:
-            # 如果无法确定对象类型，使用当前类上下文
-            current_class = self._get_current_class()
-            if current_class:
-                qualified_method_name = f"{current_class}::{method_name}"
-            else:
-                qualified_method_name = method_name
-        
-        return self.repo.resolve_function_call(
-            qualified_method_name,
-            self._get_current_namespace(),
-            self._get_current_class()
-        )
-    
-    def _analyze_operator_call(self, op_node: Node, caller_usr_id: str) -> Optional[str]:
-        """分析运算符重载调用"""
-        operator = op_node.child_by_field_name('operator')
-        if not operator:
-            return None
-        
-        op_text = self._get_text(operator)
-        
-        # 构建运算符函数名
-        operator_map = {
-            '+': 'operator+',
-            '-': 'operator-',
-            '*': 'operator*',
-            '/': 'operator/',
-            '=': 'operator=',
-            '==': 'operator==',
-            '!=': 'operator!=',
-            '<': 'operator<',
-            '>': 'operator>',
-            '<=': 'operator<=',
-            '>=': 'operator>=',
-            '++': 'operator++',
-            '--': 'operator--',
-            '[]': 'operator[]',
-            '()': 'operator()',
-            '->': 'operator->',
-        }
-        
-        operator_name = operator_map.get(op_text, f"operator{op_text}")
-        
-        # 尝试确定操作数类型
-        if op_node.type == 'binary_expression':
-            left_node = op_node.child_by_field_name('left')
-            left_type = self._infer_object_type(left_node) if left_node else None
-            if left_type:
-                qualified_operator_name = f"{left_type}::{operator_name}"
-            else:
-                qualified_operator_name = operator_name
-        else:
-            # 一元运算符
-            qualified_operator_name = operator_name
-        
-        return self.repo.resolve_function_call(
-            qualified_operator_name,
-            self._get_current_namespace(),
-            self._get_current_class()
-        )
-    
-    def _analyze_constructor_call(self, new_node: Node, caller_usr_id: str) -> Optional[str]:
-        """分析构造函数调用"""
-        type_node = new_node.child_by_field_name('type')
-        if not type_node:
-            return None
-        
-        type_name = self._get_text(type_node)
-        constructor_name = f"{type_name}::{type_name}"  # 构造函数名与类名相同
-        
-        return self.repo.resolve_function_call(
-            constructor_name,
-            self._get_current_namespace(),
-            self._get_current_class()
-        )
-    
     def _analyze_destructor_call(self, delete_node: Node, caller_usr_id: str) -> Optional[str]:
         """分析析构函数调用"""
         # delete表达式可能隐式调用析构函数
         # 这里简化处理，实际情况更复杂
         return None
-    
-    def _infer_object_type(self, object_node: Node) -> Optional[str]:
-        """推断对象的类型"""
-        if not object_node:
-            return None
-        
-        # 简化的类型推断
-        object_text = self._get_text(object_node)
-        
-        # 如果是this指针
-        if object_text == 'this':
-            return self._get_current_class()
-        
-        # 如果是变量名，可以尝试从声明中推断类型
-        # 这里简化处理，实际需要更复杂的类型推断系统
-        
-        return None
-    
-    def _build_qualified_name(self, name: str) -> str:
-        """根据当前上下文构建qualified name"""
-        parts = []
-        
-        if self.current_namespace_stack:
-            parts.extend(self.current_namespace_stack)
-        
-        if self.current_class_stack:
-            parts.extend(self.current_class_stack)
-        
-        parts.append(name)
-        return "::".join(parts)
     
     def _get_current_namespace(self) -> str:
         """获取当前命名空间"""
@@ -444,11 +298,12 @@ class CallRelationshipAnalyzer:
         # 如果没有找到候选且是简单名称，尝试简单名称匹配（类似debug脚本中的逻辑）
         if not candidates and '::' not in function_name:
             self.logger.info(f"尝试简单名称匹配: {function_name}")
-            for usr, entity in self.repo.nodes.items():
-                if (hasattr(entity, 'type') and entity.type == 'function' and 
-                    hasattr(entity, 'name') and entity.name == function_name):
-                    candidates.append(entity)
-                    self.logger.info(f"简单名称匹配成功: {entity.name}")
+            with self.repo._lock.read_lock():
+                for usr, entity in self.repo.nodes.items():
+                    if (hasattr(entity, 'type') and entity.type == 'function' and 
+                        hasattr(entity, 'name') and entity.name == function_name):
+                        candidates.append(entity)
+                        self.logger.info(f"简单名称匹配成功: {entity.name}")
         
         if not candidates:
             self.logger.warning(f"未找到函数 {function_name} 的候选")
@@ -600,12 +455,19 @@ class CallRelationshipAnalyzer:
         
         arg_types = []
         for arg in args_node.children:
-            if arg.type != ',':  # 跳过逗号
+            if arg.type not in [',', '(', ')']:  # 跳过逗号和括号
                 arg_type_info = self.type_engine.infer_expression_type(arg)
                 if arg_type_info:
                     arg_types.append(arg_type_info)
                 else:
-                    arg_types.append(TypeInfo(type_name='unknown', confidence=0.1))
+                    # 使用备用类型推断
+                    fallback_type = self._infer_argument_type_fallback(arg)
+                    if fallback_type:
+                        from analyzer.data_structures import TypeInfo
+                        arg_types.append(TypeInfo(type_name=fallback_type, confidence=0.8))
+                    else:
+                        from analyzer.data_structures import TypeInfo
+                        arg_types.append(TypeInfo(type_name='unknown', confidence=0.1))
         
         # 简单的重载决议：匹配参数数量和类型
         best_match = None
@@ -725,6 +587,19 @@ class CallRelationshipAnalyzer:
         if 'const' in param_type and 'const' not in arg_type:
             base_param = param_type.replace('const', '').strip()
             return base_param == arg_type
+        
+        # 引用兼容性 - std::string可以传递给const std::string&
+        if param_type.endswith('&'):
+            base_param = param_type.rstrip('&').strip()
+            if base_param.startswith('const '):
+                base_param = base_param[6:].strip()  # 移除"const "
+            return base_param == arg_type
+        
+        # std::string与const char*兼容性
+        if param_type == "std::string" and arg_type == "const char*":
+            return True
+        if param_type == "const char*" and arg_type == "std::string":
+            return True
         
         return False
 
@@ -931,11 +806,12 @@ class CallRelationshipAnalyzer:
         # 策略3: 模糊匹配（部分名称匹配）
         function_name = qualified_name.split("::")[-1]
         candidates = []
-        for usr, entity in self.repo.nodes.items():
-            if (isinstance(entity, Function) and 
-                entity.name == function_name and 
-                entity.is_definition):
-                candidates.append(entity)
+        with self.repo._lock.read_lock():
+            for usr, entity in self.repo.nodes.items():
+                if (isinstance(entity, Function) and 
+                    entity.name == function_name and 
+                    entity.is_definition):
+                    candidates.append(entity)
         
         if len(candidates) == 1:
             return candidates[0].usr
@@ -1118,7 +994,8 @@ class CallRelationshipAnalyzer:
                 return "int"
         
         elif arg_node.type == 'string_literal':
-            return "const char*"
+            # 字符串字面量可以隐式转换为std::string
+            return "std::string"
         
         elif arg_node.type in ['true', 'false']:
             return "bool"

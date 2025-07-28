@@ -1,7 +1,7 @@
 {
   "project_name": "rich_demo",
   "project_path": "rich_demo",
-  "analysis_timestamp": "2025-07-28T19:04:56.606886",
+  "analysis_timestamp": "2025-07-28T20:29:59.349787",
   "total_files": 12,
   "total_entities": 217,
   "entities_by_type": {
@@ -9,7 +9,7 @@
     "class": 32,
     "namespace": 4
   },
-  "call_relationships": 119,
+  "call_relationships": 128,
   "files_analyzed": 12,
   "file_mappings": {
     "total_files": 12,
