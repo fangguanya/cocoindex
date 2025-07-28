@@ -1,8 +1,8 @@
 {
   "meta": {
-    "timestamp": "2025-07-29 00:43:22",
-    "analysis_time_seconds": 0.010508060455322266,
-    "overall_quality_score": 95.5
+    "timestamp": "2025-07-29 01:41:23",
+    "analysis_time_seconds": 0.009008407592773438,
+    "overall_quality_score": 95.65
   },
   "completeness": {
     "ast_statistics": {
@@ -16,13 +16,13 @@
     "extraction_statistics": {
       "extracted_functions": 313,
       "extracted_classes": 32,
-      "extracted_call_relationships": 128,
+      "extracted_call_relationships": 134,
       "extracted_inheritance_relationships": 13
     },
     "coverage_rates": {
       "function_extraction_rate": 0.9178885630498533,
       "class_extraction_rate": 0.9411764705882353,
-      "call_extraction_rate": 0.5140562248995983,
+      "call_extraction_rate": 0.5381526104417671,
       "inheritance_extraction_rate": 1.3
     },
     "missing_entities": {
@@ -94,8 +94,8 @@
   },
   "relationships": {
     "call_relationships": {
-      "total": 128,
-      "bidirectional_consistent": 128,
+      "total": 134,
+      "bidirectional_consistent": 134,
       "orphaned_references": 0,
       "consistency_rate": 1.0,
       "orphaned_calls": []
@@ -111,7 +111,7 @@
   "recommendations": [
     "函数提取覆盖率仅为 91.8%，建议检查函数提取器的匹配规则",
     "类提取覆盖率仅为 94.1%，建议检查类提取器的匹配规则",
-    "调用关系提取覆盖率仅为 51.4%，建议增强调用分析器",
+    "调用关系提取覆盖率仅为 53.8%，建议增强调用分析器",
     "发现 6 个函数定义缺少函数体，需要调查原因",
     "分析质量优秀！继续保持高标准"
   ]

@@ -1,8 +1,8 @@
 {
   "meta": {
-    "timestamp": "2025-07-29 01:32:32",
-    "analysis_time_seconds": 0.0025033950805664062,
-    "overall_quality_score": 94.76
+    "timestamp": "2025-07-29 01:41:23",
+    "analysis_time_seconds": 0.0009999275207519531,
+    "overall_quality_score": 98.47
   },
   "completeness": {
     "ast_statistics": {
@@ -16,13 +16,13 @@
     "extraction_statistics": {
       "extracted_functions": 26,
       "extracted_classes": 6,
-      "extracted_call_relationships": 12,
+      "extracted_call_relationships": 33,
       "extracted_inheritance_relationships": 3
     },
     "coverage_rates": {
       "function_extraction_rate": 0.9285714285714286,
       "class_extraction_rate": 1.0,
-      "call_extraction_rate": 0.35294117647058826,
+      "call_extraction_rate": 0.9705882352941176,
       "inheritance_extraction_rate": 1.5
     },
     "missing_entities": {
@@ -50,13 +50,13 @@
         {
           "usr": "c:@F@Base::~Base@()@ret:~Base",
           "qualified_name": "Base::~Base",
-          "file_path": "demo_test.cpp",
+          "file_path": "test_demo\\demo_test.cpp",
           "line": 8
         },
         {
           "usr": "c:@F@Another::~Another@()@ret:~Another",
           "qualified_name": "Another::~Another",
-          "file_path": "demo_test.cpp",
+          "file_path": "test_demo\\demo_test.cpp",
           "line": 29
         }
       ],
@@ -65,8 +65,8 @@
   },
   "relationships": {
     "call_relationships": {
-      "total": 12,
-      "bidirectional_consistent": 12,
+      "total": 33,
+      "bidirectional_consistent": 33,
       "orphaned_references": 0,
       "consistency_rate": 1.0,
       "orphaned_calls": []
@@ -81,8 +81,8 @@
   },
   "recommendations": [
     "函数提取覆盖率仅为 92.9%，建议检查函数提取器的匹配规则",
-    "调用关系提取覆盖率仅为 35.3%，建议增强调用分析器",
     "函数体保存率仅为 92.0%，建议检查函数体提取逻辑",
-    "发现 2 个函数定义缺少函数体，需要调查原因"
+    "发现 2 个函数定义缺少函数体，需要调查原因",
+    "分析质量优秀！继续保持高标准"
   ]
 }

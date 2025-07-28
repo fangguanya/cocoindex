@@ -65,9 +65,7 @@ class CallRelationshipAnalyzer:
                 # 或者重载函数可能有多个不同的调用
                 if called_usr_id not in calls_to:
                     calls_to.append(called_usr_id)
-                # 始终建立调用关系到全局存储库（允许重复）
-                self.repo.add_call_relationship(function_usr_id, called_usr_id)
-                self.resolved_calls_count += 1
+                # 注意：调用关系已经在_analyze_single_call_enhanced中建立，这里不再重复
         
         return calls_to
     
@@ -353,8 +351,9 @@ class CallRelationshipAnalyzer:
             
             object_type_info = self.type_engine.infer_expression_type(object_node)
             if object_type_info:
-                # 🚑 关键修复：在构造限定名之前先清理类型字符串，移除 * & const 等修饰符
-                object_type = self._clean_type_string(object_type_info.type_name)
+                # 🚑 关键修复：确保type_name是字符串类型
+                type_name = object_type_info.type_name if isinstance(object_type_info.type_name, str) else str(object_type_info.type_name)
+                object_type = self._clean_type_string(type_name)
                 self.logger.debug(f"推断的对象类型: {object_type}")
         
         # 构建可能的方法qualified names
@@ -1151,30 +1150,6 @@ class CallRelationshipAnalyzer:
         
         return None
 
-    def _analyze_single_call_enhanced(self, call_node: Node, function_usr_id: str) -> Optional[str]:
-        """分析单个函数调用 - 增强版本"""
-        called_usr_id = self.resolve_function_call(call_node, function_usr_id)
-        
-        if called_usr_id:
-            # 创建详细的调用信息
-            call_info = self._create_call_info_enhanced(call_node, called_usr_id, function_usr_id)
-            
-            # 添加到调用详情列表
-            caller_function = self.repo.get_node(function_usr_id)
-            if isinstance(caller_function, Function):
-                if not hasattr(caller_function, 'call_details'):
-                    caller_function.call_details = []
-                caller_function.call_details.append(call_info)
-            
-            return called_usr_id
-        else:
-            # 添加到待解析队列
-            function_name = self._extract_function_name_enhanced(call_node)
-            if function_name:
-                self.pending_calls.append((function_usr_id, function_name, call_node, self.file_content))
-                self.pending_calls_count += 1
-            
-            return None
 
     def _create_call_info_enhanced(self, call_node: Node, called_usr_id: str, caller_usr_id: str):
         """创建增强的调用信息对象"""
