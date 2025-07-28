@@ -156,7 +156,12 @@ class ClassExtractor(BaseExtractor):
             self._analyze_template_parameters(node, class_entity)
             
             # 分析继承关系
+            self.logger.debug(f"开始分析类 {class_entity.name} 的继承关系...")
             self._analyze_inheritance(node, class_entity)
+            if class_entity.base_classes:
+                self.logger.info(f"类 {class_entity.name} 发现 {len(class_entity.base_classes)} 个基类: {class_entity.base_classes}")
+            else:
+                self.logger.debug(f"类 {class_entity.name} 没有基类")
             
             # 如果是定义，分析类体
             if class_entity.is_definition:
@@ -205,18 +210,88 @@ class ClassExtractor(BaseExtractor):
     
     def _analyze_inheritance(self, node: Node, class_entity: Class):
         """分析继承关系"""
-        # 查找基类列表
-        base_list = node.child_by_field_name('base_class_clause')
-        if base_list:
-            for child in base_list.children:
-                if child.type == 'base_class_clause':
-                    base_name = self._extract_base_class_name(child)
-                    if base_name:
-                        # 解析基类的USR
-                        base_qualified_name = self._resolve_base_class_name(base_name)
-                        base_usr = self.repo.generate_usr('class', base_qualified_name, file_path=self.file_path)
-                        class_entity.base_classes.append(base_usr)
+        # 查找基类列表 - 作为子节点而不是字段
+        base_clause = None
+        for child in node.children:
+            if child.type == 'base_class_clause':
+                base_clause = child
+                break
+                
+        self.logger.debug(f"类 {class_entity.name}: base_class_clause = {base_clause is not None}")
+        if not base_clause:
+            self.logger.debug(f"类 {class_entity.name}: 没有找到 base_class_clause")
+            return
+            
+        # 解析基类列表
+        inheritance_infos = self._parse_base_class_clause(base_clause)
+        self.logger.debug(f"类 {class_entity.name}: 解析到 {len(inheritance_infos)} 个继承信息")
+        
+        for inheritance_info in inheritance_infos:
+            base_name = inheritance_info['base_class_name']
+            access_specifier = inheritance_info['access_specifier']
+            is_virtual = inheritance_info['is_virtual']
+            
+            # 解析基类的完全限定名和USR
+            base_qualified_name = self._resolve_base_class_name(base_name)
+            base_usr = self.repo.generate_usr('class', base_qualified_name, file_path=self.file_path)
+            
+            # 添加到基类列表
+            class_entity.base_classes.append(base_usr)
+            
+            # 添加到详细继承信息
+            from .data_structures import InheritanceInfo
+            inheritance_detail = InheritanceInfo(
+                base_class_usr_id=base_usr,
+                access_specifier=access_specifier,
+                is_virtual=is_virtual
+            )
+            class_entity.inheritance_list.append(inheritance_detail)
     
+    def _parse_base_class_clause(self, base_clause: Node) -> List[Dict[str, Any]]:
+        """解析基类条款，支持多重继承"""
+        inheritance_infos = []
+        
+        # 当前正在解析的继承信息
+        current_access = "private"  # C++默认private继承 (对于class)
+        current_virtual = False
+        current_base_name = None
+        
+        for child in base_clause.children:
+            if child.type == ':':
+                # 开始解析继承列表
+                continue
+            elif child.type == 'access_specifier':
+                # 访问说明符: public, private, protected
+                access_text = self._get_text(child)
+                if access_text in ['public', 'private', 'protected']:
+                    current_access = access_text
+            elif child.type == 'virtual':
+                # 虚继承关键字
+                current_virtual = True
+            elif child.type in ['type_identifier', 'qualified_identifier']:
+                # 基类名称
+                current_base_name = self._get_text(child)
+                
+                # 如果找到基类名，保存当前继承信息
+                if current_base_name:
+                    inheritance_infos.append({
+                        'base_class_name': current_base_name,
+                        'access_specifier': current_access,
+                        'is_virtual': current_virtual
+                    })
+                    
+                    # 重置状态为下一个基类准备 (保持access_specifier为下一个基类的默认值)
+                    current_virtual = False
+                    current_base_name = None
+            elif child.type == ',':
+                # 多重继承分隔符
+                continue
+            else:
+                # 处理其他可能的节点类型
+                pass
+        
+        return inheritance_infos
+
     def _extract_base_class_name(self, base_node: Node) -> Optional[str]:
         """提取基类名称"""
         for child in base_node.children:

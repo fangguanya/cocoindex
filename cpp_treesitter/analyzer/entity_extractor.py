@@ -197,9 +197,20 @@ class EntityExtractor:
         )
 
         # 提取基类信息
-        base_clause = node.child_by_field_name('base_clause')
+        base_clause = None
+        
+        # 查找 base_class_clause 子节点
+        for child in node.children:
+            if child.type == 'base_class_clause':
+                base_clause = child
+                break
+                
         if base_clause:
             class_obj.base_classes = self._extract_base_classes(base_clause)
+            if class_obj.base_classes:
+                self.logger.info(f"类 {class_obj.name} 发现 {len(class_obj.base_classes)} 个基类: {class_obj.base_classes}")
+        else:
+            self.logger.debug(f"类 {class_obj.name} 没有找到 base_class_clause")
         
         self.repo.register_entity(class_obj)
 
@@ -623,10 +634,43 @@ class EntityExtractor:
     def _extract_base_classes(self, base_clause: Node) -> List[str]:
         """提取基类列表"""
         base_classes = []
+        
+        # 当前正在解析的继承信息
+        current_base_name = None
+        
         for child in base_clause.children:
-            if child.type == 'type_identifier':
-                base_classes.append(self._get_text(child))
+            if child.type == ':':
+                # 开始解析继承列表
+                continue
+            elif child.type == 'access_specifier':
+                # 访问说明符: public, private, protected
+                continue
+            elif child.type == 'virtual':
+                # 虚继承关键字
+                continue
+            elif child.type in ['type_identifier', 'qualified_identifier']:
+                # 基类名称
+                current_base_name = self._get_text(child)
+                
+                # 如果找到基类名，添加到列表
+                if current_base_name:
+                    # 解析基类的完全限定名
+                    base_qualified_name = self._resolve_base_class_name(current_base_name)
+                    base_usr = self._generate_usr('class', base_qualified_name)
+                    base_classes.append(base_usr)
+                    current_base_name = None
+            elif child.type == ',':
+                # 多重继承分隔符
+                continue
+        
         return base_classes
+    
+    def _resolve_base_class_name(self, base_name: str) -> str:
+        """解析基类的完全限定名"""
+        # 简化实现：如果没有命名空间前缀，使用当前命名空间
+        if '::' not in base_name and self.current_namespace_stack:
+            return f"{self._get_current_scope_qualifier()}{base_name}"
+        return base_name
 
     def _extract_declaration_node(self, node: Node):
         """提取声明节点（可能是函数声明或变量声明）"""

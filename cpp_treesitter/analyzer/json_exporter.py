@@ -269,8 +269,11 @@ class JsonExporter:
                 self._write_call_relations_streaming(f, repo)
                 f.write(',\n')
                 
-                # 写入其他关系
-                f.write('    "inheritance_relations": {},\n')
+                # 流式写入继承关系
+                logger.info("🔗 流式写入继承关系...")
+                f.write('    "inheritance_relations": ')
+                self._write_inheritance_relations_streaming(f, repo)
+                f.write(',\n')
                 f.write('    "type_inference_info": {}\n')
                 
                 # 结束entities对象
@@ -1699,6 +1702,70 @@ class JsonExporter:
         f.write('    ]')
         total_time = time.time() - write_start
         logger.info(f"   ✅ 调用关系写入完成: {total_relations} 个，耗时: {total_time:.2f}秒")
+
+    def _write_inheritance_relations_streaming(self, f, repo: NodeRepository):
+        """流式写入继承关系到JSON文件"""
+        from .logger import Logger
+        logger = Logger.get_logger()
+        import time
+        
+        f.write('[\n')
+        
+        # 收集所有继承关系
+        logger.info("   📈 开始收集继承关系...")
+        collect_start = time.time()
+        
+        inheritance_relations = []
+        for usr_id, entity in repo.nodes.items():
+            if isinstance(entity, Class) and entity.base_classes:
+                for i, base_class_usr in enumerate(entity.base_classes):
+                    base_class = repo.get_node(base_class_usr)
+                    
+                    # 获取详细继承信息
+                    access_specifier = "private"  # 默认值
+                    is_virtual = False
+                    
+                    # 如果有详细的继承信息，使用它
+                    if hasattr(entity, 'inheritance_list') and i < len(entity.inheritance_list):
+                        inheritance_info = entity.inheritance_list[i]
+                        access_specifier = inheritance_info.access_specifier
+                        is_virtual = inheritance_info.is_virtual
+                    
+                    # 构建继承关系对象
+                    inheritance_relation = {
+                        "derived_class_usr": usr_id,
+                        "base_class_usr": base_class_usr,
+                        "access_specifier": access_specifier,
+                        "is_virtual": is_virtual,
+                        "derived_class_name": entity.qualified_name,
+                        "base_class_name": base_class.qualified_name if base_class else "unknown"
+                    }
+                    
+                    inheritance_relations.append(inheritance_relation)
+        
+        collect_time = time.time() - collect_start
+        total_relations = len(inheritance_relations)
+        logger.info(f"   📊 继承关系收集完成: {total_relations} 个关系，耗时: {collect_time:.2f}秒")
+        
+        # 写入继承关系
+        if total_relations > 0:
+            logger.info(f"   📈 开始写入 {total_relations} 个继承关系...")
+            write_start = time.time()
+            
+            for i, relation in enumerate(inheritance_relations):
+                f.write('      ')
+                json.dump(relation, f, cls=CustomJsonEncoder, ensure_ascii=False)
+                
+                if i < total_relations - 1:
+                    f.write(',')
+                f.write('\n')
+            
+            write_time = time.time() - write_start
+            logger.info(f"   ✅ 继承关系写入完成: {total_relations} 个，耗时: {write_time:.2f}秒")
+        else:
+            logger.info("   📊 没有找到继承关系")
+        
+        f.write('    ]')
 
     def _write_call_graph_streaming(self, f, call_graph_data):
         """流式写入调用图数据，分批处理"""
