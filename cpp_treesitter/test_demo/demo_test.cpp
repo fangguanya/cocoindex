@@ -6,6 +6,8 @@ class Base {
 public:
     virtual void display() = 0;
     virtual ~Base() = default;
+private:
+    int testVar;
 };
 
 // 派生类

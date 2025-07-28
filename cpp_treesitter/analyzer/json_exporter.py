@@ -41,8 +41,8 @@ class CustomJsonEncoder(json.JSONEncoder):
                 "name": getattr(entity, 'name', ''),
                 "qualified_name": getattr(entity, 'qualified_name', ''),
                 "file_path": getattr(entity, 'file_path', ''),
-                "start_line": getattr(entity, 'start_line', 0),
-                "end_line": getattr(entity, 'end_line', 0),
+                # "start_line": getattr(entity, 'start_line', 0),
+                # "end_line": getattr(entity, 'end_line', 0),
                 "usr": getattr(entity, 'usr', '')
             }
             
@@ -93,7 +93,7 @@ class CustomJsonEncoder(json.JSONEncoder):
                         }
                     
                     # 添加函数体内容
-                    result["code_content"] = getattr(entity, 'code_content', '')
+                    # result["code_content"] = getattr(entity, 'code_content', '')
             
             return result
         else:
@@ -711,8 +711,8 @@ class JsonExporter:
                         "qualified_name": entity.qualified_name,
                         "signature": f"{entity.qualified_name}_{entity.file_path}",  # 向后兼容
                         "definition_file_id": self._get_file_id_for_path(entity.file_path),
-                        "start_line": entity.start_line,
-                        "end_line": entity.end_line,
+                        # "start_line": entity.start_line,
+                        # "end_line": entity.end_line,
                         "is_local": False,  # 简化处理
                         "methods": entity.methods,
                         "fields": getattr(entity, 'fields', []),
@@ -745,7 +745,7 @@ class JsonExporter:
                     "name": entity.name,
                     "qualified_name": entity.qualified_name,
                     "definition_file_id": self._get_file_id_for_path(entity.file_path),
-                    "line": entity.start_line,
+                    # "line": entity.start_line,
                     "is_anonymous": getattr(entity, 'is_anonymous', False),
                     "is_inline": getattr(entity, 'is_inline', False),
                     "parent_namespace": getattr(entity, 'parent_namespace', "global"),
@@ -940,8 +940,8 @@ class JsonExporter:
             "name": entity.name,
             "qualified_name": entity.qualified_name,
             "file_path": entity.file_path,
-            "start_line": entity.start_line,
-            "end_line": entity.end_line,
+            # "start_line": entity.start_line,
+            # "end_line": entity.end_line,
             "type": entity.type,
             "is_definition": entity.is_definition
         }
@@ -1055,12 +1055,12 @@ class JsonExporter:
                         "usr": entity.usr,
                         "definition_file_id": file_id,
                         "declaration_file_id": file_id,  # v2.3规范要求
-                        "start_line": entity.start_line,
-                        "end_line": entity.end_line,
+                        # "start_line": entity.start_line,
+                        # "end_line": entity.end_line,
                         "is_definition": entity.is_definition,
                         "is_declaration": getattr(entity, 'is_declaration', False),
                         "is_local": False,  # 简化处理
-                        "documentation": entity.code_content if entity.code_content else "",
+                        # "documentation": entity.code_content if entity.code_content else "",
                         "calls_to": entity.calls_to,
                         "called_by": entity.called_by,
                         "complexity": getattr(entity, 'complexity', 0),
@@ -1110,8 +1110,8 @@ class JsonExporter:
                         "usr": entity.usr,
                         "definition_file_id": file_id,
                         "declaration_file_id": file_id,  # v2.3规范要求
-                        "start_line": entity.start_line,
-                        "end_line": entity.end_line,
+                        # "start_line": entity.start_line,
+                        # "end_line": entity.end_line,
                         "is_definition": entity.is_definition,
                         "is_declaration": getattr(entity, 'is_declaration', False),
                         "is_local": False,  # 简化处理
@@ -1143,8 +1143,8 @@ class JsonExporter:
                         "qualified_name": entity.qualified_name,
                         "usr": entity.usr,
                         "definition_file_id": self._get_file_id_for_path(entity.file_path),
-                        "start_line": entity.start_line,
-                        "end_line": entity.end_line,
+                        # "start_line": entity.start_line,
+                        # "end_line": entity.end_line,
                         "is_anonymous": getattr(entity, 'is_anonymous', False),
                         "is_inline": getattr(entity, 'is_inline', False),
                         "parent_namespace": getattr(entity, 'parent_namespace', "global"),
@@ -1382,8 +1382,8 @@ class JsonExporter:
                         "parameters": entity.parameters,
                         "usr": usr_id,
                         "file_path": entity.file_path,
-                        "start_line": entity.start_line,
-                        "end_line": entity.end_line,
+                        # "start_line": entity.start_line,
+                        # "end_line": entity.end_line,
                         "access_specifier": getattr(entity, 'access_specifier', 'public'),
                         "is_virtual": getattr(entity, 'is_virtual', False),
                         "signature": entity.signature
@@ -1967,7 +1967,7 @@ class JsonExporter:
                 }
             
             # 添加 code_content 字段
-            result["code_content"] = getattr(func_node, 'code_content', '')
+            # result["code_content"] = getattr(func_node, 'code_content', '')
         
         return result
 
@@ -2003,8 +2003,8 @@ class JsonExporter:
             "name": entity.name,
             "qualified_name": entity.qualified_name,
             "file_path": entity.file_path,
-            "start_line": entity.start_line,
-            "end_line": entity.end_line,
+            # "start_line": entity.start_line,
+            # "end_line": entity.end_line,
             "type": entity.type,
             "is_definition": entity.is_definition
         }
@@ -2060,7 +2060,7 @@ class JsonExporter:
                     }
                 
                 # 添加函数体内容
-                function_data["code_content"] = getattr(entity, 'code_content', '')
+                # function_data["code_content"] = getattr(entity, 'code_content', '')
             
             entity_dict.update(function_data)
         elif isinstance(entity, Class):

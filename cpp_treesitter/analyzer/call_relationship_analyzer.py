@@ -453,21 +453,27 @@ class CallRelationshipAnalyzer:
         if not args_node:
             return candidates[0]  # 无参数调用，返回第一个候选
         
+        # 导入TypeInfo
+        from .type_inference import TypeInfo
+        
         arg_types = []
         for arg in args_node.children:
             if arg.type not in [',', '(', ')']:  # 跳过逗号和括号
-                arg_type_info = self.type_engine.infer_expression_type(arg)
-                if arg_type_info:
-                    arg_types.append(arg_type_info)
+                # 优先使用备用类型推断，因为它更可靠
+                fallback_type = self._infer_argument_type_fallback(arg)
+                if fallback_type:
+                    arg_types.append(TypeInfo(type_name=fallback_type, confidence=0.9))
+                    self.logger.debug(f"🔍 参数类型推断: {self._get_text(arg)} -> {fallback_type}")
                 else:
-                    # 使用备用类型推断
-                    fallback_type = self._infer_argument_type_fallback(arg)
-                    if fallback_type:
-                        from analyzer.data_structures import TypeInfo
-                        arg_types.append(TypeInfo(type_name=fallback_type, confidence=0.8))
+                    # 尝试类型推断引擎
+                    arg_type_info = self.type_engine.infer_expression_type(arg)
+                    if arg_type_info:
+                        arg_types.append(arg_type_info)
                     else:
-                        from analyzer.data_structures import TypeInfo
                         arg_types.append(TypeInfo(type_name='unknown', confidence=0.1))
+                        self.logger.warning(f"⚠️ 无法推断参数类型: {self._get_text(arg)}")
+        
+        self.logger.debug(f"🔍 重载决议: 候选函数 {len(candidates)} 个，参数类型 {[t.type_name for t in arg_types]}")
         
         # 简单的重载决议：匹配参数数量和类型
         best_match = None
@@ -475,9 +481,16 @@ class CallRelationshipAnalyzer:
         
         for candidate in candidates:
             score = self._calculate_match_score(candidate, arg_types)
+            self.logger.debug(f"   候选: {candidate.signature}, 匹配分数: {score}")
             if score > best_score:
                 best_score = score
                 best_match = candidate
+        
+        if best_match:
+            self.logger.info(f"✅ 重载决议成功: 选择 {best_match.signature} (分数: {best_score})")
+        else:
+            self.logger.warning(f"⚠️ 重载决议失败，使用第一个候选")
+            best_match = candidates[0]
         
         return best_match
 
@@ -568,9 +581,36 @@ class CallRelationshipAnalyzer:
         return score
 
     def _types_compatible(self, param_type: str, arg_type: str) -> bool:
-        """检查类型兼容性"""
+        """检查类型兼容性 - 修复：改进字符串类型兼容性检查"""
         if param_type == arg_type:
             return True
+        
+        # 🔧 修复：增强字符串兼容性检查 - const char* 与各种std::string类型的兼容
+        if arg_type == "const char*":
+            # const char* 可以匹配各种std::string参数类型
+            string_compatible_types = [
+                "std::string", "const std::string", "std::string&", "const std::string&",
+                "string", "const string", "string&", "const string&"
+            ]
+            if param_type in string_compatible_types:
+                return True
+            
+            # 处理带有额外空格的类型
+            normalized_param = param_type.replace(" ", "")
+            normalized_compatible = [t.replace(" ", "") for t in string_compatible_types]
+            if normalized_param in normalized_compatible:
+                return True
+        
+        # 反向兼容：std::string 也可以传递给 const char* 
+        if param_type == "const char*" and arg_type in ["std::string", "string"]:
+            return True
+        
+        # 原有的字符串兼容性逻辑 - 保留兼容
+        if arg_type == 'std::string':
+            # std::string 可以匹配 const std::string&, std::string&, const std::string
+            normalized_param = param_type.replace('const ', '').replace('&', '').strip()
+            if normalized_param == 'std::string':
+                return True
         
         # 数值类型的隐式转换
         numeric_types = ['int', 'long', 'float', 'double', 'char', 'short']
@@ -588,14 +628,21 @@ class CallRelationshipAnalyzer:
             base_param = param_type.replace('const', '').strip()
             return base_param == arg_type
         
-        # 引用兼容性 - std::string可以传递给const std::string&
+        # 🔧 修复：增强引用兼容性检查
         if param_type.endswith('&'):
             base_param = param_type.rstrip('&').strip()
             if base_param.startswith('const '):
                 base_param = base_param[6:].strip()  # 移除"const "
-            return base_param == arg_type
+            
+            # 检查基础类型兼容性
+            if base_param == arg_type:
+                return True
+            
+            # 特别检查字符串类型
+            if base_param == "std::string" and arg_type == "const char*":
+                return True
         
-        # std::string与const char*兼容性
+        # std::string与const char*兼容性（保留原逻辑）
         if param_type == "std::string" and arg_type == "const char*":
             return True
         if param_type == "const char*" and arg_type == "std::string":
@@ -985,7 +1032,7 @@ class CallRelationshipAnalyzer:
         return argument_types
 
     def _infer_argument_type_fallback(self, arg_node: Node) -> Optional[str]:
-        """参数类型推断的备用方法"""
+        """参数类型推断的备用方法 - 修复：改进字符串字面量类型推断"""
         if arg_node.type == 'number_literal':
             text = self._get_text(arg_node)
             if '.' in text or 'e' in text.lower():
@@ -994,8 +1041,9 @@ class CallRelationshipAnalyzer:
                 return "int"
         
         elif arg_node.type == 'string_literal':
-            # 字符串字面量可以隐式转换为std::string
-            return "std::string"
+            # 🔧 修复：字符串字面量应该优先匹配const char*，然后能隐式转换为std::string相关类型
+            # 返回const char*作为基础类型，在类型兼容性检查中处理转换
+            return "const char*"
         
         elif arg_node.type in ['true', 'false']:
             return "bool"

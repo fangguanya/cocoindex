@@ -532,62 +532,95 @@ class EntityExtractor:
 
     def _extract_function_name(self, declarator_node: Node, function_node: Node) -> str:
         """提取函数名称 - 增强版：支持析构函数、运算符重载等特殊函数名"""
+        self.logger.info(f"🔧 开始提取函数名，declarator类型: {declarator_node.type}")
+        
         name = ""
         name_node = declarator_node
         
+        # 🔧 修复：添加详细的节点调试信息
+        self.logger.info(f"📋 declarator节点详情: type={declarator_node.type}, text={repr(self._get_text(declarator_node)[:100])}")
+        for i, child in enumerate(declarator_node.children):
+            child_text = self._get_text(child)[:50].replace('\n', '\\n')
+            self.logger.info(f"   [{i}] 子节点: type={child.type}, text={repr(child_text)}")
+        
         while name_node:
+            self.logger.info(f"🔍 当前检查节点: type={name_node.type}, text={repr(self._get_text(name_node)[:50])}")
+            
             if name_node.type == 'identifier':
                 name = self._get_text(name_node)
+                self.logger.info(f"✅ 找到identifier: {name}")
+                break
+            elif name_node.type == 'field_identifier':
+                # 🔧 修复：添加对field_identifier的支持，这是类方法名的实际节点类型
+                name = self._get_text(name_node)
+                self.logger.info(f"✅ 找到field_identifier: {name}")
                 break
             elif name_node.type == 'destructor_name':
                 # 析构函数：~ClassName
                 name = self._get_text(name_node)
+                self.logger.info(f"✅ 找到destructor_name: {name}")
                 break
             elif name_node.type == 'operator_name':
                 # 运算符重载：operator+, operator[], operator()等
                 name = self._get_text(name_node)
+                self.logger.info(f"✅ 找到operator_name: {name}")
                 break
             elif name_node.type == 'operator_cast':
                 # 转换运算符：operator Type()
                 name = self._get_text(name_node)
+                self.logger.info(f"✅ 找到operator_cast: {name}")
                 break
             elif name_node.type == 'qualified_identifier':
                 # 限定标识符：namespace::function
                 # 获取最后一部分作为函数名
+                self.logger.info(f"🔍 处理qualified_identifier: {self._get_text(name_node)}")
                 for child in reversed(name_node.children):
-                    if child.type in ['identifier', 'destructor_name', 'operator_name']:
+                    if child.type in ['identifier', 'field_identifier', 'destructor_name', 'operator_name']:
                         name = self._get_text(child)
+                        self.logger.info(f"✅ 从qualified_identifier中找到: {name}")
                         break
                 if name:
                     break
+            
             # 嵌套的 declarator
             temp_name_node = name_node.child_by_field_name('declarator')
             if not temp_name_node:
                 # 尝试查找其他可能的子节点
+                self.logger.info(f"🔍 在子节点中查找函数名...")
                 for child in name_node.children:
-                    if child.type in ['identifier', 'destructor_name', 'operator_name', 'operator_cast', 'qualified_identifier']:
+                    child_text = self._get_text(child)[:30].replace('\n', '\\n')
+                    self.logger.info(f"   检查子节点: type={child.type}, text={repr(child_text)}")
+                    if child.type in ['identifier', 'field_identifier', 'destructor_name', 'operator_name', 'operator_cast', 'qualified_identifier']:
+                        self.logger.info(f"   🎯 找到候选节点: {child.type}")
                         name_node = child
                         break
                 else:
+                    self.logger.warning(f"⚠️ 未找到合适的子节点，退出循环")
                     break
             else:
+                self.logger.info(f"🔄 移动到嵌套declarator: {temp_name_node.type}")
                 name_node = temp_name_node
         
         if not name:
+            self.logger.warning(f"⚠️ 未能通过常规方法提取函数名，尝试特殊处理...")
             # 处理构造函数等特殊情况
             type_node = function_node.child_by_field_name('type')
             if type_node and self.current_class_stack:
                 type_text = self._get_text(type_node)
                 current_class = self.current_class_stack[-1]
+                self.logger.info(f"🔍 检查构造函数: type_text={type_text}, current_class={current_class}")
                 # 检查是否是构造函数（类型与当前类名相同）
                 if type_text == current_class or type_text.endswith(f"::{current_class}"):
                     name = current_class
+                    self.logger.info(f"✅ 识别为构造函数: {name}")
                 elif type_text == "void" and not name:
                     # 可能是析构函数但没有正确识别
                     # 尝试从declarator中找到析构符号
                     declarator_text = self._get_text(declarator_node)
+                    self.logger.info(f"🔍 检查析构函数: declarator_text={repr(declarator_text)}")
                     if "~" in declarator_text:
                         name = f"~{current_class}"
+                        self.logger.info(f"✅ 识别为析构函数: {name}")
         
         # 最后的清理和验证
         if name:
@@ -625,6 +658,10 @@ class EntityExtractor:
                     if name == spaced_op:
                         name = clean_op
                         break
+            
+            self.logger.info(f"✅ 最终提取的函数名: {name}")
+        else:
+            self.logger.error(f"❌ 函数名提取失败!")
         
         return name
 
@@ -773,10 +810,18 @@ class EntityExtractor:
         return nodes
 
     def _analyze_class_members(self, body_node: Node, class_usr: str) -> Tuple[List[str], List[str]]:
-        """分析类成员，返回方法和字段的USR列表"""
+        """分析类成员，返回方法和字段的USR列表 - 修复：增强成员识别逻辑"""
         methods = []
         fields = []
         current_access = "private"  # 类默认为private
+        
+        self.logger.info(f"🔍 开始分析类成员，类USR: {class_usr}")
+        
+        # 🔧 修复：添加详细的节点类型调试信息
+        self.logger.info(f"📋 类体包含 {len(body_node.children)} 个子节点")
+        for i, child in enumerate(body_node.children):
+            child_text = self._get_text(child)[:100].replace('\n', '\\n')
+            self.logger.info(f"   [{i}] 节点类型: {child.type}, 内容: {repr(child_text)}")
         
         for child in body_node.children:
             if child.type == 'access_specifier':
@@ -788,40 +833,93 @@ class EntityExtractor:
                     current_access = "protected"
                 elif 'private' in access_text:
                     current_access = "private"
+                self.logger.debug(f"   访问修饰符: {current_access}")
             
             elif child.type == 'function_definition':
                 # 成员函数定义
+                self.logger.debug(f"   发现成员函数定义: {child.type}")
                 method = self._process_method_definition_enhanced(child, class_usr, current_access)
                 if method:
                     methods.append(method.usr)
+                    self.logger.info(f"   ✅ 添加方法: {method.name}")
             
             elif child.type == 'declaration':
-                # 可能是方法声明或成员变量声明
-                member_usrs = self._process_member_declaration(child, class_usr, current_access)
-                for usr, member_type in member_usrs:
-                    if member_type == 'function':
-                        methods.append(usr)
-                    elif member_type == 'variable':
-                        fields.append(usr)
+                # 🔧 修复：增强声明节点处理，特别关注纯虚函数和成员变量
+                self.logger.debug(f"   发现声明节点: {child.type}")
+                
+                # 检查是否是纯虚函数声明
+                decl_text = self._get_text(child)
+                if '= 0' in decl_text and 'virtual' in decl_text:
+                    self.logger.info(f"   🎯 发现纯虚函数声明: {decl_text}")
+                    # 处理纯虚函数
+                    pure_virtual_method = self._process_pure_virtual_function(child, class_usr, current_access)
+                    if pure_virtual_method:
+                        methods.append(pure_virtual_method.usr)
+                        self.logger.info(f"   ✅ 添加纯虚函数: {pure_virtual_method.name}")
+                else:
+                    # 原有的成员声明处理逻辑
+                    member_usrs = self._process_member_declaration(child, class_usr, current_access)
+                    for usr, member_type in member_usrs:
+                        if member_type == 'function':
+                            methods.append(usr)
+                            self.logger.info(f"   ✅ 添加声明函数: {usr}")
+                        elif member_type == 'variable':
+                            fields.append(usr)
+                            self.logger.info(f"   ✅ 添加成员变量: {usr}")
             
             elif child.type in ['constructor_definition', 'destructor_definition']:
                 # 构造函数和析构函数
+                self.logger.debug(f"   发现特殊方法: {child.type}")
                 special_method = self._process_special_method(child, class_usr, current_access)
                 if special_method:
                     methods.append(special_method.usr)
+                    self.logger.info(f"   ✅ 添加特殊方法: {special_method.name}")
+            
+            # 🔧 修复：添加对其他可能包含成员的节点类型的处理
+            elif child.type in ['field_declaration', 'field_declaration_list']:
+                self.logger.debug(f"   发现字段声明: {child.type}")
+                field_results = self._process_field_declaration(child, class_usr, current_access)
+                
+                # 🔧 修复：处理新的返回格式 (type, usr)
+                for result in field_results:
+                    if isinstance(result, tuple) and len(result) == 2:
+                        entity_type, usr = result
+                        if entity_type == 'function':
+                            methods.append(usr)
+                            self.logger.info(f"   ✅ 添加函数: {usr}")
+                        elif entity_type == 'variable':
+                            fields.append(usr)
+                            self.logger.info(f"   ✅ 添加变量: {usr}")
+                    else:
+                        # 兼容旧格式：直接是USR字符串
+                        fields.append(result)
+                        self.logger.info(f"   ✅ 添加字段(旧格式): {result}")
+                        
+                self.logger.info(f"   ✅ 处理字段声明完成: {len(field_results)} 个实体")
+            
+            # 🔧 新增：处理其他可能的节点类型
+            else:
+                self.logger.warning(f"   ⚠️ 未处理的节点类型: {child.type}, 内容: {repr(self._get_text(child)[:50])}")
         
+        self.logger.info(f"🏁 类成员分析完成: {len(methods)} 个方法, {len(fields)} 个字段")
         return methods, fields
 
     def _process_method_definition_enhanced(self, node: Node, parent_class_usr: str, access_specifier: str = "private"):
         """处理类方法定义 - 增强版"""
+        self.logger.info(f"🔧 开始处理方法定义: parent_class={parent_class_usr}, access={access_specifier}")
+        
         declarator_node = node.child_by_field_name('declarator')
         if not declarator_node:
+            self.logger.warning(f"⚠️ 方法定义中未找到declarator节点")
             return None
 
         name = self._extract_function_name(declarator_node, node)
         if not name:
+            self.logger.warning(f"⚠️ 无法提取函数名")
             return None
             
+        self.logger.info(f"📋 提取的方法名: {name}")
+        
         qualifier = self._get_current_scope_qualifier()
         qualified_name = f"{qualifier}{name}"
         
@@ -831,12 +929,15 @@ class EntityExtractor:
         parameters, signature = self._extract_parameters_and_signature(declarator_node, name)
         usr = self._generate_usr('function', qualified_name, signature)
         
+        self.logger.info(f"📋 方法信息: qualified_name={qualified_name}, signature={signature}, usr={usr}")
+        
         # 分析函数修饰符
         modifiers = self._extract_function_modifiers_enhanced(node, declarator_node)
         
         # 检查是否已存在
         existing = self.repo.get_node(usr)
         if existing and isinstance(existing, Function):
+            self.logger.info(f"🔄 更新现有方法: {name}")
             method = existing
             # 更新定义信息
             method.is_definition = True
@@ -855,6 +956,7 @@ class EntityExtractor:
             if body_node:
                 method.code_content = self._extract_function_body(body_node)
         else:
+            self.logger.info(f"🆕 创建新方法: {name}")
             # 创建新方法
             method = Function(
                 usr=usr,
@@ -882,6 +984,7 @@ class EntityExtractor:
                 method.code_content = self._extract_function_body(body_node)
             
             self.repo.register_entity(method)
+            self.logger.info(f"✅ 方法已注册到存储库: {usr}")
         
         # 分析方法调用关系
         if method.code_content:
@@ -889,6 +992,7 @@ class EntityExtractor:
             # 🔧 修复：调用关系现在已经通过add_call_relationship正确添加到存储库
             # method.calls_to会通过add_call_relationship自动同步更新
         
+        self.logger.info(f"✅ 方法处理完成: {name}")
         return method
 
     def _process_member_declaration(self, decl_node: Node, class_usr: str, access_specifier: str) -> List[Tuple[str, str]]:
@@ -1227,6 +1331,222 @@ class EntityExtractor:
         self.repo.register_entity(destructor)
         return destructor
     
+    def _process_pure_virtual_function(self, decl_node: Node, class_usr: str, access_specifier: str) -> Optional[Function]:
+        """处理纯虚函数声明 - 新增方法"""
+        self.logger.info(f"🎯 开始处理纯虚函数声明")
+        
+        # 查找函数声明符
+        func_declarator = None
+        for child in decl_node.children:
+            if child.type == 'function_declarator':
+                func_declarator = child
+                break
+        
+        if not func_declarator:
+            self.logger.warning(f"⚠️ 纯虚函数声明中未找到function_declarator")
+            return None
+        
+        # 提取函数名
+        name_node = func_declarator.child_by_field_name('declarator')
+        if not name_node:
+            self.logger.warning(f"⚠️ 函数声明符中未找到declarator")
+            return None
+        
+        name = self._get_text(name_node)
+        qualifier = self._get_current_scope_qualifier()
+        qualified_name = f"{qualifier}{name}"
+        
+        # 提取返回类型
+        type_node = decl_node.child_by_field_name('type')
+        return_type = self._get_text(type_node) if type_node else "void"
+        
+        # 提取参数和签名
+        parameters, signature = self._extract_parameters_and_signature(func_declarator, name)
+        usr = self._generate_usr('function', qualified_name, signature)
+        
+        self.logger.info(f"✅ 纯虚函数信息: name={name}, qualified_name={qualified_name}, signature={signature}")
+        
+        # 检查是否已存在
+        existing = self.repo.get_node(usr)
+        if existing and isinstance(existing, Function):
+            # 更新现有函数信息
+            existing.is_declaration = True
+            existing.is_virtual = True
+            existing.is_pure_virtual = True
+            existing.access_specifier = access_specifier
+            existing.parent_class = class_usr
+            return existing
+        else:
+            # 创建新的纯虚函数
+            pure_virtual_func = Function(
+                usr=usr,
+                name=name,
+                qualified_name=qualified_name,
+                file_path=self.file_path,
+                start_line=decl_node.start_point[0] + 1,
+                end_line=decl_node.end_point[0] + 1,
+                return_type=return_type,
+                parameters=parameters,
+                signature=signature,
+                is_definition=False,
+                is_declaration=True,
+                parent_class=class_usr,
+                access_specifier=access_specifier,
+                is_virtual=True,
+                is_pure_virtual=True
+            )
+            
+            self.repo.register_entity(pure_virtual_func)
+            self.logger.info(f"✅ 成功注册纯虚函数: {name}")
+            return pure_virtual_func
+    
+    def _process_field_declaration(self, field_node: Node, class_usr: str, access_specifier: str) -> List[Tuple[str, str]]:
+        """处理字段声明 - 修复版本：正确区分函数和变量声明"""
+        fields = []
+        self.logger.info(f"🔍 开始处理字段声明")
+        
+        # 🔧 修复：首先检查是否包含function_declarator（函数声明）
+        has_function_declarator = False
+        function_declarator_node = None
+        
+        for child in field_node.children:
+            if child.type == 'function_declarator':
+                has_function_declarator = True
+                function_declarator_node = child
+                break
+        
+        # 🔧 修复：如果包含function_declarator，说明这是函数声明
+        if has_function_declarator:
+            self.logger.info(f"🎯 检测到函数声明在field_declaration中")
+            
+            # 检查是否为纯虚函数
+            decl_text = self._get_text(field_node)
+            if '= 0' in decl_text and 'virtual' in decl_text:
+                self.logger.info(f"🎯 发现纯虚函数声明: {decl_text}")
+                # 处理纯虚函数 - 返回函数USR而不是变量USR
+                pure_virtual_method = self._process_pure_virtual_function(field_node, class_usr, access_specifier)
+                if pure_virtual_method:
+                    # 注意：这里返回的是函数USR，调用者需要区分处理
+                    fields.append(('function', pure_virtual_method.usr))
+                    self.logger.info(f"✅ 添加纯虚函数: {pure_virtual_method.name}")
+            else:
+                # 处理普通函数声明
+                self.logger.info(f"🔍 处理普通函数声明: {decl_text}")
+                function_method = self._process_function_declaration_in_field(field_node, function_declarator_node, class_usr, access_specifier)
+                if function_method:
+                    fields.append(('function', function_method.usr))
+                    self.logger.info(f"✅ 添加函数声明: {function_method.name}")
+        else:
+            # 🔧 原有逻辑：处理真正的成员变量
+            self.logger.info(f"🔍 处理成员变量声明")
+            
+            # 分析字段类型
+            type_node = field_node.child_by_field_name('type')
+            if not type_node:
+                # 尝试在子节点中查找类型信息
+                for child in field_node.children:
+                    if child.type in ['primitive_type', 'type_identifier', 'qualified_identifier']:
+                        type_node = child
+                        break
+            
+            field_type = self._get_text(type_node) if type_node else "unknown"
+            
+            # 查找字段名
+            for child in field_node.children:
+                if child.type in ['identifier', 'field_identifier']:
+                    field_name = self._get_text(child)
+                    qualifier = self._get_current_scope_qualifier()
+                    qualified_name = f"{qualifier}{field_name}"
+                    usr = self._generate_usr('variable', qualified_name)
+                    
+                    # 创建成员变量实体
+                    field_var = Variable(
+                        usr=usr,
+                        name=field_name,
+                        qualified_name=qualified_name,
+                        file_path=self.file_path,
+                        start_line=field_node.start_point[0] + 1,
+                        end_line=field_node.end_point[0] + 1,
+                        var_type=field_type,
+                        is_const='const' in field_type,
+                        is_static='static' in self._get_text(field_node),
+                        access_specifier=access_specifier,
+                        parent_class=class_usr
+                    )
+                    
+                    self.repo.register_entity(field_var)
+                    fields.append(('variable', usr))
+                    self.logger.info(f"✅ 成功注册字段: {field_name} ({field_type})")
+        
+        return fields
+
+    def _process_function_declaration_in_field(self, field_node: Node, function_declarator_node: Node, class_usr: str, access_specifier: str) -> Optional[Function]:
+        """处理field_declaration中的普通函数声明"""
+        self.logger.info(f"🎯 开始处理field_declaration中的函数声明")
+        
+        # 提取函数名
+        name = self._extract_function_name(function_declarator_node, field_node)
+        if not name:
+            self.logger.warning(f"⚠️ 无法提取函数名")
+            return None
+        
+        qualifier = self._get_current_scope_qualifier()
+        qualified_name = f"{qualifier}{name}"
+        
+        # 提取返回类型
+        type_node = field_node.child_by_field_name('type')
+        if not type_node:
+            # 查找第一个类型节点
+            for child in field_node.children:
+                if child.type in ['primitive_type', 'type_identifier', 'qualified_identifier']:
+                    type_node = child
+                    break
+        
+        return_type = self._get_text(type_node) if type_node else "void"
+        
+        # 提取参数和签名
+        parameters, signature = self._extract_parameters_and_signature(function_declarator_node, name)
+        usr = self._generate_usr('function', qualified_name, signature)
+        
+        self.logger.info(f"✅ 函数声明信息: name={name}, qualified_name={qualified_name}, signature={signature}")
+        
+        # 分析函数修饰符
+        modifiers = self._extract_function_modifiers_enhanced(field_node, function_declarator_node)
+        
+        # 检查是否已存在
+        existing = self.repo.get_node(usr)
+        if existing and isinstance(existing, Function):
+            # 更新现有函数信息
+            existing.is_declaration = True
+            existing.is_virtual = modifiers.get('is_virtual', False)
+            existing.is_pure_virtual = modifiers.get('is_pure_virtual', False)
+            existing.access_specifier = access_specifier
+            existing.parent_class = class_usr
+            return existing
+        else:
+            # 创建新的函数
+            func = Function(
+                usr=usr,
+                name=name,
+                qualified_name=qualified_name,
+                file_path=self.file_path,
+                start_line=field_node.start_point[0] + 1,
+                end_line=field_node.end_point[0] + 1,
+                return_type=return_type,
+                parameters=parameters,
+                signature=signature,
+                is_definition=False,
+                is_declaration=True,
+                parent_class=class_usr,
+                access_specifier=access_specifier,
+                is_virtual=modifiers.get('is_virtual', False),
+                is_pure_virtual=modifiers.get('is_pure_virtual', False)
+            )
+            
+            self.repo.register_entity(func)
+            self.logger.info(f"✅ 成功注册函数声明: {name}")
+            return func
+    
     def _extract_template_declaration(self, template_node: Node):
         """提取模板声明"""
         try:
@@ -1325,6 +1645,9 @@ class EntityExtractor:
         """提取模板类声明"""
         # 检查是否为模板特化
         is_specialization = self._is_template_specialization(template_node)
+        
+        # 使用现有的类声明提取逻辑，但增加模板信息
+        original_extract = self._extract_class_declaration
         
         # 临时保存模板信息供类提取器使用
         self._current_template_params = template_params
