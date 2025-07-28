@@ -945,7 +945,7 @@ class CocoIndexMcpServer:
         async def search_code(
             query: str,
             search_type: str = "advanced",
-            flow_name: Optional[str] = None,
+            flow_name: Optional[str] = "",
             top_k: int = 10,
         ) -> List[dict]:
             """根据自然语言查询在代码库中进行高级混合搜索"""
@@ -960,7 +960,7 @@ class CocoIndexMcpServer:
                 return [{"error": "Search engine is not initialized."}]
 
             # 检查是否需要切换flow
-            if flow_name and self.flow_name != flow_name:
+            if flow_name and len(flow_name) > 1 and self.flow_name != flow_name:
                 self.logger.warning(f"[{request_id}] 请求的 flow_name '{flow_name}' 与服务器初始化的 '{self.flow_name}' 不同。此功能暂不支持动态切换。")
                 # 当前设计为每个服务器实例服务一个flow，未来可以扩展
             
