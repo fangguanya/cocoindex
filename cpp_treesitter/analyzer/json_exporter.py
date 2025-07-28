@@ -1979,7 +1979,7 @@ class JsonExporter:
             "file_path": getattr(class_node, 'file_path', ''),
             "line_number": getattr(class_node, 'line_number', 0),
             "is_definition": getattr(class_node, 'is_definition', False),
-            "members": getattr(class_node, 'members', []),
+            "members": getattr(class_node, 'fields', []),  # 修复：使用fields而不是members
             "methods": getattr(class_node, 'methods', []),
             "base_classes": getattr(class_node, 'base_classes', [])
         }

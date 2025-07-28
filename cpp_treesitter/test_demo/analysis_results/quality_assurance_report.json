@@ -1,7 +1,7 @@
 {
   "meta": {
-    "timestamp": "2025-07-28 21:53:38",
-    "analysis_time_seconds": 0.0010051727294921875,
+    "timestamp": "2025-07-29 01:32:32",
+    "analysis_time_seconds": 0.0025033950805664062,
     "overall_quality_score": 94.76
   },
   "completeness": {
@@ -50,13 +50,13 @@
         {
           "usr": "c:@F@Base::~Base@()@ret:~Base",
           "qualified_name": "Base::~Base",
-          "file_path": "test_demo\\demo_test.cpp",
+          "file_path": "demo_test.cpp",
           "line": 8
         },
         {
           "usr": "c:@F@Another::~Another@()@ret:~Another",
           "qualified_name": "Another::~Another",
-          "file_path": "test_demo\\demo_test.cpp",
+          "file_path": "demo_test.cpp",
           "line": 29
         }
       ],

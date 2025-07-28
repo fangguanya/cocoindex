@@ -849,7 +849,7 @@ class EntityExtractor:
                 
                 # 检查是否是纯虚函数声明
                 decl_text = self._get_text(child)
-                if '= 0' in decl_text and 'virtual' in decl_text:
+                if '= 0' in decl_text:
                     self.logger.info(f"   🎯 发现纯虚函数声明: {decl_text}")
                     # 处理纯虚函数
                     pure_virtual_method = self._process_pure_virtual_function(child, class_usr, current_access)
@@ -1346,13 +1346,12 @@ class EntityExtractor:
             self.logger.warning(f"⚠️ 纯虚函数声明中未找到function_declarator")
             return None
         
-        # 提取函数名
-        name_node = func_declarator.child_by_field_name('declarator')
-        if not name_node:
-            self.logger.warning(f"⚠️ 函数声明符中未找到declarator")
+        # 提取函数名 - 使用增强的函数名提取方法
+        name = self._extract_function_name(func_declarator, decl_node)
+        if not name:
+            self.logger.warning(f"⚠️ 无法提取纯虚函数名")
             return None
         
-        name = self._get_text(name_node)
         qualifier = self._get_current_scope_qualifier()
         qualified_name = f"{qualifier}{name}"
         
@@ -1375,6 +1374,7 @@ class EntityExtractor:
             existing.is_pure_virtual = True
             existing.access_specifier = access_specifier
             existing.parent_class = class_usr
+            self.logger.info(f"✅ 更新现有纯虚函数: {name}")
             return existing
         else:
             # 创建新的纯虚函数
@@ -1399,7 +1399,6 @@ class EntityExtractor:
             self.repo.register_entity(pure_virtual_func)
             self.logger.info(f"✅ 成功注册纯虚函数: {name}")
             return pure_virtual_func
-    
     def _process_field_declaration(self, field_node: Node, class_usr: str, access_specifier: str) -> List[Tuple[str, str]]:
         """处理字段声明 - 修复版本：正确区分函数和变量声明"""
         fields = []

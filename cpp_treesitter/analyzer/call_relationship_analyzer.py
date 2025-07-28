@@ -260,7 +260,12 @@ class CallRelationshipAnalyzer:
         """获取节点的文本内容"""
         if not node:
             return ""
-        return self.file_content[node.start_byte:node.end_byte].decode('utf-8', errors='ignore')
+        # 修复：如果file_content没有设置，使用节点的text属性作为备选
+        if hasattr(self, 'file_content') and self.file_content:
+            return self.file_content[node.start_byte:node.end_byte].decode('utf-8', errors='ignore')
+        else:
+            # 备选方案：使用节点的text属性
+            return node.text.decode('utf-8', errors='ignore')
     
     def set_context(self, namespace_stack: List[str], class_stack: List[str]):
         """设置当前的命名空间和类上下文"""
@@ -300,7 +305,7 @@ class CallRelationshipAnalyzer:
             self.logger.info(f"尝试简单名称匹配: {function_name}")
             with self.repo._lock.read_lock():
                 for usr, entity in self.repo.nodes.items():
-                    if (hasattr(entity, 'type') and entity.type == 'function' and 
+                    if (hasattr(entity, 'type') and entity.type == 'function' and
                         hasattr(entity, 'name') and entity.name == function_name):
                         candidates.append(entity)
                         self.logger.info(f"简单名称匹配成功: {entity.name}")
@@ -320,7 +325,7 @@ class CallRelationshipAnalyzer:
             self.logger.info(f"✅ 重载决议成功: {function_name} -> {best_match.usr[:20]}...")
             return best_match.usr
         else:
-            self.logger.info(f"✅ 重载决议失败，使用第一个候选: {function_name} -> {candidates[0].usr[:20]}...")
+            self.logger.info(f"⚠️ 重载决议失败，使用第一个候选: {function_name} -> {candidates[0].usr[:20]}...")
             return candidates[0].usr
 
     def _analyze_member_call_enhanced(self, field_node: Node, caller_usr_id: str) -> Optional[str]:
@@ -338,42 +343,81 @@ class CallRelationshipAnalyzer:
             return None
         
         method_name = self._get_text(field_name_node)
+        self.logger.info(f"🔍 分析成员函数调用: {method_name}")
         
         # 推断对象类型
         object_type = None
         if object_node:
+            object_text = self._get_text(object_node)
+            self.logger.debug(f"对象表达式: {object_text}")
+            
             object_type_info = self.type_engine.infer_expression_type(object_node)
             if object_type_info:
-                object_type = object_type_info.type_name
+                # 🚑 关键修复：在构造限定名之前先清理类型字符串，移除 * & const 等修饰符
+                object_type = self._clean_type_string(object_type_info.type_name)
+                self.logger.debug(f"推断的对象类型: {object_type}")
         
         # 构建可能的方法qualified names
         possible_names = []
         if object_type:
             possible_names.append(f"{object_type}::{method_name}")
+            # 兼容命名空间 + 类情况，如 ns::Class::method
+            if self.current_namespace_stack:
+                ns_prefix = "::".join(self.current_namespace_stack)
+                possible_names.append(f"{ns_prefix}::{object_type}::{method_name}")
         
         # 添加当前类上下文的可能性
         current_class = self._get_current_class()
         if current_class:
             possible_names.append(f"{current_class}::{method_name}")
         
-        # 如果无法确定类型，添加基本名称
+        # 如果无法确定类型，添加基本名称并尝试简单匹配
         possible_names.append(method_name)
+        
+        # 去重，保持原有顺序
+        seen = set()
+        deduped_names = []
+        for n in possible_names:
+            if n not in seen:
+                deduped_names.append(n)
+                seen.add(n)
+        
+        self.logger.debug(f"可能的方法名: {deduped_names}")
         
         # 查找候选方法
         candidates = []
-        for name in possible_names:
+        for name in deduped_names:
             functions = self.repo.find_by_qualified_name(name, 'function')
             candidates.extend(functions)
         
+        # 🔧 修复：如果没有找到候选且是简单方法名，尝试简单名称匹配
+        if not candidates and '::' not in method_name:
+            self.logger.info(f"尝试简单方法名匹配: {method_name}")
+            with self.repo._lock.read_lock():
+                for usr, entity in self.repo.nodes.items():
+                    if (hasattr(entity, 'type') and entity.type == 'function' and
+                        hasattr(entity, 'name') and entity.name == method_name):
+                        candidates.append(entity)
+                        self.logger.debug(f"简单方法名匹配成功: {entity.qualified_name}")
+        
         if not candidates:
+            self.logger.warning(f"未找到方法 {method_name} 的候选")
             return None
+        
+        self.logger.info(f"找到 {len(candidates)} 个候选方法")
         
         # 进行重载决议
         if len(candidates) == 1:
+            self.logger.info(f"✅ 单一候选，解析成功: {method_name} -> {candidates[0].usr[:20]}...")
             return candidates[0].usr
         
         best_match = self._resolve_overloaded_call(parent, candidates)
-        return best_match.usr if best_match else candidates[0].usr
+        if best_match:
+            self.logger.info(f"✅ 重载决议成功: {method_name} -> {best_match.usr[:20]}...")
+            return best_match.usr
+        else:
+            self.logger.info(f"⚠️ 重载决议失败，使用第一个候选: {method_name} -> {candidates[0].usr[:20]}...")
+            return candidates[0].usr
 
     def _analyze_operator_call_enhanced(self, op_node: Node, caller_usr_id: str) -> Optional[str]:
         """分析运算符重载调用 - 增强版"""
@@ -601,7 +645,7 @@ class CallRelationshipAnalyzer:
             if normalized_param in normalized_compatible:
                 return True
         
-        # 反向兼容：std::string 也可以传递给 const char* 
+        # 反向兼容：std::string 也可以传递给 const char*
         if param_type == "const char*" and arg_type in ["std::string", "string"]:
             return True
         
@@ -610,6 +654,11 @@ class CallRelationshipAnalyzer:
             # std::string 可以匹配 const std::string&, std::string&, const std::string
             normalized_param = param_type.replace('const ', '').replace('&', '').strip()
             if normalized_param == 'std::string':
+                return True
+        
+        # 🔧 修复：增强引用兼容性检查，特别处理const std::string&参数
+        if param_type == "const std::string&" or param_type == "const std::string &":
+            if arg_type in ["const char*", "std::string", "string"]:
                 return True
         
         # 数值类型的隐式转换
@@ -744,8 +793,15 @@ class CallRelationshipAnalyzer:
                         elif object_name.endswith('Engine') or object_name.startswith('Editor'):
                             # 对于Engine相关的调用，返回方法名让简单匹配处理
                             return method_name
-                        # 对于成员变量的方法调用，暂时返回方法名
-                        return method_name
+                        # 对于成员变量的方法调用，尝试进行类型推断
+                        else:
+                            # 尝试推断对象类型并构建qualified name
+                            object_type = self._infer_object_type(object_node)
+                            if object_type:
+                                # 构建可能的qualified name
+                                return f"{object_type}::{method_name}"
+                            # 如果无法推断类型，返回简单方法名，让后续逻辑处理
+                            return method_name
                     return method_name
             
             # 情况4: 模板函数调用 func<T>() 或 Cast<Type>()
@@ -1204,3 +1260,53 @@ class CallRelationshipAnalyzer:
                     template_args.append(arg_text)
         
         return template_args 
+    def _infer_object_type(self, object_node: Node) -> Optional[str]:
+        """推断对象的类型，返回类型名称"""
+        try:
+            if not object_node:
+                return None
+            
+            object_text = self._get_text(object_node)
+            if not object_text:
+                return None
+            
+            # 使用现有的TypeInferenceEngine进行类型推断
+            inferred_type = self.type_engine.infer_expression_type(
+                object_text, 
+                self.current_function_usr
+            )
+            
+            if inferred_type:
+                # 清理类型字符串，移除指针标记和其他修饰符
+                clean_type = self._clean_type_string(inferred_type)
+                self.logger.debug(f"类型推断成功: {object_text} -> {clean_type}")
+                return clean_type
+                            
+            self.logger.debug(f"无法推断对象类型: {object_text}")
+            return None
+            
+        except Exception as e:
+            self.logger.warning(f"推断对象类型时出错: {e}")
+            return None
+    
+    def _clean_type_string(self, type_string: str) -> str:
+        """清理类型字符串，移除指针、引用等修饰符"""
+        if not type_string:
+            return ""
+        
+        # 移除常见的类型修饰符
+        cleaned = type_string.strip()
+        cleaned = cleaned.replace('*', '').replace('&', '').replace('const', '').strip()
+        
+        # 移除模板参数（简化处理）
+        if '<' in cleaned and '>' in cleaned:
+            template_start = cleaned.find('<')
+            cleaned = cleaned[:template_start]
+        
+        # 移除命名空间前缀（如果需要的话）
+        if '::' in cleaned:
+            parts = cleaned.split('::')
+            cleaned = parts[-1]  # 取最后一部分作为类名
+        
+        return cleaned.strip()
+    
