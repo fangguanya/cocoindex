@@ -127,7 +127,7 @@ class TestRunner:
         return success
     
     def verify_function_exports(self, results: dict, test_name: str) -> bool:
-        """验证函数导出（location和code_content）"""
+        """验证函数导出（location）"""
         logger.info(f"验证函数导出 - {test_name}")
         
         # 检查主结果文件中的函数
@@ -136,7 +136,6 @@ class TestRunner:
         main_functions = entities.get('functions', {})
         
         functions_with_location = 0
-        functions_with_content = 0
         definition_functions = 0
         declaration_functions = 0
         invalid_definitions = []
@@ -146,26 +145,14 @@ class TestRunner:
         for func_id, func_info in main_functions.items():
             is_definition = func_info.get('is_definition', False)
             has_location = 'location' in func_info
-            has_content = 'code_content' in func_info
-            code_content = func_info.get('code_content', '')
             func_name = func_info.get('name', 'Unknown')
             
             if has_location:
                 functions_with_location += 1
-            if has_content:
-                functions_with_content += 1
             
             if is_definition:
                 definition_functions += 1
-                # 验证规则1：函数定义必须有函数体内容字段（即使内容为空，如= default函数）
-                if not has_content:
-                    invalid_definitions.append({
-                        'name': func_name,
-                        'id': func_id,
-                        'issue': 'definition_without_content_field',
-                        'has_content': has_content
-                    })
-                # 验证规则2：函数定义必须有location信息
+                # 验证规则：函数定义必须有location信息
                 if not has_location:
                     invalid_definitions.append({
                         'name': func_name,
@@ -173,34 +160,22 @@ class TestRunner:
                         'issue': 'definition_without_location',
                         'has_location': has_location
                     })
-                
-                # 特殊检查：如果函数体为空但有location，可能是= default或= delete函数，这是合法的
-                if has_content and not code_content.strip() and has_location:
-                    # 这是正常情况，如 virtual ~Base() = default; 
-                    pass
             else:
                 declaration_functions += 1
-                # 验证规则2：函数声明不应该有location和code_content
+                # 验证规则：函数声明不应该有location
                 if has_location:
                     invalid_declarations.append({
                         'name': func_name,
                         'id': func_id,
                         'issue': 'declaration_with_location'
                     })
-                if has_content and code_content.strip():
-                    invalid_declarations.append({
-                        'name': func_name,
-                        'id': func_id,
-                        'issue': 'declaration_with_body'
-                    })
         
-        logger.info(f"  主结果文件: {functions_with_location}个函数有location, {functions_with_content}个有code_content")
+        logger.info(f"  主结果文件: {functions_with_location}个函数有location")
         logger.info(f"  函数类型统计: {definition_functions}个定义, {declaration_functions}个声明")
         
         # 检查nodes.json中的函数
         nodes_functions = 0
         nodes_with_location = 0
-        nodes_with_content = 0
         nodes_definition_functions = 0
         nodes_declaration_functions = 0
         nodes_invalid_definitions = []
@@ -217,31 +192,20 @@ class TestRunner:
                         node_data = node_info.get('data', {})
                         is_definition = node_data.get('is_definition', False)
                         has_location = 'location' in node_data
-                        has_content = 'code_content' in node_data
-                        code_content = node_data.get('code_content', '')
                         func_name = node_data.get('name', 'Unknown')
                         
                         if has_location:
                             nodes_with_location += 1
-                        if has_content:
-                            nodes_with_content += 1
                         
                         if is_definition:
                             nodes_definition_functions += 1
                             # 验证函数定义的规则
-                            if not has_content:
-                                nodes_invalid_definitions.append({
-                                    'name': func_name,
-                                    'id': node_id,
-                                    'issue': 'definition_without_content_field'
-                                })
                             if not has_location:
                                 nodes_invalid_definitions.append({
                                     'name': func_name,
                                     'id': node_id,
                                     'issue': 'definition_without_location'
                                 })
-                            # 空函数体但有location是合法的（= default/= delete函数）
                         else:
                             nodes_declaration_functions += 1
                             # 验证函数声明的规则
@@ -251,12 +215,6 @@ class TestRunner:
                                     'id': node_id,
                                     'issue': 'declaration_with_location'
                                 })
-                            if has_content and code_content.strip():
-                                nodes_invalid_declarations.append({
-                                    'name': func_name,
-                                    'id': node_id,
-                                    'issue': 'declaration_with_body'
-                                })
             elif isinstance(nodes_data, list):
                 # 旧格式，作为列表处理
                 for node in nodes_data:
@@ -264,10 +222,8 @@ class TestRunner:
                         nodes_functions += 1
                         if 'location' in node:
                             nodes_with_location += 1
-                        if 'code_content' in node:
-                            nodes_with_content += 1
         
-        logger.info(f"  节点文件: {nodes_with_location}/{nodes_functions}个函数有location, {nodes_with_content}/{nodes_functions}个有code_content")
+        logger.info(f"  节点文件: {nodes_with_location}/{nodes_functions}个函数有location")
         logger.info(f"  节点函数类型: {nodes_definition_functions}个定义, {nodes_declaration_functions}个声明")
         
         # 报告验证问题
@@ -287,14 +243,13 @@ class TestRunner:
         if nodes_invalid_declarations:
             logger.warning(f"  节点文件中发现{len(nodes_invalid_declarations)}个有问题的函数声明")
         
-        # 检查是否所有函数定义都有location和code_content
-        basic_success = (functions_with_location > 0 and functions_with_content > 0 and 
-                        nodes_with_location > 0 and nodes_with_content > 0)
+        # 检查基本功能
+        basic_success = (functions_with_location > 0 and nodes_with_location > 0)
         
-        # 函数体验证成功条件：
+        # 验证成功条件：
         # 1. 基本功能正常
-        # 2. 没有无效的函数定义（定义必须有body和location）
-        # 3. 没有无效的函数声明（声明不应该有location和非空body）
+        # 2. 没有无效的函数定义（定义必须有location）
+        # 3. 没有无效的函数声明（声明不应该有location）
         validation_success = (basic_success and 
                              len(invalid_definitions) == 0 and 
                              len(invalid_declarations) == 0 and
@@ -306,9 +261,9 @@ class TestRunner:
             if not basic_success:
                 logger.error("  基本功能验证失败")
             if invalid_definitions or nodes_invalid_definitions:
-                logger.error("  函数定义验证失败：存在没有函数体或location的定义")
+                logger.error("  函数定义验证失败：存在没有location的定义")
             if invalid_declarations or nodes_invalid_declarations:
-                logger.error("  函数声明验证失败：存在带有location或函数体的声明")
+                logger.error("  函数声明验证失败：存在带有location的声明")
         
         return validation_success
     

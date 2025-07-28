@@ -1,15 +1,16 @@
 {
   "project_name": "test_demo",
   "project_path": "test_demo",
-  "analysis_timestamp": "2025-07-28T20:29:58.940792",
+  "analysis_timestamp": "2025-07-28T21:53:38.301144",
   "total_files": 1,
-  "total_entities": 16,
+  "total_entities": 34,
   "entities_by_type": {
-    "class": 5,
-    "function": 10,
-    "namespace": 1
+    "class": 6,
+    "function": 26,
+    "namespace": 1,
+    "variable": 1
   },
-  "call_relationships": 7,
+  "call_relationships": 12,
   "files_analyzed": 1,
   "file_mappings": {
     "total_files": 1,
