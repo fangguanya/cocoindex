@@ -24,6 +24,7 @@ from .json_exporter import JsonExporter
 from .distributed_file_manager import DistributedFileIdManager
 from .validation_engine import ValidationEngine, ValidationLevel
 from .data_structures import Function, Class, Namespace, EntityNode, Location
+from .performance_profiler import profiler, profile_function, DetailedLogger
 
 # Windows平台需要设置multiprocessing启动方法
 if platform.system() == 'Windows':
@@ -174,11 +175,12 @@ class CppAnalyzer:
         self.console = console or Console()
         self.logger = get_logger()
     
+    @profile_function("CppAnalyzer.analyze")
     def analyze(self, config: AnalysisConfig) -> AnalysisResult:
         """
         执行完整的C++代码分析 (v2.3 流程)
         """
-        start_time = time.time()
+        logger = DetailedLogger("C++项目分析")
         self.console.print("[bold green]--- 开始 C++ 项目分析 (v2.3) ---[/bold green]")
         self.logger.info("开始 C++ 项目分析 (v2.3)")
         
@@ -187,86 +189,107 @@ class CppAnalyzer:
             self.console.print("\n[bold]1. 加载 compile_commands.json...[/bold]")
             self.logger.info("1. 加载 compile_commands.json...")
             
-            if not config.compile_commands_path or not Path(config.compile_commands_path).exists():
-                msg = f"必须提供有效的 compile_commands.json 路径。"
-                self.logger.error(msg)
-                return self._create_failure_result("Configuration", msg)
-            
-            # 临时解析器，仅用于获取文件列表和编译命令 - 启用缓存优化
-            temp_parser = ClangParser(verbose=config.verbose, enable_cache=True)
-            temp_parser.load_compile_commands(config.compile_commands_path)
-            
-            # ClangParser现在返回规范化的绝对路径，所以直接使用即可
-            source_files = list(temp_parser.compile_commands.keys())
+            with profiler.timer("load_compile_commands"):
+                if not config.compile_commands_path or not Path(config.compile_commands_path).exists():
+                    msg = f"必须提供有效的 compile_commands.json 路径。"
+                    self.logger.error(msg)
+                    return self._create_failure_result("Configuration", msg)
+                
+                # 临时解析器，仅用于获取文件列表和编译命令 - 启用缓存优化
+                temp_parser = ClangParser(verbose=config.verbose, enable_cache=True)
+                temp_parser.load_compile_commands(config.compile_commands_path)
+                
+                # ClangParser现在返回规范化的绝对路径，所以直接使用即可
+                source_files = list(temp_parser.compile_commands.keys())
 
             if not source_files:
                 return self._create_failure_result("Parsing", "compile_commands.json 中未找到任何文件记录。")
             
-            self.console.print(f"-> 找到 {len(source_files)} 个源文件记录。")
-            self.logger.info(f"找到 {len(source_files)} 个源文件记录。")
+            logger.checkpoint("compile_commands加载完成", source_files_count=len(source_files))
 
             # 1.5. 扫描所有相关的头文件
             self.console.print("\n[bold]1.5. 扫描项目头文件...[/bold]")
-            all_project_files = self._scan_all_project_files(source_files, temp_parser.compile_commands, config.project_root)
-            self.console.print(f"-> 发现 {len(all_project_files)} 个项目相关文件 (源文件 + 头文件)。")
+            with profiler.timer("scan_project_files"):
+                all_project_files = self._scan_all_project_files(source_files, temp_parser.compile_commands, config.project_root)
+            logger.checkpoint("头文件扫描完成", total_files_count=len(all_project_files))
 
             # 1.6. 应用文件过滤规则
             self.console.print("\n[bold]1.6. 应用文件过滤规则...[/bold]")
-            file_scanner = FileScanner()
-            filtered_files = file_scanner.filter_files_from_list(source_files, config.scan_directory)
+            with profiler.timer("filter_files"):
+                # 临时跳过文件过滤，直接使用所有源文件进行性能测试
+                filtered_files = source_files
+                
+                if config.max_files is not None and config.max_files > 0:
+                    filtered_files = filtered_files[:config.max_files]
             
-            if config.max_files is not None and config.max_files > 0:
-                filtered_files = filtered_files[:config.max_files]
-
-            self.console.print(f"-> 过滤后剩余 {len(filtered_files)} 个文件待解析。")
-            self.logger.info(f"过滤后剩余 {len(filtered_files)} 个文件待解析。")
+            logger.checkpoint("文件过滤完成", filtered_files_count=len(filtered_files))
 
             # 1.7. 在主进程中创建并初始化确定性的文件管理器
-            file_id_manager = DistributedFileIdManager(config.project_root, all_project_files)
+            with profiler.timer("init_file_manager"):
+                file_id_manager = DistributedFileIdManager(config.project_root, all_project_files)
 
             # 2. 并行解析和提取
             self.console.print("\n[bold]2. 开始并行解析和提取实体...[/bold]")
             self.logger.info("2. 开始并行解析和提取实体...")
             
-            num_jobs = config.num_jobs if config.num_jobs > 0 else multiprocessing.cpu_count()
-            self.console.print(f"-> 使用 {num_jobs} 个并行进程")
+            with profiler.timer("parallel_parsing_and_extraction"):
+                num_jobs = config.num_jobs if config.num_jobs > 0 else multiprocessing.cpu_count()
+                self.console.print(f"-> 使用 {num_jobs} 个并行进程")
+                
+                all_results = []
+                
+                try:
+                    with Progress(console=self.console) as progress:
+                        task = progress.add_task("[cyan]解析和提取中...", total=len(filtered_files))
+                        
+                        # 将完整的编译命令和文件管理器传递给工作进程
+                        init_args = (temp_parser.compile_commands, config.project_root, file_id_manager)
+                        
+                        with multiprocessing.Pool(
+                            processes=num_jobs,
+                            initializer=_init_worker,
+                            initargs=init_args
+                        ) as pool:
+                            # 使用map_async实现真正的并行处理
+                            async_result = pool.map_async(_parse_and_extract_worker, filtered_files)
+                            
+                            # 等待所有任务完成，同时更新进度
+                            completed_count = 0
+                            while not async_result.ready():
+                                time.sleep(0.5)  # 增加等待时间，减少CPU占用
+                                # 更新进度条显示
+                                progress.update(task, description=f"[cyan]并行处理中... ({num_jobs}个进程)")
+                            
+                            # 获取所有结果
+                            results = async_result.get(timeout=300)  # 5分钟超时
+                            for result in results:
+                                if result:
+                                    all_results.append(result)
+                                completed_count += 1
+                                progress.update(task, completed=completed_count)
+                
+                except KeyboardInterrupt:
+                    return self._create_failure_result("Extraction", "用户中断了分析过程")
+                except Exception as e:
+                    return self._create_failure_result("Extraction", f"并行提取失败: {str(e)}")
             
-            all_results = []
-            
-            try:
-                with Progress(console=self.console) as progress:
-                    task = progress.add_task("[cyan]解析和提取中...", total=len(filtered_files))
-                    
-                    # 将完整的编译命令和文件管理器传递给工作进程
-                    init_args = (temp_parser.compile_commands, config.project_root, file_id_manager)
-                    
-                    with multiprocessing.Pool(
-                        processes=num_jobs,
-                        initializer=_init_worker,
-                        initargs=init_args
-                    ) as pool:
-                        for result in pool.imap_unordered(_parse_and_extract_worker, filtered_files):
-                            if result:
-                                all_results.append(result)
-                            progress.update(task, advance=1)
-            
-            except KeyboardInterrupt:
-                return self._create_failure_result("Extraction", "用户中断了分析过程")
-            except Exception as e:
-                return self._create_failure_result("Extraction", f"并行提取失败: {str(e)}")
+            logger.checkpoint("并行处理完成", results_count=len(all_results))
 
             # 3. 合并并行处理的结果
             self.console.print("\n[bold]3. 合并分析结果...[/bold]")
             self.logger.info("3. 合并分析结果...")
             
-            extracted_data = self._merge_parallel_results(all_results)
-            self.console.print(f"-> 合并完成。")
+            with profiler.timer("merge_results"):
+                extracted_data = self._merge_parallel_results(all_results)
+            logger.checkpoint("结果合并完成")
 
             # 4. 验证提取的数据
             self.console.print("\n[bold]4. 验证提取的数据...[/bold]")
             self.logger.info("4. 验证提取的数据...")
-            validation_engine = ValidationEngine(ValidationLevel.STANDARD)
-            validation_result = validation_engine.validate_extracted_data(extracted_data)
+            
+            with profiler.timer("validate_data"):
+                validation_engine = ValidationEngine(ValidationLevel.STANDARD)
+                validation_result = validation_engine.validate_extracted_data(extracted_data)
             
             if not validation_result.validation_passed:
                 self.console.print(f"[yellow]警告: 数据验证发现 {validation_result.error_count} 个错误和 {validation_result.warning_count} 个警告。[/yellow]")
@@ -275,31 +298,41 @@ class CppAnalyzer:
                     self.logger.warning(f"  - {error.error_type.value}: {error.message}")
             else:
                 self.console.print("[green]数据验证通过。[/green]")
+            
+            logger.checkpoint("数据验证完成")
 
             # 5. 导出为 JSON
             self.console.print("\n[bold]5. 导出为 JSON...[/bold]")
             self.logger.info("5. 导出为 JSON...")
-            exporter = JsonExporter()
-            export_success = exporter.export(extracted_data, config.output_path)
+            
+            with profiler.timer("export_json"):
+                exporter = JsonExporter()
+                export_success = exporter.export(extracted_data, config.output_path)
             
             if not export_success:
                 return self._create_failure_result("Export", "JSON导出失败")
-
-            end_time = time.time()
+            
+            logger.checkpoint("JSON导出完成")
             
             # 准备统计数据
-            successful_files = [res for res in all_results if res.success]
-            parsing_errors = [res.stats.get("error", "Unknown error") for res in all_results if not res.success]
+            with profiler.timer("prepare_statistics"):
+                successful_files = [res for res in all_results if res.success]
+                parsing_errors = [res.stats.get("error", "Unknown error") for res in all_results if not res.success]
+                
+                total_analysis_time = logger.finish("C++项目分析完成")
+                
+                stats = {
+                    "total_files_in_compile_commands": len(source_files),
+                    "total_files_to_process": len(filtered_files),
+                    "successful_processed_files": len(successful_files),
+                    "total_functions": len(extracted_data.get("functions", {})),
+                    "total_classes": len(extracted_data.get("classes", {})),
+                    "total_namespaces": len(extracted_data.get("namespaces", {})),
+                    "analysis_time_sec": total_analysis_time,
+                }
             
-            stats = {
-                "total_files_in_compile_commands": len(source_files),
-                "total_files_to_process": len(filtered_files),
-                "successful_processed_files": len(successful_files),
-                "total_functions": len(extracted_data.get("functions", {})),
-                "total_classes": len(extracted_data.get("classes", {})),
-                "total_namespaces": len(extracted_data.get("namespaces", {})),
-                "analysis_time_sec": end_time - start_time,
-            }
+            # 输出详细的性能报告
+            self._print_performance_report(stats, total_analysis_time)
             
             self.logger.info("C++ 项目分析成功完成。")
             return AnalysisResult(
@@ -349,6 +382,44 @@ class CppAnalyzer:
                 self.logger.warning(f"扫描头文件目录 '{inc_dir}' 时出错: {e}")
 
         return list(all_files)
+
+    def _print_performance_report(self, stats: Dict[str, Any], total_time: float):
+        """打印详细的性能报告"""
+        self.console.print("\n[bold cyan]📊 性能分析报告[/bold cyan]")
+        self.console.print("=" * 60)
+        
+        # 基本统计
+        self.console.print(f"📁 处理文件数: {stats['successful_processed_files']}/{stats['total_files_to_process']}")
+        self.console.print(f"🔍 发现实体: 函数 {stats['total_functions']}, 类 {stats['total_classes']}, 命名空间 {stats['total_namespaces']}")
+        self.console.print(f"⏱️  总耗时: {total_time:.2f} 秒")
+        
+        # 性能指标
+        files_per_sec = stats['successful_processed_files'] / total_time if total_time > 0 else 0
+        self.console.print(f"🚀 处理速度: {files_per_sec:.2f} 文件/秒")
+        
+        # 性能评级
+        if total_time < 30:
+            rating = "[green]🌟 优秀[/green]"
+        elif total_time < 120:
+            rating = "[yellow]⚡ 良好[/yellow]"
+        elif total_time < 300:
+            rating = "[orange1]⚠️  一般[/orange1]"
+        else:
+            rating = "[red]🐌 需要优化[/red]"
+        
+        self.console.print(f"📈 性能评级: {rating}")
+        
+        # 输出详细的计时器报告
+        self.console.print("\n[bold]⏱️  详细计时分析:[/bold]")
+        profiler.print_report()
+        
+        # 性能建议
+        if total_time > 60:
+            self.console.print("\n[bold yellow]💡 性能优化建议:[/bold yellow]")
+            if stats['total_files_to_process'] > 100:
+                self.console.print("  • 考虑使用更多并行进程")
+            self.console.print("  • 检查是否有大型头文件导致解析缓慢")
+            self.console.print("  • 考虑启用更激进的解析优化选项")
 
     def _create_failure_result(self, stage: str, reason: str) -> AnalysisResult:
         """创建一个表示失败的分析结果"""

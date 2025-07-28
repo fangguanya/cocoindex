@@ -22,6 +22,7 @@ import clang.cindex as clang
 
 from .logger import get_logger
 from .distributed_file_manager import DistributedFileIdManager
+from .performance_profiler import profiler, profile_function, DetailedLogger
 from .data_structures import (
     Function, Class, Namespace, CppExtensions, CppOopExtensions,
     CallInfo, CppCallInfo, Parameter, Location, ResolvedDefinitionLocation, InheritanceInfo,
@@ -79,32 +80,64 @@ class EntityExtractor:
         self._cursor_cache: Dict[str, Any] = {}
         self._qualified_name_cache: Dict[str, str] = {}
 
+    @profile_function("EntityExtractor.extract_from_files")
     def extract_from_files(self, parsed_files: List[Any], config: Any) -> Dict[str, Any]:
-        self.logger.info("开始实体提取 (v2.5 - 模板支持)...")
-        self._reset_state()
+        logger = DetailedLogger("实体提取")
+        
+        with profiler.timer("extract_reset_state"):
+            self._reset_state()
+        
+        logger.checkpoint("状态重置完成", parsed_files_count=len(parsed_files))
 
-        self.logger.info("Pass 1: 提取声明和定义...")
-        for parsed_file in parsed_files:
-            if parsed_file.translation_unit:
-                self._first_pass_visitor(parsed_file.translation_unit.cursor)
+        # Pass 1: 提取声明和定义 - 优化版
+        with profiler.timer("extract_pass1_declarations"):
+            for i, parsed_file in enumerate(parsed_files):
+                if parsed_file.translation_unit:
+                    file_logger = DetailedLogger(f"Pass1-文件{i+1}")
+                    with profiler.timer("first_pass_single_file", {'file': parsed_file.file_path}):
+                        self._first_pass_visitor_optimized(parsed_file.translation_unit.cursor)
+                    file_logger.finish()
 
-        self.logger.info("Pass 2: 提取关系...")
-        for parsed_file in parsed_files:
-            if parsed_file.translation_unit:
-                self._second_pass_visitor(parsed_file.translation_unit.cursor)
+        logger.checkpoint("Pass 1 完成", 
+                         functions_found=len(self.functions),
+                         classes_found=len(self.classes),
+                         namespaces_found=len(self.namespaces))
 
-        self.logger.info("Pass 3: 建立反向调用关系...")
-        self._build_reverse_call_relationships()
+        # Pass 2: 提取关系 - 优化版
+        with profiler.timer("extract_pass2_relationships"):
+            for i, parsed_file in enumerate(parsed_files):
+                if parsed_file.translation_unit:
+                    file_logger = DetailedLogger(f"Pass2-文件{i+1}")
+                    with profiler.timer("second_pass_single_file", {'file': parsed_file.file_path}):
+                        self._second_pass_visitor_optimized(parsed_file.translation_unit.cursor)
+                    file_logger.finish()
 
+        logger.checkpoint("Pass 2 完成")
+
+        # Pass 3: 建立反向调用关系
+        with profiler.timer("extract_pass3_reverse_calls"):
+            self._build_reverse_call_relationships()
+
+        logger.checkpoint("Pass 3 完成")
+        
+        # 构建结果
+        with profiler.timer("extract_build_result"):
+            result = {
+                "functions": self.functions,
+                "classes": self.classes,
+                "namespaces": self.namespaces,
+                "global_nodes": {usr_id: node.to_dict() for usr_id, node in self.global_nodes.items()},
+                "file_mappings": self.file_id_manager.get_file_mappings()
+            }
+
+        total_time = logger.finish("实体提取完成")
+        
+        if total_time > 5.0:  # 如果实体提取超过5秒，记录警告
+            self.logger.warning(f"⚠️  实体提取耗时过长: {total_time:.2f}s")
+        
         self.logger.info(f"实体提取完成。函数: {len(self.functions)}, 类: {len(self.classes)}, 命名空间: {len(self.namespaces)}")
         
-        return {
-            "functions": self.functions,
-            "classes": self.classes,
-            "namespaces": self.namespaces,
-            "global_nodes": {usr_id: node.to_dict() for usr_id, node in self.global_nodes.items()},
-            "file_mappings": self.file_id_manager.get_file_mappings()
-        }
+        return result
 
     def _reset_state(self):
         """重置状态 - 线程安全版本"""
@@ -117,62 +150,160 @@ class EntityExtractor:
             self._cursor_cache.clear()
             self._qualified_name_cache.clear()
 
-    def _first_pass_visitor(self, cursor: clang.Cursor):
-        if cursor.kind == clang.CursorKind.TRANSLATION_UNIT:
-            for child in cursor.get_children():
-                self._first_pass_visitor(child)
-            return
-
-        try:
-            if self._is_in_project(cursor):
-                if cursor.kind in [
-                    clang.CursorKind.FUNCTION_DECL, clang.CursorKind.CXX_METHOD, 
-                    clang.CursorKind.CONSTRUCTOR, clang.CursorKind.DESTRUCTOR,
-                    clang.CursorKind.FUNCTION_TEMPLATE
-                ]:
-                    self._process_function_cursor(cursor)
-                
-                elif cursor.kind in [
-                    clang.CursorKind.CLASS_DECL, clang.CursorKind.STRUCT_DECL,
-                    clang.CursorKind.CLASS_TEMPLATE, clang.CursorKind.CLASS_TEMPLATE_PARTIAL_SPECIALIZATION
-                ]:
-                    self._process_class_cursor(cursor)
-                
-                elif cursor.kind == clang.CursorKind.NAMESPACE:
-                    self._process_namespace_cursor(cursor)
-
-            for child in cursor.get_children():
-                self._first_pass_visitor(child)
-                
-        except Exception as e:
-            self.logger.warning(f"Pass 1 - Error processing cursor {cursor.spelling}: {e}")
-
-    def _second_pass_visitor(self, cursor: clang.Cursor):
-        if cursor.kind == clang.CursorKind.TRANSLATION_UNIT:
-            for child in cursor.get_children():
-                self._second_pass_visitor(child)
+    def _first_pass_visitor_optimized(self, cursor):
+        """优化版第一遍遍历 - 只提取声明和定义"""
+        with profiler.timer("first_pass_visitor"):
+            self._visit_optimized(cursor, self._extract_declarations_only)
+    
+    def _second_pass_visitor_optimized(self, cursor):
+        """优化版第二遍遍历 - 只提取关系"""
+        with profiler.timer("second_pass_visitor"):
+            self._visit_optimized(cursor, self._extract_relationships_only)
+    
+    def _visit_optimized(self, cursor, extract_func):
+        """优化的AST遍历算法 - 减少递归调用和内存分配"""
+        if not cursor:
             return
             
-        try:
-            if self._is_in_project(cursor):
-                if cursor.kind in [
-                    clang.CursorKind.FUNCTION_DECL, clang.CursorKind.CXX_METHOD, 
-                    clang.CursorKind.CONSTRUCTOR, clang.CursorKind.DESTRUCTOR,
-                    clang.CursorKind.FUNCTION_TEMPLATE
-                ]:
-                    self._extract_calls_for_function(cursor)
-                
-                elif cursor.kind in [
-                    clang.CursorKind.CLASS_DECL, clang.CursorKind.STRUCT_DECL,
-                    clang.CursorKind.CLASS_TEMPLATE, clang.CursorKind.CLASS_TEMPLATE_PARTIAL_SPECIALIZATION
-                ] and cursor.is_definition():
-                    self._extract_inheritance_for_class(cursor)
+        # 使用栈而不是递归，避免Python递归限制和开销
+        stack = [cursor]
+        visited = set()  # 防止重复访问
+        
+        while stack:
+            current = stack.pop()
             
-            for child in cursor.get_children():
-                self._second_pass_visitor(child)
+            # 避免重复访问同一个cursor
+            cursor_hash = hash((current.spelling, current.location.file, current.location.line))
+            if cursor_hash in visited:
+                continue
+            visited.add(cursor_hash)
+            
+            # 快速跳过不需要的cursor类型
+            if self._should_skip_cursor(current):
+                continue
                 
-        except Exception as e:
-            self.logger.warning(f"Pass 2 - Error processing cursor {cursor.spelling}: {e}")
+            # 执行提取函数
+            extract_func(current)
+            
+            # 只遍历相关的子节点，跳过不必要的节点
+            for child in current.get_children():
+                if self._should_visit_child(child):
+                    stack.append(child)
+    
+    def _should_skip_cursor(self, cursor):
+        """判断是否应该跳过这个cursor"""
+        # 跳过注释、预处理指令等不相关节点
+        skip_kinds = {
+            clang.CursorKind.UNEXPOSED_DECL,
+            clang.CursorKind.MACRO_DEFINITION,
+            clang.CursorKind.INCLUSION_DIRECTIVE,
+            clang.CursorKind.UNEXPOSED_STMT,
+        }
+        return cursor.kind in skip_kinds
+    
+    def _should_visit_child(self, cursor):
+        """判断是否应该访问这个子节点"""
+        # 只访问相关的节点类型
+        relevant_kinds = {
+            clang.CursorKind.NAMESPACE,
+            clang.CursorKind.CLASS_DECL,
+            clang.CursorKind.STRUCT_DECL,
+            clang.CursorKind.FUNCTION_DECL,
+            clang.CursorKind.CXX_METHOD,
+            clang.CursorKind.CONSTRUCTOR,
+            clang.CursorKind.DESTRUCTOR,
+            clang.CursorKind.CALL_EXPR,
+            clang.CursorKind.MEMBER_REF_EXPR,
+            clang.CursorKind.DECL_REF_EXPR,
+            clang.CursorKind.CLASS_TEMPLATE,
+            clang.CursorKind.FUNCTION_TEMPLATE,
+            clang.CursorKind.TEMPLATE_TYPE_PARAMETER,
+            clang.CursorKind.TEMPLATE_NON_TYPE_PARAMETER,
+            # 语句类型 - 确保能够遍历函数体
+            clang.CursorKind.COMPOUND_STMT,
+            clang.CursorKind.IF_STMT,
+            clang.CursorKind.FOR_STMT,
+            clang.CursorKind.WHILE_STMT,
+            clang.CursorKind.DO_STMT,
+            clang.CursorKind.SWITCH_STMT,
+            clang.CursorKind.CASE_STMT,
+            clang.CursorKind.DEFAULT_STMT,
+            clang.CursorKind.BREAK_STMT,
+            clang.CursorKind.CONTINUE_STMT,
+            clang.CursorKind.RETURN_STMT,
+            clang.CursorKind.GOTO_STMT,
+            clang.CursorKind.LABEL_STMT,
+            clang.CursorKind.UNEXPOSED_STMT,
+            clang.CursorKind.DECL_STMT,
+            clang.CursorKind.NULL_STMT,
+            # C++特定语句
+            clang.CursorKind.CXX_TRY_STMT,
+            clang.CursorKind.CXX_CATCH_STMT,
+            clang.CursorKind.CXX_FOR_RANGE_STMT,
+            # 表达式类型 - 确保能够找到函数调用
+            clang.CursorKind.UNEXPOSED_EXPR,
+            clang.CursorKind.PAREN_EXPR,
+            clang.CursorKind.INIT_LIST_EXPR,
+            clang.CursorKind.LAMBDA_EXPR,
+            clang.CursorKind.ARRAY_SUBSCRIPT_EXPR,
+            clang.CursorKind.BINARY_OPERATOR,
+            clang.CursorKind.UNARY_OPERATOR,
+            clang.CursorKind.CONDITIONAL_OPERATOR,
+            clang.CursorKind.CSTYLE_CAST_EXPR,
+            clang.CursorKind.CXX_FUNCTIONAL_CAST_EXPR,
+            clang.CursorKind.CXX_STATIC_CAST_EXPR,
+            clang.CursorKind.CXX_DYNAMIC_CAST_EXPR,
+            clang.CursorKind.CXX_REINTERPRET_CAST_EXPR,
+            clang.CursorKind.CXX_CONST_CAST_EXPR,
+            # 模板相关
+            clang.CursorKind.CLASS_TEMPLATE_PARTIAL_SPECIALIZATION,
+            clang.CursorKind.TEMPLATE_REF,
+        }
+        return (cursor.kind in relevant_kinds or 
+                cursor.kind.is_declaration() or 
+                cursor.kind.is_statement() or 
+                cursor.kind.is_expression())
+    
+    def _extract_declarations_only(self, cursor):
+        """第一遍：只提取声明和定义"""
+        if cursor.kind == clang.CursorKind.NAMESPACE:
+            self._extract_namespace(cursor)
+        elif cursor.kind in [clang.CursorKind.CLASS_DECL, clang.CursorKind.STRUCT_DECL, clang.CursorKind.CLASS_TEMPLATE]:
+            self._extract_class(cursor)
+        elif cursor.kind in [clang.CursorKind.FUNCTION_DECL, clang.CursorKind.CXX_METHOD, 
+                           clang.CursorKind.CONSTRUCTOR, clang.CursorKind.DESTRUCTOR, clang.CursorKind.FUNCTION_TEMPLATE]:
+            self._extract_function(cursor)
+    
+    def _extract_relationships_only(self, cursor):
+        """第二遍：只提取关系"""
+        if cursor.kind in [clang.CursorKind.CALL_EXPR, clang.CursorKind.MEMBER_REF_EXPR, clang.CursorKind.DECL_REF_EXPR]:
+            self._extract_call_relationship(cursor)
+    
+    def _extract_namespace(self, cursor):
+        """提取命名空间 - 优化版"""
+        self._process_namespace_cursor(cursor)
+    
+    def _extract_class(self, cursor):
+        """提取类 - 优化版"""
+        self._process_class_cursor(cursor)
+    
+    def _extract_function(self, cursor):
+        """提取函数 - 优化版"""
+        self._process_function_cursor(cursor)
+    
+    def _extract_call_relationship(self, cursor):
+        """提取调用关系 - 优化版"""
+        # 找到包含此调用的函数
+        parent = cursor.semantic_parent
+        while parent and parent.kind not in [
+            clang.CursorKind.FUNCTION_DECL, clang.CursorKind.CXX_METHOD, 
+            clang.CursorKind.CONSTRUCTOR, clang.CursorKind.DESTRUCTOR,
+            clang.CursorKind.FUNCTION_TEMPLATE
+        ]:
+            parent = parent.semantic_parent
+        
+        if parent:
+            self._extract_calls_for_function(parent)
 
     def _process_function_cursor(self, cursor: clang.Cursor):
         """处理函数游标 - 线程安全和性能优化版"""
