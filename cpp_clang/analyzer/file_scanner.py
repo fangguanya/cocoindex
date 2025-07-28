@@ -255,9 +255,15 @@ class FileScanner:
     def _is_under_directory(self, file_path: Path, directory_path: Path) -> bool:
         """判断文件是否在指定目录下"""
         try:
-            file_path.relative_to(directory_path)
-            return True
-        except ValueError:
+            # 确保两个路径都是绝对路径并解析符号链接
+            abs_file_path = file_path.resolve()
+            abs_dir_path = directory_path.resolve()
+            
+            # 使用 os.path.commonpath 来进行可靠的检查
+            common = os.path.commonpath([str(abs_file_path), str(abs_dir_path)])
+            return common == str(abs_dir_path)
+        except (OSError, ValueError):
+            # 如果路径解析失败，则认为不在目录下
             return False
 
     def _is_file_excluded(self, file_path: str) -> bool:

@@ -29,10 +29,7 @@ def main():
     # ========== 参数解析 ==========
     parser = argparse.ArgumentParser(description="C++ 项目分析工具")
     parser.add_argument("--project_root", default="N:/c7_enginedev/Engine", help="项目根目录")
-    # N:/c7_enginedev/Client
-    #parser.add_argument("--scan_directory", default="N:/c7_enginedev/Client/Plugins/KGCharacter", help="要分析的代码目录 (仅用于过滤)")
     parser.add_argument("--scan_directory", default="N:/c7_enginedev/Client", help="要分析的代码目录 (仅用于过滤)")
-    #parser.add_argument("--compile_commands_path", default="N:/c7_enginedev/compile_commands.json", help="compile_commands.json 文件的路径")
     parser.add_argument("--compile_commands_path", default="L:/ai-cocoindex-clangcpp/cpp_clang/compile_commands.json", help="compile_commands.json 文件的路径")
     parser.add_argument("--output_file", default="cpp_analysis_result.json", help="输出 JSON 文件路径")
     parser.add_argument("--verbose", action="store_true", help="显示详细输出")
@@ -46,19 +43,10 @@ def main():
     
     # ========== 配置参数 ==========
     
-    # 项目根目录（用于 include 搜索和路径映射）
     PROJECT_ROOT = args.project_root
-    
-    # 要分析的代码目录 (注意：在新流程中，此参数仅用于语义，分析范围由 compile_commands 决定)
     SCAN_DIRECTORY = args.scan_directory
-    
-    # compile_commands.json 文件的具体路径
     COMPILE_COMMANDS_PATH = args.compile_commands_path
-    
-    # 输出 JSON 文件路径
     OUTPUT_FILE = args.output_file
-    
-    # 其他选项
     VERBOSE = args.verbose
     MAX_FILES = args.max_files
     NUM_JOBS = args.jobs
@@ -72,7 +60,6 @@ def main():
     console.print(f"输出文件: {OUTPUT_FILE}")
     console.print(f"并行任务数: {NUM_JOBS if NUM_JOBS > 0 else '自动 (所有核心)'}")
     
-    # 检查路径是否存在
     if not Path(PROJECT_ROOT).exists():
         console.print(f"[red]警告: 项目根目录不存在: {PROJECT_ROOT}[/red]")
     if not Path(COMPILE_COMMANDS_PATH).exists():
@@ -80,11 +67,9 @@ def main():
         return 1
     
     try:
-        # 创建分析器
         console.print("\n[bold blue]初始化分析器...[/bold blue]")
         analyzer = CppAnalyzer(console=console)
         
-        # 创建配置对象
         config = AnalysisConfig(
             project_root=PROJECT_ROOT,
             scan_directory=SCAN_DIRECTORY,
@@ -95,25 +80,22 @@ def main():
             num_jobs=NUM_JOBS
         )
 
-        # 执行分析
         console.print("\n[bold blue]开始分析...[/bold blue]")
         result = analyzer.analyze(config)
         
-        # 显示结果
         console.print(f"\n{'='*60}")
         if result.success and result.output_path:
             console.print("[bold green]✓ 分析完成！[/bold green]")
             
-            # 显示统计信息
             stats = result.statistics
             console.print(f"\n[bold blue]分析统计:[/bold blue]")
             console.print(f"源文件数 (from compile_commands): {stats.get('total_files_in_compile_commands', 0)}")
-            console.print(f"成功解析: {stats.get('successful_parsed_files', 0)} / {stats.get('total_parsed_files', 0)}")
+            console.print(f"成功处理: {stats.get('successful_processed_files', 0)} / {stats.get('total_files_to_process', 0)}")
             console.print(f"提取函数: {stats.get('total_functions', 0)}")
             console.print(f"提取类: {stats.get('total_classes', 0)}")
+            console.print(f"提取命名空间: {stats.get('total_namespaces', 0)}")
             console.print(f"分析用时: {stats.get('analysis_time_sec', 0):.2f}秒")
             
-            # 检查输出文件
             if Path(result.output_path).exists():
                 file_size = Path(result.output_path).stat().st_size
                 console.print(f"\n[green]✓ 结果已保存到: {result.output_path}[/green]")
@@ -144,4 +126,4 @@ def main():
 if __name__ == "__main__":
     """程序入口"""
     exit_code = main()
-    sys.exit(exit_code) 
+    sys.exit(exit_code)

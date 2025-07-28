@@ -64,7 +64,7 @@ class SpecialMethodStatusFlags:
 # 核心数据结构
 # ==============================================================================
 
-@dataclass
+@dataclass(frozen=True)
 class Location:
     """代码位置信息 (使用文件ID)"""
     file_id: str
@@ -77,6 +77,12 @@ class Parameter:
     name: str
     type: str  # 简化后的类型名
     default_value: Optional[str] = None
+
+@dataclass
+class TemplateParameter:
+    """模板参数"""
+    name: str
+    type: str # e.g., "typename", "int"
 
 @dataclass
 class ResolvedDefinitionLocation:
@@ -117,13 +123,11 @@ class CppExtensions:
     calling_convention: str = "default"
     return_type: str = "void"
     parameter_types: Dict[str, str] = field(default_factory=dict)
-    template_parameters: List[Dict[str, Any]] = field(default_factory=list)
+    template_parameters: List[TemplateParameter] = field(default_factory=list)
     exception_specification: str = ""
     attributes: List[str] = field(default_factory=list)
     mangled_name: str = ""
     usr: Optional[str] = None # USR作为内部关联和调试使用
-    # 新增：保留签名键值用于向后兼容
-    signature_key: str = ""
 
 @dataclass
 class Function:
@@ -177,7 +181,7 @@ class CppOopExtensions:
     type: str = "class"  # class or struct
     class_status_flags: int = 0
     inheritance_list: List[InheritanceInfo] = field(default_factory=list)
-    template_parameters: List[Dict[str, Any]] = field(default_factory=list)
+    template_parameters: List[TemplateParameter] = field(default_factory=list)
     template_specialization_args: List[str] = field(default_factory=list)
     nested_types: List[str] = field(default_factory=list)
     friend_declarations: List[str] = field(default_factory=list)
@@ -187,8 +191,6 @@ class CppOopExtensions:
     constructors: Dict[str, SpecialMethodInfo] = field(default_factory=dict)
     destructor: Optional[SpecialMethodInfo] = None
     usr: Optional[str] = None # USR作为内部关联和调试使用
-    # 新增：保留签名键值用于向后兼容
-    signature_key: str = ""
 
 @dataclass
 class Class:
@@ -256,37 +258,3 @@ class EntityNode:
             "entity_type": self.entity_type,
             "entity_data": self.entity_data.__dict__ if hasattr(self.entity_data, '__dict__') else str(self.entity_data)
         }
-
-# ==============================================================================
-# 新增：向后兼容性支持
-# ==============================================================================
-
-class KeyGenerator:
-    """生成符合规范的函数和类的签名键值（用于向后兼容）"""
-    @staticmethod
-    def _simplify_type(type_name: str) -> str:
-        """简化C++类型名以用于键值生成"""
-        if not isinstance(type_name, str):
-            type_name = "unknown"
-        
-        # 规则参考 json_format.md
-        s = re.sub(r'\bconst\b', 'const', type_name)
-        s = s.replace('::', '')
-        s = s.replace('<', '')
-        s = s.replace('>', '')
-        s = s.replace('*', 'Ptr')
-        s = s.replace('&', 'Ref')
-        s = s.replace(' ', '')
-        s = s.replace(',', '')
-        return s
-
-    @classmethod
-    def for_function(cls, return_type: str, func_name: str, param_types: List[str], file_id: str) -> str:
-        """生成函数签名键值（用于向后兼容）"""
-        simplified_params = [cls._simplify_type(p) for p in param_types]
-        return f"{cls._simplify_type(return_type)}_{func_name}_{'_'.join(simplified_params)}_{file_id}"
-
-    @classmethod
-    def for_class(cls, qualified_name: str, file_id: str) -> str:
-        """生成类签名键值（用于向后兼容）"""
-        return f"{cls._simplify_type(qualified_name)}_{file_id}" 

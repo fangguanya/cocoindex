@@ -10,17 +10,20 @@ import traceback
 import multiprocessing
 import platform
 from pathlib import Path
-from typing import List, Dict, Any, Optional
-from dataclasses import dataclass, field
+from typing import List, Dict, Any, Optional, Set
 
+from dataclasses import dataclass, field
 from rich.console import Console
 from rich.progress import Progress
 
 from .logger import get_logger
 from .file_scanner import FileScanner, ScanResult
-from .clang_parser import ClangParser, ParsedFile
+from .clang_parser import ClangParser, ParsedFile, SerializableExtractedData
 from .entity_extractor import EntityExtractor
 from .json_exporter import JsonExporter
+from .distributed_file_manager import DistributedFileIdManager
+from .validation_engine import ValidationEngine, ValidationLevel
+from .data_structures import Function, Class, Namespace, EntityNode, Location
 
 # Windows平台需要设置multiprocessing启动方法
 if platform.system() == 'Windows':
@@ -47,68 +50,109 @@ class AnalysisResult:
     success: bool
     output_path: Optional[str] = None
     statistics: Dict[str, Any] = field(default_factory=dict)
+    files_processed: int = 0
+    files_parsed: int = 0
+    parsing_errors: List[str] = field(default_factory=list)
 
-# 全局 ClangParser 实例，用于多进程初始化
+# 全局变量用于多进程worker
 g_parser: Optional[ClangParser] = None
+g_extractor: Optional[EntityExtractor] = None
+g_project_root: Optional[str] = None
 
-def _init_worker(compile_commands_path: str):
+g_file_manager: Optional[DistributedFileIdManager] = None
+g_compile_commands: Optional[Dict[str, Any]] = None
+
+def _init_worker(compile_commands: Dict[str, Any], project_root: str, file_id_manager: DistributedFileIdManager):
     """初始化工作进程"""
-    global g_parser
+    global g_parser, g_extractor, g_project_root, g_file_manager, g_compile_commands
     try:
-        print(f"DEBUG: Initializing worker process with compile_commands: {compile_commands_path}")
-        
         # 不传递Console对象到子进程，避免多进程冲突，关闭详细输出
         g_parser = ClangParser(console=None, verbose=False)
-        print(f"DEBUG: Created ClangParser instance")
         
-        g_parser.load_compile_commands(compile_commands_path)
-        print(f"DEBUG: Loaded compile commands, found {len(g_parser.compile_commands)} entries")
+        # 直接接收编译命令，而不是重新加载
+        g_compile_commands = compile_commands
+        g_parser.compile_commands = compile_commands
         
-        print(f"DEBUG: Worker initialization completed successfully")
+        # 初始化文件管理器和实体提取器
+        g_project_root = project_root
+        g_file_manager = file_id_manager
+        g_extractor = EntityExtractor(g_file_manager)
         
     except Exception as e:
         print(f"ERROR: Failed to initialize worker: {e}")
         import traceback
         print(f"Traceback: {traceback.format_exc()}")
         g_parser = None
+        g_extractor = None
+        g_file_manager = None
 
-def _parse_worker(file_path: str) -> Optional[ParsedFile]:
-    """并行解析单个文件的工作函数"""
-    global g_parser
+def _parse_and_extract_worker(file_path: str) -> Optional[SerializableExtractedData]:
+    """并行解析和提取单个文件实体的工作函数"""
+    global g_parser, g_extractor, g_compile_commands
     
-    # 添加详细的调试信息
+    start_time = time.time()
+    
     try:
-        if not g_parser:
-            print(f"ERROR: g_parser is None for file {file_path}")
-            return None
-            
-        print(f"DEBUG: Attempting to parse {file_path}")
+        if not g_parser or not g_extractor or not g_compile_commands:
+            print(f"ERROR: Worker not initialized properly for file {file_path}")
+            return SerializableExtractedData.empty_result(file_path, "Worker not initialized")
+
+        # 关键修复：在解析前切换到正确的工作目录
+        import os
+        original_cwd = os.getcwd()
         
-        # 检查compile_commands是否已加载
-        if not hasattr(g_parser, 'compile_commands') or not g_parser.compile_commands:
-            print(f"ERROR: compile_commands not loaded in worker for {file_path}")
-            return None
+        compile_info = g_compile_commands.get(file_path)
+        if not compile_info:
+            # 使用规范化路径再次尝试
+            normalized_path = str(Path(file_path).resolve()).replace('\\', '/')
+            compile_info = g_compile_commands.get(normalized_path)
+            if not compile_info:
+                print(f"ERROR: No compile info found for {file_path}")
+                return SerializableExtractedData.empty_result(file_path, "No compile info")
             
-        # 检查文件是否在compile_commands中
-        if file_path not in g_parser.compile_commands:
-            print(f"WARNING: {file_path} not found in compile_commands")
-            return None
-            
-        print(f"DEBUG: Found compile commands for {file_path}, calling parse_file...")
-        result = g_parser.parse_file(file_path)
+        directory = compile_info.get("directory")
         
-        if result:
-            print(f"SUCCESS: Parsed {file_path}")
-        else:
-            print(f"FAILED: parse_file returned None for {file_path}")
+        try:
+            if directory and os.path.isdir(directory):
+                os.chdir(directory)
             
-        return result
+            # 1. 解析文件
+            parsed_file = g_parser.parse_file(file_path)
+        finally:
+            os.chdir(original_cwd)
+        if not parsed_file:
+            return SerializableExtractedData.empty_result(file_path, "Parsing failed")
         
+        parse_time = time.time() - start_time
+        
+        # 2. 提取实体
+        extraction_start_time = time.time()
+        extracted_data = g_extractor.extract_from_files([parsed_file], None)
+        extraction_time = time.time() - extraction_start_time
+        
+        # 3. 准备可序列化的结果
+        serializable_result = SerializableExtractedData(
+            file_path=file_path,
+            success=True,
+            parse_time=parse_time,
+            extraction_time=extraction_time,
+            functions={usr: func.__dict__ for usr, func in extracted_data.get('functions', {}).items()},
+            classes={usr: cls.__dict__ for usr, cls in extracted_data.get('classes', {}).items()},
+            namespaces={usr: ns.__dict__ for usr, ns in extracted_data.get('namespaces', {}).items()},
+            global_nodes=extracted_data.get('global_nodes', {}),
+            file_mappings=extracted_data.get('file_mappings', {}),
+            stats={
+                "functions": len(extracted_data.get('functions', {})),
+                "classes": len(extracted_data.get('classes', {}))
+            }
+        )
+        return serializable_result
+
     except Exception as e:
-        print(f"EXCEPTION in _parse_worker for {file_path}: {e}")
+        print(f"EXCEPTION in _parse_and_extract_worker for {file_path}: {e}")
         import traceback
         print(f"Traceback: {traceback.format_exc()}")
-        return None
+        return SerializableExtractedData.empty_result(file_path, str(e))
 
 class CppAnalyzer:
     """C++代码分析器 (v2.3)"""
@@ -136,22 +180,28 @@ class CppAnalyzer:
                 self.logger.error(msg)
                 return self._create_failure_result("Configuration", msg)
             
-            # 临时解析器，仅用于获取文件列表
+            # 临时解析器，仅用于获取文件列表和编译命令
             temp_parser = ClangParser(verbose=config.verbose)
             temp_parser.load_compile_commands(config.compile_commands_path)
-            files_to_parse = list(temp_parser.compile_commands.keys())
+            
+            # ClangParser现在返回规范化的绝对路径，所以直接使用即可
+            source_files = list(temp_parser.compile_commands.keys())
 
-            if not files_to_parse:
+            if not source_files:
                 return self._create_failure_result("Parsing", "compile_commands.json 中未找到任何文件记录。")
             
-            self.console.print(f"-> 找到 {len(files_to_parse)} 个待分析文件。")
-            self.logger.info(f"找到 {len(files_to_parse)} 个待分析文件。")
+            self.console.print(f"-> 找到 {len(source_files)} 个源文件记录。")
+            self.logger.info(f"找到 {len(source_files)} 个源文件记录。")
 
-            # 1.5. 使用 FileScanner 过滤文件列表
-            self.console.print("\n[bold]1.5. 应用文件过滤规则...[/bold]")
-            self.logger.info("1.5. 应用文件过滤规则...")
+            # 1.5. 扫描所有相关的头文件
+            self.console.print("\n[bold]1.5. 扫描项目头文件...[/bold]")
+            all_project_files = self._scan_all_project_files(source_files, temp_parser.compile_commands, config.project_root)
+            self.console.print(f"-> 发现 {len(all_project_files)} 个项目相关文件 (源文件 + 头文件)。")
+
+            # 1.6. 应用文件过滤规则
+            self.console.print("\n[bold]1.6. 应用文件过滤规则...[/bold]")
             file_scanner = FileScanner()
-            filtered_files = file_scanner.filter_files_from_list(files_to_parse, config.scan_directory)
+            filtered_files = file_scanner.filter_files_from_list(source_files, config.scan_directory)
             
             if config.max_files is not None and config.max_files > 0:
                 filtered_files = filtered_files[:config.max_files]
@@ -159,71 +209,64 @@ class CppAnalyzer:
             self.console.print(f"-> 过滤后剩余 {len(filtered_files)} 个文件待解析。")
             self.logger.info(f"过滤后剩余 {len(filtered_files)} 个文件待解析。")
 
-            # 2. 并行解析文件
-            self.console.print("\n[bold]2. 开始并行解析文件...[/bold]")
-            self.logger.info("2. 开始并行解析文件...")
+            # 1.7. 在主进程中创建并初始化确定性的文件管理器
+            file_id_manager = DistributedFileIdManager(config.project_root, all_project_files)
+
+            # 2. 并行解析和提取
+            self.console.print("\n[bold]2. 开始并行解析和提取实体...[/bold]")
+            self.logger.info("2. 开始并行解析和提取实体...")
             
-            parsed_files: List[ParsedFile] = []
             num_jobs = config.num_jobs if config.num_jobs > 0 else multiprocessing.cpu_count()
-            
             self.console.print(f"-> 使用 {num_jobs} 个并行进程")
-            self.logger.info(f"使用 {num_jobs} 个并行进程")
+            
+            all_results = []
             
             try:
                 with Progress(console=self.console) as progress:
-                    task = progress.add_task("[cyan]解析中...", total=len(filtered_files))
+                    task = progress.add_task("[cyan]解析和提取中...", total=len(filtered_files))
                     
-                    # 使用 multiprocessing.Pool 实现并行处理
-                    # initializer 用于为每个工作进程设置全局解析器实例
+                    # 将完整的编译命令和文件管理器传递给工作进程
+                    init_args = (temp_parser.compile_commands, config.project_root, file_id_manager)
+                    
                     with multiprocessing.Pool(
-                        processes=num_jobs, 
-                        initializer=_init_worker, 
-                        initargs=(config.compile_commands_path,)
+                        processes=num_jobs,
+                        initializer=_init_worker,
+                        initargs=init_args
                     ) as pool:
-                        # 使用 imap_unordered 以便在任务完成时立即获得结果
-                        try:
-                            for result in pool.imap_unordered(_parse_worker, filtered_files):
-                                if result:
-                                    parsed_files.append(result)
-                                progress.update(task, advance=1)
-                        except KeyboardInterrupt:
-                            self.console.print("\n[yellow]用户中断，正在终止进程池...[/yellow]")
-                            pool.terminate()
-                            pool.join()
-                            raise
-                        except Exception as e:
-                            self.console.print(f"\n[red]并行处理过程中发生错误: {e}[/red]")
-                            pool.terminate()
-                            pool.join()
-                            raise
-
+                        for result in pool.imap_unordered(_parse_and_extract_worker, filtered_files):
+                            if result:
+                                all_results.append(result)
+                            progress.update(task, advance=1)
+            
             except KeyboardInterrupt:
-                return self._create_failure_result("Parsing", "用户中断了分析过程")
+                return self._create_failure_result("Extraction", "用户中断了分析过程")
             except Exception as e:
-                return self._create_failure_result("Parsing", f"并行解析失败: {str(e)}")
+                return self._create_failure_result("Extraction", f"并行提取失败: {str(e)}")
 
-            self.console.print(f"-> 成功解析 {len(parsed_files)} / {len(filtered_files)} 个文件。")
-            self.logger.info(f"成功解析 {len(parsed_files)} / {len(filtered_files)} 个文件。")
+            # 3. 合并并行处理的结果
+            self.console.print("\n[bold]3. 合并分析结果...[/bold]")
+            self.logger.info("3. 合并分析结果...")
             
-            # 检查是否有足够的解析结果
-            if not parsed_files:
-                return self._create_failure_result("Parsing", "没有成功解析任何文件")
+            extracted_data = self._merge_parallel_results(all_results)
+            self.console.print(f"-> 合并完成。")
+
+            # 4. 验证提取的数据
+            self.console.print("\n[bold]4. 验证提取的数据...[/bold]")
+            self.logger.info("4. 验证提取的数据...")
+            validation_engine = ValidationEngine(ValidationLevel.STANDARD)
+            validation_result = validation_engine.validate_extracted_data(extracted_data)
             
-            success_rate = len(parsed_files) / len(filtered_files)
-            if success_rate < 0.1:  # 如果成功率低于10%，可能存在严重问题
-                self.logger.warning(f"解析成功率较低: {success_rate:.1%}")
-                self.console.print(f"[yellow]警告: 解析成功率较低 ({success_rate:.1%})，请检查编译配置[/yellow]")
+            if not validation_result.validation_passed:
+                self.console.print(f"[yellow]警告: 数据验证发现 {validation_result.error_count} 个错误和 {validation_result.warning_count} 个警告。[/yellow]")
+                self.logger.warning(f"数据验证发现 {validation_result.error_count} 个错误和 {validation_result.warning_count} 个警告。")
+                for error in validation_result.errors[:10]:
+                    self.logger.warning(f"  - {error.error_type.value}: {error.message}")
+            else:
+                self.console.print("[green]数据验证通过。[/green]")
 
-            # 3. 提取实体
-            self.console.print("\n[bold]3. 提取代码实体 (函数、类等)...[/bold]")
-            self.logger.info("3. 提取代码实体...")
-            extractor = EntityExtractor(config.project_root)
-            extracted_data = extractor.extract_from_files(parsed_files, config)
-            self.console.print(f"-> 提取完成。")
-
-            # 4. 导出为 JSON
-            self.console.print("\n[bold]4. 导出为 JSON...[/bold]")
-            self.logger.info("4. 导出为 JSON...")
+            # 5. 导出为 JSON
+            self.console.print("\n[bold]5. 导出为 JSON...[/bold]")
+            self.logger.info("5. 导出为 JSON...")
             exporter = JsonExporter()
             export_success = exporter.export(extracted_data, config.output_path)
             
@@ -233,23 +276,167 @@ class CppAnalyzer:
             end_time = time.time()
             
             # 准备统计数据
+            successful_files = [res for res in all_results if res.success]
+            parsing_errors = [res.stats.get("error", "Unknown error") for res in all_results if not res.success]
+            
             stats = {
-                "total_files_in_compile_commands": len(files_to_parse),
-                "total_parsed_files": len(filtered_files),
-                "successful_parsed_files": len(parsed_files),
-                "total_functions": extracted_data.get("total_functions", 0),
-                "total_classes": extracted_data.get("total_classes", 0),
+                "total_files_in_compile_commands": len(source_files),
+                "total_files_to_process": len(filtered_files),
+                "successful_processed_files": len(successful_files),
+                "total_functions": len(extracted_data.get("functions", {})),
+                "total_classes": len(extracted_data.get("classes", {})),
+                "total_namespaces": len(extracted_data.get("namespaces", {})),
                 "analysis_time_sec": end_time - start_time,
             }
             
             self.logger.info("C++ 项目分析成功完成。")
-            return AnalysisResult(success=True, output_path=config.output_path, statistics=stats)
+            return AnalysisResult(
+                success=True,
+                output_path=config.output_path,
+                statistics=stats,
+                files_processed=len(filtered_files),
+                files_parsed=len(successful_files),
+                parsing_errors=parsing_errors
+            )
 
         except Exception as e:
             self.logger.error(f"分析过程中发生严重错误: {e}\n{traceback.format_exc()}")
             return self._create_failure_result("Exception", str(e))
 
+    def _scan_all_project_files(self, source_files: List[str], compile_commands: Dict, project_root: str) -> List[str]:
+        """扫描所有源文件和相关的头文件"""
+        all_files = set(source_files)
+        include_dirs = set()
+
+        for cmd_info in compile_commands.values():
+            directory = Path(cmd_info['directory'])
+            for arg in cmd_info['args']:
+                if arg.startswith('-I'):
+                    path_str = arg[2:].strip()
+                    if not path_str: continue
+                    
+                    include_path = Path(path_str)
+                    if not include_path.is_absolute():
+                        include_path = (directory / include_path).resolve()
+                    else:
+                        include_path = include_path.resolve()
+                    
+                    # 确保只添加项目内的头文件目录
+                    try:
+                        include_path.relative_to(project_root)
+                        include_dirs.add(str(include_path))
+                    except ValueError:
+                        continue # 忽略项目外的目录
+
+        for inc_dir in include_dirs:
+            try:
+                for p in Path(inc_dir).rglob('*'):
+                    if p.is_file() and p.suffix in ['.h', '.hpp']:
+                        all_files.add(str(p))
+            except Exception as e:
+                self.logger.warning(f"扫描头文件目录 '{inc_dir}' 时出错: {e}")
+
+        return list(all_files)
+
     def _create_failure_result(self, stage: str, reason: str) -> AnalysisResult:
         """创建一个表示失败的分析结果"""
-        return AnalysisResult(success=False, statistics={"stage": stage, "reason": reason})
+        return AnalysisResult(
+            success=False, 
+            statistics={"stage": stage, "reason": reason},
+            files_processed=0,
+            files_parsed=0,
+            parsing_errors=[f"{stage}: {reason}"]
+        )
     
+    def _merge_parallel_results(self, parallel_results: List[SerializableExtractedData]) -> Dict[str, Any]:
+        """健壮地合并来自多个工作进程的分析结果"""
+        merged_functions: Dict[str, Function] = {}
+        merged_classes: Dict[str, Class] = {}
+        merged_namespaces: Dict[str, Namespace] = {}
+        merged_global_nodes: Dict[str, EntityNode] = {}
+        merged_file_mappings: Dict[str, str] = {}
+
+        for result in parallel_results:
+            if not result.success:
+                continue
+
+            merged_file_mappings.update(result.file_mappings)
+
+            # 合并函数
+            for usr, func_dict in result.functions.items():
+                new_func = Function(**func_dict)
+                if usr not in merged_functions:
+                    merged_functions[usr] = new_func
+                else:
+                    existing_func = merged_functions[usr]
+                    # 定义优先原则
+                    if new_func.is_definition and not existing_func.is_definition:
+                        # 新的是定义，旧的是声明，用新的覆盖旧的，但保留旧的声明位置
+                        new_func.declaration_locations.extend(existing_func.declaration_locations)
+                        merged_functions[usr] = new_func
+                    elif new_func.is_definition and existing_func.is_definition:
+                        # 两个都是定义（例如，头文件中的inline函数），合并信息
+                        existing_func.declaration_locations.extend(new_func.declaration_locations)
+                        existing_func.calls_to.extend(new_func.calls_to)
+                        existing_func.call_details.extend(new_func.call_details)
+                    else: # new_func是声明
+                        existing_func.declaration_locations.extend(new_func.declaration_locations)
+
+            # 合并类
+            for usr, class_dict in result.classes.items():
+                new_class = Class(**class_dict)
+                if usr not in merged_classes:
+                    merged_classes[usr] = new_class
+                else:
+                    existing_class = merged_classes[usr]
+                    if new_class.is_definition and not existing_class.is_definition:
+                        new_class.declaration_locations.extend(existing_class.declaration_locations)
+                        merged_classes[usr] = new_class
+                    else:
+                        existing_class.declaration_locations.extend(new_class.declaration_locations)
+                        existing_class.methods.extend(new_class.methods)
+                        existing_class.parent_classes.extend(new_class.parent_classes)
+
+            # 合并命名空间
+            for usr, ns_dict in result.namespaces.items():
+                new_ns = Namespace(**ns_dict)
+                if usr not in merged_namespaces:
+                    merged_namespaces[usr] = new_ns
+                else:
+                    existing_ns = merged_namespaces[usr]
+                    existing_ns.declaration_locations.extend(new_ns.declaration_locations)
+                    existing_ns.classes.extend(new_ns.classes)
+                    existing_ns.functions.extend(new_ns.functions)
+
+        # 去重和最终化
+        for func in merged_functions.values():
+            func.declaration_locations = list(dict.fromkeys(func.declaration_locations))
+            func.calls_to = list(set(func.calls_to))
+        for cls in merged_classes.values():
+            cls.declaration_locations = list(dict.fromkeys(cls.declaration_locations))
+            cls.methods = list(set(cls.methods))
+            cls.parent_classes = list(set(cls.parent_classes))
+        
+        # 建立反向调用关系
+        for caller_usr, func in merged_functions.items():
+            for callee_usr in func.calls_to:
+                if callee_usr in merged_functions:
+                    callee_func = merged_functions[callee_usr]
+                    if caller_usr not in callee_func.called_by:
+                        callee_func.called_by.append(caller_usr)
+        
+        # 重建全局节点
+        for usr, func in merged_functions.items():
+            merged_global_nodes[usr] = EntityNode(usr, "function", func)
+        for usr, cls in merged_classes.items():
+            merged_global_nodes[usr] = EntityNode(usr, "class", cls)
+        for usr, ns in merged_namespaces.items():
+            merged_global_nodes[usr] = EntityNode(usr, "namespace", ns)
+
+        return {
+            "functions": merged_functions,
+            "classes": merged_classes,
+            "namespaces": merged_namespaces,
+            "global_nodes": {usr_id: node.to_dict() for usr_id, node in merged_global_nodes.items()},
+            "file_mappings": merged_file_mappings
+        }

@@ -6,16 +6,19 @@ symbol resolution, and extraction of language constructs like functions,
 classes, namespaces, and templates.
 """
 
+import os
 import json
 import time
 import subprocess
 import platform
 import shlex
+import traceback
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set
 from dataclasses import dataclass
 
 import clang.cindex as clang
+from clang.cindex import TranslationUnit, Diagnostic
 from rich.console import Console
 from rich.progress import Progress, TaskID
 from .logger import get_logger
@@ -23,7 +26,7 @@ from .logger import get_logger
 @dataclass
 class DiagnosticInfo:
     """诊断信息"""
-    severity: str  # 'error', 'warning', 'info', 'note'
+    severity: str
     message: str
     file_path: str
     line: int
@@ -31,10 +34,72 @@ class DiagnosticInfo:
     category: str
 
 @dataclass
+class SerializableDiagnostic:
+    """可序列化的诊断信息"""
+    spelling: str
+    severity: int
+    location_file: str
+    location_line: int
+    location_column: int
+
+@dataclass 
+class SerializableParseResult:
+    """可序列化的解析结果，用于多进程传输"""
+    file_path: str
+    success: bool
+    diagnostics: List[SerializableDiagnostic]
+    parse_time: float
+    
+    @staticmethod
+    def from_parsed_file(parsed_file) -> 'SerializableParseResult':
+        serializable_diagnostics = []
+        if hasattr(parsed_file, 'translation_unit') and parsed_file.translation_unit:
+            for diag in parsed_file.translation_unit.diagnostics:
+                try:
+                    serializable_diagnostics.append(SerializableDiagnostic(
+                        spelling=diag.spelling,
+                        severity=diag.severity,
+                        location_file=str(diag.location.file) if diag.location.file else "",
+                        location_line=diag.location.line,
+                        location_column=diag.location.column
+                    ))
+                except:
+                    pass
+        
+        return SerializableParseResult(
+            file_path=parsed_file.file_path,
+            success=parsed_file.success,
+            diagnostics=serializable_diagnostics,
+            parse_time=parsed_file.parse_time
+        )
+
+@dataclass
+class SerializableExtractedData:
+    """可序列化的实体提取结果，用于多进程传输"""
+    file_path: str
+    success: bool
+    parse_time: float
+    extraction_time: float
+    functions: Dict[str, Any]
+    classes: Dict[str, Any]
+    namespaces: Dict[str, Any]
+    global_nodes: Dict[str, Any]
+    file_mappings: Dict[str, Any]
+    stats: Dict[str, Any]
+    
+    @staticmethod
+    def empty_result(file_path: str, error_msg: str = "") -> 'SerializableExtractedData':
+        return SerializableExtractedData(
+            file_path=file_path, success=False, parse_time=0.0, extraction_time=0.0,
+            functions={}, classes={}, namespaces={}, global_nodes={}, file_mappings={},
+            stats={"error": error_msg}
+        )
+
+@dataclass
 class ParsedFile:
     """解析后的文件信息"""
     file_path: str
-    translation_unit: Any  # clang.TranslationUnit
+    translation_unit: Any
     success: bool
     diagnostics: List[DiagnosticInfo]
     parse_time: float
@@ -43,666 +108,132 @@ class ClangParser:
     """Clang解析器 - 支持compile_commands.json和动态编译参数"""
     
     def __init__(self, console: Optional[Console] = None, verbose: bool = True):
-        """初始化解析器"""
         self.console = console or Console()
-        self.logger = get_logger()  # 确保logger始终被初始化
-        self._verbose = verbose  # 控制详细输出
+        self.logger = get_logger()
+        self._verbose = verbose
         self.index = None
-        # 修改数据结构：存储每个文件的编译参数和工作目录
-        self.compile_commands: Dict[str, Dict[str, Any]] = {}  # file -> {"args": List[str], "directory": str}
-        self._current_directory = ""  # 用于解析rsp相对路径
-        self._working_directory = ""  # clang执行的工作目录（保留向后兼容）
+        self.compile_commands: Dict[str, Dict[str, Any]] = {}
         self._initialize_index()
-    
-    def _get_ue_constexpr_args(self) -> List[str]:
-        """获取UE5.4 constexpr支持的专用编译参数 - 简化版本"""
-        return [
-            # 核心constexpr支持 - 这些是最关键的参数
-            '-fconstexpr-steps=5000000',      # 大幅增加constexpr计算步数
-            '-fconstexpr-depth=2048',         # 增加constexpr递归深度
-            
-            "-Wno-invalid-constexpr",   # 奇怪了，，关闭constexpr的编译错误先...add by fg
-        ]
-    
-    def set_working_directory(self, working_dir: str):
-        """设置clang执行的工作目录"""
-        self._working_directory = working_dir
-        logger = get_logger()
-        logger.info(f"设置clang工作目录: {working_dir}")
-        if self.console:
-            self.console.print(f"✓ 设置clang工作目录: {working_dir}", style="green")
-    
+
     def _initialize_index(self):
         """初始化libclang索引"""
-        logger = get_logger()
         try:
             self.index = clang.Index.create()
-            if self.console:
-                self.console.print("✓ libclang索引初始化成功", style="green")
-            logger.info("libclang索引初始化成功")
+            self.logger.info("libclang索引初始化成功")
         except Exception as e:
-            if self.console:
-                self.console.print(f"✗ libclang索引初始化失败: {e}", style="red")
-            logger.error(f"libclang索引初始化失败: {e}")
+            self.logger.error(f"libclang索引初始化失败: {e}")
             raise
-    
-    def load_compile_commands(self, compile_commands_path: str) -> bool:
+
+    def load_compile_commands(self, compile_commands_path: str):
         """加载compile_commands.json文件"""
-        try:
-            from .logger import get_logger
-            logger = get_logger()
-            
-            logger.info(f"加载 compile_commands.json: {compile_commands_path}")
-            
-            with open(compile_commands_path, 'r', encoding='utf-8') as f:
-                commands_data = json.load(f)
-            
-            self.compile_commands = self._parse_compile_commands(commands_data)
-            
-            logger.info(f"已加载 compile_commands.json: {len(self.compile_commands)} 文件")
-            if len(self.compile_commands) > 0:
-                sample_file = list(self.compile_commands.keys())[0]
-                sample_args_data = self.compile_commands[sample_file]
-                sample_args = sample_args_data["args"]
-                logger.debug(f"示例编译参数 ({len(sample_args)} 个): {' '.join(sample_args[:5])}...")
-            
-            if self.console:
-                self.console.print(f"✓ 已加载 compile_commands.json: {len(self.compile_commands)} 文件", style="green")
-            
-            return True
-            
-        except Exception as e:
-            if self.console:
-                self.console.print(f"✗ 加载 compile_commands.json 失败: {e}", style="red")
-            return False
-    
-    def _parse_command_string(self, command: str) -> List[str]:
-        """解析编译命令字符串，包括UE的@rsp文件支持"""
-        try:
-            # 使用shlex.split处理带引号的参数
-            if platform.system() == 'Windows':
-                args = shlex.split(command, posix=False)
-            else:
-                args = shlex.split(command)
-            
-            # 处理UE的@response_file.rsp格式
-            processed_args = []
-            for arg in args:
-                if arg.startswith('@'):
-                    # 解析.rsp响应文件
-                    arg = arg[1:].strip('"\'')
-                    rsp_args = self._parse_rsp_file(arg)
-                    processed_args.extend(rsp_args)
-                else:
-                    processed_args.append(arg)
-            
-            return processed_args
-            
-        except ValueError:
-            # 如果shlex.split失败，使用简单的空格分割
-            return command.split()
-    
-    def _parse_rsp_file(self, rsp_path: str) -> List[str]:
-        """解析UE的.rsp响应文件"""
-        try:
-            # 处理相对路径 - UE的rsp路径是相对于directory字段的
-            if not Path(rsp_path).is_absolute() and self._current_directory:
-                rsp_path = str(Path(self._current_directory) / rsp_path)
-            
-            # 尝试读取rsp文件
-            rsp_file = Path(rsp_path)
-            if rsp_file.exists():
-                content = rsp_file.read_text(encoding='utf-8', errors='ignore')
-                
-                # rsp文件通常每行一个参数，或者用空格分隔
-                args = []
-                for line in content.splitlines():
-                    line = line.strip()
-                    if line and not line.startswith('#'):  # 跳过空行和注释
-                        # 使用shlex分割每行，处理引号
-                        try:
-                            line_args = shlex.split(line)
-                            args.extend(line_args)
-                        except ValueError:
-                            # 如果解析失败，按空格分割
-                            args.extend(line.split())
-                
-                from .logger import get_logger
-                logger = get_logger()
-                logger.rsp_file_parsed(rsp_path, len(args))
-                
-                # 减少RSP文件解析的输出干扰
-                if self.console and hasattr(self, '_verbose') and self._verbose:
-                    self.console.print(f"✓ 解析RSP文件: {rsp_path} ({len(args)} 参数)", style="green")
-                
-                return args
-            else:
-                from .logger import get_logger
-                logger = get_logger()
-                logger.warning(f"RSP文件未找到: {rsp_path}")
-                return []
-                
-        except Exception as e:
-            from .logger import get_logger
-            logger = get_logger()
-            logger.error(f"解析RSP文件失败 {rsp_path}: {e}")
-            return []
-    
-    def _expand_response_files_recursive(self, args: List[str], visited_files: Optional[Set[str]] = None) -> List[str]:
-        """递归展开所有@响应文件，防止循环引用"""
-        if visited_files is None:
-            visited_files = set()
-        
-        expanded_args = []
-        for arg in args:
-            if arg.startswith('@'):
-                # 移除引号和@符号
-                rsp_path = arg[1:].strip('"\'')
-                
-                # 获取绝对路径以便比较，防止循环引用
-                if Path(rsp_path).is_absolute():
-                    abs_path = str(Path(rsp_path).resolve())
-                else:
-                    if self._current_directory:
-                        abs_path = str(Path(self._current_directory, rsp_path).resolve())
-                    else:
-                        abs_path = str(Path(rsp_path).resolve())
-                
-                if abs_path in visited_files:
-                    # 检测到循环引用，记录警告并跳过
-                    from .logger import get_logger
-                    logger = get_logger()
-                    logger.warning(f"检测到循环引用的响应文件: {abs_path}")
-                    if self.console:
-                        self.console.print(f"⚠️  跳过循环引用的RSP文件: {abs_path}", style="yellow")
-                    continue
-                
-                # 标记当前文件为正在访问
-                visited_files.add(abs_path)
-                try:
-                    # 解析响应文件
-                    rsp_args = self._parse_rsp_file(rsp_path)
-                    # 递归处理从响应文件中读取的参数
-                    nested_expanded = self._expand_response_files_recursive(rsp_args, visited_files)
-                    expanded_args.extend(nested_expanded)
-                finally:
-                    # 移除标记以允许在其他分支中使用相同文件
-                    visited_files.discard(abs_path)
-            else:
-                expanded_args.append(arg)
-        
-        return expanded_args
-    
+        self.logger.info(f"加载 compile_commands.json: {compile_commands_path}")
+        with open(compile_commands_path, 'r', encoding='utf-8') as f:
+            commands_data = json.load(f)
+        self.compile_commands = self._parse_compile_commands(commands_data)
+        self.logger.info(f"已加载 compile_commands.json: {len(self.compile_commands)} 文件")
+
     def _parse_compile_commands(self, commands_data: List[Dict]) -> Dict[str, Dict[str, Any]]:
-        """解析compile_commands.json数据，支持UE的@rsp文件"""
+        """解析compile_commands.json数据"""
         file_commands = {}
-        logger = get_logger()
-        
         for entry in commands_data:
             file_path = entry.get('file', '')
-            command = entry.get('command', '')
-            arguments = entry.get('arguments', [])
+            if not file_path: continue
+            
             directory = entry.get('directory', '')
+            command = entry.get('command', '')
             
-            if not file_path:
-                continue
-            
-            # 跳过所有 *.gen.cpp 文件
-            if file_path.endswith('.gen.cpp'):
-                logger.info(f"跳过生成的文件: {file_path}")
-                continue
-            
-            # 临时保存当前目录，用于解析rsp相对路径
-            self._current_directory = directory
-            
-            # 解析编译命令
             if command:
-                args = self._parse_command_string(command)
-            elif arguments:
-                args = arguments[1:]  # 去掉编译器路径
-            else:
-                continue
-            
-            # 处理和清理参数
-            processed_args = self._process_compile_args(args)
-            
-            normalized_file_path = self._normalize_path(file_path)
-            file_commands[normalized_file_path] = {"args": processed_args, "directory": directory}
-        
+                args = self._process_compile_args(shlex.split(command, posix=False) if platform.system() == 'Windows' else shlex.split(command))
+                file_commands[self._normalize_path(file_path)] = {"args": args, "directory": directory}
         return file_commands
-    
-    def _convert_msvc_to_clang(self, arg: str) -> Optional[str]:
-        """将MSVC参数转换为clang参数
-        
-        基于官方文档和实际测试的MSVC到clang参数映射表
-        """
-        
-        # 标准转换表 - 基于官方文档验证
-        conversions = {
-            # C++ 标准
-            '/std:c++20': '-std=c++20',
-            '/std:c++17': '-std=c++17', 
-            '/std:c++14': '-std=c++14',
-            '/std:c++11': '-std=c++11',
-            
-            # 警告级别
-            '/W0': '-w',
-            '/W1': '-Wall',
-            '/W2': '-Wall',
-            '/W3': '-Wall',
-            '/W4': '-Wall -Wextra',
-            '/Wall': '-Wall -Wextra -Wpedantic',
-            '/WX': '-Werror',
-            
-            # 优化
-            '/O1': '-Os',      # 优化大小
-            '/O2': '-O2',      # 优化速度
-            '/Od': '-O0',      # 禁用优化
-            '/Ox': '-O3',      # 最大优化
-            '/Os': '-Os',      # 优化大小
-            '/Ot': '-O2',      # 优化速度
-            
-            # 异常处理
-            '/EHsc': '-fexceptions',
-            '/EHs': '-fexceptions',
-            '/EHc': '-fexceptions',
-            '/EHa': '-fexceptions',  # 异步异常
-            
-            # RTTI
-            '/GR': '',           # 启用RTTI（clang默认启用）
-            '/GR-': '-fno-rtti', # 禁用RTTI
-            
-            # 调试信息
-            '/Zi': '-g',
-            '/Z7': '-g',
-            '/ZI': '-g',
-            
-            # 代码生成
-            '/TC': '-x c',       # 强制C模式
-            '/TP': '-x c++',     # 强制C++模式
-            '/Gd': '',           # __cdecl调用约定（默认）
-            '/Gr': '',           # __fastcall调用约定
-            '/Gz': '',           # __stdcall调用约定
-            
-            # 运行时库（clang-cl会自动处理）
-            '/MT': '',           # 静态链接
-            '/MTd': '',          # 静态链接调试版
-            '/MD': '',           # 动态链接
-            '/MDd': '',          # 动态链接调试版
-            
-            # 编译器行为
-            '/permissive-': '-pedantic',
-            '/nologo': '',       # 不显示版权信息
-            '/bigobj': '',       # 大对象支持（clang不需要）
-            
-            # 特殊标志
-            '/volatile:iso': '',      # ISO volatile语义
-            '/volatile:ms': '',       # MS volatile语义
-            '/Zc:wchar_t': '',        # wchar_t是内置类型
-            '/Zc:wchar_t-': '',       # wchar_t不是内置类型
-            '/Zc:forScope': '',       # for循环作用域
-            '/Zc:inline': '',         # 内联函数处理
-        }
-        
-        # 直接转换
-        if arg in conversions:
-            result = conversions[arg]
-            return result if result else None
-        
-        # 模式匹配转换
-        
-        # 禁用特定警告 /wd4996 -> -Wno-deprecated-declarations
-        if arg.startswith('/wd'):
-            warning_id = arg[3:]
-            warning_mappings = {
-                '4996': '-Wno-deprecated-declarations',
-                '4100': '-Wno-unused-parameter',
-                '4101': '-Wno-unused-variable',
-                '4189': '-Wno-unused-variable',
-                '4244': '-Wno-conversion',
-                '4267': '-Wno-conversion',
-                '4305': '-Wno-literal-conversion',
-                '4309': '-Wno-constant-conversion',
-                '4456': '-Wno-shadow',
-                '4457': '-Wno-shadow',
-                '4458': '-Wno-shadow',
-                '4459': '-Wno-shadow',
-            }
-            return warning_mappings.get(warning_id)
-        
-        # 预编译头参数（跳过，libclang不需要）
-        if arg.startswith(('/Yc', '/Yu', '/Fp')):
-            return None
-            
-        # 编译器一致性开关（大多数跳过）
-        if arg.startswith('/Zc:'):
-            # 少数几个重要的保留 - 增加constexpr相关参数
-            important_zc = {
-                '/Zc:__cplusplus': '',  # 正确的__cplusplus值
-                '/Zc:sizedDealloc': '',  # C++14 sized deallocation
-                '/Zc:constexpr': '',     # MSVC constexpr支持（UE核心参数已涵盖）
-                '/Zc:strictStrings': '', # 严格字符串字面量处理
-                '/Zc:implicitNoexcept': '', # 隐式noexcept
-                '/Zc:lambda': '',       # C++11 lambda表达式
-                '/Zc:auto': '',         # C++11 auto类型推导
-                '/Zc:inline': '',       # 内联函数处理
-                '/Zc:wchar_t': '',      # wchar_t类型处理
-            }
-            return important_zc.get(arg)
-            
-        # 链接器相关参数（直接跳过）
-        if arg.startswith(('/link', '/ENTRY:', '/SUBSYSTEM:', '/MACHINE:', '/LIBPATH:')):
-            return None
-            
-        # C++20模块相关参数（clang可能不完全支持）
-        if arg.startswith(('/module:', '/interface', '/internalPartition')):
-            return None
-            
-        # 其他优化参数
-        if arg.startswith('/O') and len(arg) > 2:
-            other_opts = {
-                '/Ob0': '',     # 禁用内联
-                '/Ob1': '',     # 只内联标记为inline的函数
-                '/Ob2': '',     # 内联合适的函数
-                '/Oi': '',      # 生成内置函数
-                '/Oy': '',      # 省略帧指针
-                '/Oy-': '-fno-omit-frame-pointer',
-            }
-            return other_opts.get(arg)
-            
-        # 控制流保护等安全特性
-        if arg.startswith('/guard:'):
-            return None  # clang有自己的控制流保护实现
-            
-        # 其他MSVC特定参数，跳过
-        msvc_specific_prefixes = [
-            '/await', '/experimental:', '/kernel', '/homeparams',
-            '/Qfast_transcendentals', '/QIfist', '/Qimprecise_fwaits',
-            '/Qpar', '/Qsafe_fp_loads', '/Qvec-report'
-        ]
-        
-        for prefix in msvc_specific_prefixes:
-            if arg.startswith(prefix):
-                return None
-        
-        # 未知参数，返回None表示跳过
-        return None
 
     def _process_compile_args(self, raw_args: List[str]) -> List[str]:
         """处理和清理编译参数"""
-        # 使用递归方法展开所有@rsp文件（包括嵌套的）
-        expanded_args = self._expand_response_files_recursive(raw_args)
-        
         processed_args = []
         skip_next = False
-        seen_includes = set()
-        
-        # 添加UE5.4专用的constexpr支持参数
-        processed_args.extend(self._get_ue_constexpr_args())
-        
-        # 特殊处理：为UE constexpr问题添加额外的数学函数支持
-        processed_args.extend([
-            '-D__builtin_ctz=__builtin_ctz',  # 确保内置函数可用
-            '-fno-builtin',                   # 禁用某些内置函数优化
-            '-fno-strict-aliasing',           # 放宽别名规则
-        ])
-        
-        for i, arg in enumerate(expanded_args):
+        for i, arg in enumerate(raw_args):
             if skip_next:
                 skip_next = False
                 continue
             
-            # 跳过编译器路径（处理带引号的情况）
             arg_clean = arg.strip('"\'')
-            if arg_clean.endswith(('clang-cl.exe', 'clang.exe', 'gcc', 'g++')):
+            if arg_clean.endswith(('.exe', '.c', '.cpp', '.cc', '.cxx', '.o', '.obj')):
                 continue
-            
-            # 跳过输入/输出文件
-            if arg in ['-o', '-c', '/c'] and i + 1 < len(expanded_args):
+
+            if arg in ['-o', '-c', '/c'] and i + 1 < len(raw_args):
                 skip_next = True
                 continue
-            
-            # 跳过源文件和目标文件
-            if arg.endswith(('.cpp', '.cc', '.cxx', '.c', '.C', '.obj', '.o')):
-                continue
-            
-            # 跳过链接器相关参数
-            if arg.startswith(('/link', '-link', '/SUBSYSTEM', '/MACHINE')):
-                continue
-            
-            # 处理include路径去重
-            if arg in ['-I', '/I'] and i + 1 < len(expanded_args):
-                include_path = expanded_args[i + 1]
-                if include_path not in seen_includes:
-                    processed_args.append('-I' + include_path)
-                    seen_includes.add(include_path)
-                skip_next = True
-            elif arg.startswith(('-I', '/I')) and len(arg) > 2:
-                include_path = arg[2:]
-                if include_path not in seen_includes:
-                    processed_args.append('-I' + include_path)
-                    seen_includes.add(include_path)
-            # 处理宏定义 - 改进的过滤逻辑
+
+            if arg.startswith(('-I', '/I')):
+                if len(arg) > 2:
+                    processed_args.append('-I' + arg[2:])
+                elif i + 1 < len(raw_args):
+                    processed_args.append('-I' + raw_args[i+1])
+                    skip_next = True
             elif arg.startswith(('-D', '/D')):
-                macro_def = arg[2:]
-                processed_macro = self._process_macro_definition(macro_def)
-                if processed_macro:
-                    processed_args.append('-D' + processed_macro)
-            # 处理独立的宏定义值（当/D后面跟着单独的参数时）
-            elif i > 0 and expanded_args[i-1] in ['-D', '/D']:
-                processed_macro = self._process_macro_definition(arg)
-                if processed_macro:
-                    processed_args.append('-D' + processed_macro)
-                # 注意：这种情况下不需要skip_next，因为当前参数已经被处理了
-            # 处理MSVC外部include路径 /external:I -> -isystem (更准确的映射)
-            elif arg in ['/external:I'] and i + 1 < len(expanded_args):
-                include_path = expanded_args[i + 1]
-                if include_path not in seen_includes:
-                    processed_args.extend(['-isystem', include_path])
-                    seen_includes.add(include_path)
-                skip_next = True
-            elif arg.startswith('/external:I') and len(arg) > 11:
-                include_path = arg[11:]
-                if include_path not in seen_includes:
-                    processed_args.extend(['-isystem', include_path])
-                    seen_includes.add(include_path)
-            # 处理MSVC系统include路径 /imsvc -> -isystem (更准确的映射)
-            elif arg in ['/imsvc'] and i + 1 < len(expanded_args):
-                include_path = expanded_args[i + 1]
-                if include_path not in seen_includes:
-                    processed_args.extend(['-isystem', include_path])
-                    seen_includes.add(include_path)
-                skip_next = True
-            elif arg.startswith('/imsvc') and len(arg) > 6:
-                # 处理 /imsvc"路径" 或 /imsvc路径 格式
-                include_path = arg[6:].strip('"\'')
-                if include_path and include_path not in seen_includes:
-                    processed_args.extend(['-isystem', include_path])
-                    seen_includes.add(include_path)
-            # 处理MSVC强制包含文件 /FI
-            elif arg in ['/FI'] and i + 1 < len(expanded_args):
-                force_include = expanded_args[i + 1]
-                processed_args.extend(['-include', force_include])
-                skip_next = True
-            elif arg.startswith('/FI') and len(arg) > 3:
-                force_include = arg[3:]
-                processed_args.append('-include' + force_include)
-            # 标准化MSVC参数为clang参数
+                if len(arg) > 2:
+                    processed_args.append('-D' + arg[2:])
+                elif i + 1 < len(raw_args):
+                    processed_args.append('-D' + raw_args[i+1])
+                    skip_next = True
             elif arg.startswith('/'):
                 converted = self._convert_msvc_to_clang(arg)
                 if converted:
-                    # 处理可能包含多个参数的转换结果
-                    if ' ' in converted:
-                        processed_args.extend(converted.split())
-                    else:
-                        processed_args.append(converted)
-                # 如果converted为None，则跳过该参数
-                continue
+                    processed_args.append(converted)
             else:
                 processed_args.append(arg)
-        
-        # 移除-Wshadow参数
-        final_args = [arg for arg in processed_args if arg != '-Wshadow']
-        
-        return final_args
-    
-    def _process_macro_definition(self, macro_def: str) -> Optional[str]:
-        """处理宏定义，修复常见的语法问题"""
-        # 跳过一些可能有问题的宏定义，但保留常用的Windows宏
-        if any(skip_pattern in macro_def for skip_pattern in ['WIN32_LEAN_AND_MEAN', 'NOMINMAX']):
-            return macro_def
-        
-        # 修正无效的宏定义语法 UCLASS() -> UCLASS=
-        if '()' in macro_def and '=' not in macro_def:
-            macro_name = macro_def.replace('()', '')
-            # UE特定宏的处理
-            if macro_name in ['UCLASS', 'USTRUCT', 'UENUM', 'UFUNCTION', 'UPROPERTY', 
-                             'GENERATED_BODY', 'GENERATED_UCLASS_BODY', 'GENERATED_USTRUCT_BODY']:
-                return f'{macro_name}='
-            else:
-                return f'{macro_name}='
-        
-        # 处理一些可能导致解析问题的宏
-        if macro_def in ['UNICODE', '_UNICODE']:
-            return macro_def
-        
-        # 跳过一些可能有问题的MSVC特定宏
-        problematic_macros = ['_MSC_VER', '_WIN32', '_WIN64']
-        if any(problematic in macro_def for problematic in problematic_macros):
-            # 这些宏通常会自动定义，跳过可能重复的定义
-            return None
-        
-        return macro_def
-    
-    def _get_file_compile_args(self, file_path: str) -> List[str]:
-        """获取文件特定的编译参数"""
-        # 规范化输入路径
-        normalized_input = self._normalize_path(file_path)
-        return self.compile_commands[normalized_input]["args"]
-    
-    def _get_file_directory(self, file_path: str) -> str:
-        """获取文件的编译目录"""
-        normalized_input = self._normalize_path(file_path)
-        return self.compile_commands[normalized_input]["directory"]
-    
+        return processed_args
+
+    def _convert_msvc_to_clang(self, arg: str) -> Optional[str]:
+        """将MSVC参数转换为clang参数"""
+        if arg == '/EHsc': return '-fexceptions'
+        if arg == '/GR-': return '-fno-rtti'
+        if arg.startswith('/W'): return '-Wall'
+        return None
+
     def _normalize_path(self, path: str) -> str:
-        """规范化路径 - 处理大小写、软链接等"""
-        try:
-            # 解析软链接并转换为绝对路径
-            resolved = Path(path).resolve()
-            # 在Windows下统一为小写，在Unix系统下保持原样
-            import platform
-            if platform.system().lower() == 'windows':
-                return resolved.as_posix().lower()
-            else:
-                return resolved.as_posix()
-        except Exception:
-            # 如果路径规范化失败，返回原路径
-            return str(path)
-    
+        """规范化路径"""
+        return str(Path(path).resolve()).replace('\\', '/')
+
     def parse_file(self, file_path: str) -> Optional[ParsedFile]:
-        """
-        解析单个文件。
-        
-        Args:
-            file_path (str): 要解析的文件路径。
-        
-        Returns:
-            ParsedFile: 包含解析结果的数据对象。
-        """
+        """解析单个文件"""
         self.logger.debug(f"开始解析文件: {file_path}")
-        
-        # 确保 compile_commands 已加载
-        if not self.compile_commands:
-            self.logger.error("尝试在未加载 compile_commands 的情况下解析文件")
-            raise RuntimeError("Compile commands not loaded.")
-            
-        # 从 compile_commands 获取编译参数
-        args = self.compile_commands.get(file_path, [])
-        if not args:
+
+        compile_info = self.compile_commands.get(self._normalize_path(file_path))
+        if not compile_info:
             self.logger.warning(f"在 compile_commands.json 中未找到文件 '{file_path}' 的编译命令，跳过。")
-            return None # 修改：找不到编译命令则返回 None
+            return None
+
+        args = compile_info["args"]
+        directory = compile_info["directory"]
+
+        if not Path(file_path).exists():
+            self.logger.error(f"文件路径不存在: {file_path}")
+            return None
+        if not Path(directory).exists():
+            self.logger.error(f"工作目录不存在: {directory}")
+            return None
 
         try:
-            # 创建 Clang Index
-            if self.index is None:
-                self.index = Index.create()
+            start_time = time.time()
+            original_cwd = os.getcwd()
+            os.chdir(directory)
+            
+            tu = self.index.parse(file_path, args=args, options=clang.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD)
+            
+            os.chdir(original_cwd)
+            parse_time = time.time() - start_time
 
-            # 解析翻译单元
-            # TU.PARSE_DETAILED_PROCESSING_RECORD: 提供了更详细的AST信息
-            # TU.PARSE_SKIP_FUNCTION_BODIES: 对于大型项目，可以加快速度，但会丢失函数内部信息
-            tu = self.index.parse(file_path, args=args, options=TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD)
-
-            # 检查解析错误
             if not tu:
-                self.logger.error(f"Clang 未能为文件 '{file_path}' 创建翻译单元 (Translation Unit)。")
-                return None # 修改：解析失败返回 None
-
+                self.logger.error(f"Clang 未能为文件 '{file_path}' 创建翻译单元。")
+                return None
+            
             errors = [d for d in tu.diagnostics if d.severity >= Diagnostic.Error]
             if errors:
-                error_messages = [f"  - {d.spelling} at {d.location}" for d in errors]
-                self.logger.warning(f"文件 '{file_path}' 解析时出现 {len(errors)} 个错误:\n" + "\n".join(error_messages))
-                # 即使有错误，我们仍然尝试继续提取信息
-            
-            # 返回成功的解析结果
-            return ParsedFile(
-                file_path=file_path,
-                success=True,
-                translation_unit=tu
-            )
+                self.logger.warning(f"文件 '{file_path}' 解析时出现 {len(errors)} 个错误。")
+
+            return ParsedFile(file_path=file_path, success=True, translation_unit=tu, diagnostics=[], parse_time=parse_time)
 
         except Exception as e:
             self.logger.error(f"解析文件 '{file_path}' 时发生未知异常: {e}\n{traceback.format_exc()}")
-            return None # 修改：发生异常返回 None
-    
-    def parse_files(self, file_paths: List[str], progress: Optional[Progress] = None, task_id=None) -> List[ParsedFile]:
-        """
-        解析文件列表 (保留此方法但标记为弃用，或用于非并行场景)
-        
-        Args:
-            file_paths (List[str]): 要解析的文件路径列表。
-            progress (Optional[Progress]): rich 进度条对象。
-            task_id: rich 进度条任务ID。
-        
-        Returns:
-            List[ParsedFile]: 解析结果列表。
-        """
-        self.logger.warning("`parse_files` is deprecated and will be removed. Use the parallel analyzer.")
-        results = []
-        for file_path in file_paths:
-            result = self.parse_file(file_path)
-            results.append(result)
-            if progress and task_id is not None:
-                progress.update(task_id, advance=1)
-        return results
-
-    def _extract_arguments(self, command: str) -> List[str]:
-        """从编译命令中提取参数"""
-        try:
-            # 使用shlex.split处理带引号的参数
-            if platform.system() == 'Windows':
-                args = shlex.split(command, posix=False)
-            else:
-                args = shlex.split(command)
-            
-            # 处理UE的@response_file.rsp格式
-            processed_args = []
-            for arg in args:
-                if arg.startswith('@'):
-                    # 解析.rsp响应文件
-                    arg = arg[1:].strip('"\'')
-                    rsp_args = self._parse_rsp_file(arg)
-                    processed_args.extend(rsp_args)
-                else:
-                    processed_args.append(arg)
-            
-            return processed_args
-            
-        except ValueError:
-            # 如果shlex.split失败，使用简单的空格分割
-            return command.split()
-    
-    def cleanup(self):
-        """清理资源"""
-        # libclang会自动管理资源
-        pass 
+            return None

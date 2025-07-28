@@ -12,7 +12,7 @@ from typing import Optional
 class CppAnalyzerLogger:
     """C++分析器专用日志管理器"""
     
-    def __init__(self, log_file: Optional[str] = None, console_level: str = "INFO", file_level: str = "INFO"):
+    def __init__(self, log_file: Optional[str] = None, console_level: str = "INFO", file_level: str = "DEBUG"):
         """
         初始化日志管理器
         
