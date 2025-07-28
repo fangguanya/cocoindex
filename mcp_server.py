@@ -945,7 +945,7 @@ class CocoIndexMcpServer:
         async def search_code(
             query: str,
             search_type: str = "advanced",
-            flow_name: Optional[str] = "",
+            flow_name: str = "",
             top_k: int = 10,
         ) -> List[dict]:
             """根据自然语言查询在代码库中进行高级混合搜索"""
