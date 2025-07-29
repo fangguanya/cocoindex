@@ -1010,11 +1010,26 @@ class EnhancedValidator:
             functions_match = len(current_functions) == len(base_functions)
             classes_match = len(current_classes) == len(base_classes)
             
-            # 检查内容一致性
+            # 检查内容一致性（忽略顺序）
             if functions_match:
-                functions_match = all(current_functions.get(usr) == data for usr, data in base_functions.items())
+                # 比较键是否一致
+                base_func_keys = set(base_functions.keys())
+                curr_func_keys = set(current_functions.keys())
+                if base_func_keys != curr_func_keys:
+                    functions_match = False
+                else:
+                    # 逐个比较值
+                    functions_match = all(current_functions[usr] == data for usr, data in base_functions.items())
+
             if classes_match:
-                classes_match = all(current_classes.get(usr) == data for usr, data in base_classes.items())
+                # 比较键是否一致
+                base_cls_keys = set(base_classes.keys())
+                curr_cls_keys = set(current_classes.keys())
+                if base_cls_keys != curr_cls_keys:
+                    classes_match = False
+                else:
+                    # 逐个比较值
+                    classes_match = all(current_classes[usr] == data for usr, data in base_classes.items())
 
             overall_match = functions_match and classes_match
             
