@@ -316,7 +316,16 @@ class EntityExtractor:
     def _process_function_cursor(self, cursor: clang.Cursor):
         """处理函数游标 - 线程安全和性能优化版"""
         usr = cursor.get_usr()
-        if not usr or usr in self._processed_usrs: 
+        if not usr:
+            return
+        
+        # 确保主模板被处理
+        if cursor.is_definition() and cursor.kind == clang.CursorKind.CLASS_DECL and hasattr(cursor.type, 'get_specialized_template'):
+            primary_template_cursor = cursor.type.get_specialized_template()
+            if primary_template_cursor:
+                self._process_class_cursor(primary_template_cursor.get_declaration())
+
+        if usr in self._processed_usrs:
             return
             
         file_path = cursor.location.file.name
@@ -341,7 +350,16 @@ class EntityExtractor:
     def _process_class_cursor(self, cursor: clang.Cursor):
         """处理类游标 - 线程安全和性能优化版"""
         usr = cursor.get_usr()
-        if not usr or usr in self._processed_usrs: 
+        if not usr:
+            return
+        
+        # 确保主模板被处理
+        if cursor.is_definition() and cursor.kind == clang.CursorKind.CLASS_DECL and hasattr(cursor.type, 'get_specialized_template'):
+            primary_template_cursor = cursor.type.get_specialized_template()
+            if primary_template_cursor:
+                self._process_class_cursor(primary_template_cursor.get_declaration())
+
+        if usr in self._processed_usrs:
             return
             
         file_path = cursor.location.file.name
