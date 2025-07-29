@@ -889,64 +889,83 @@ class EnhancedValidator:
         return passed
     
     def validate_template_inheritance(self, functions_map: Dict, classes_map: Dict) -> bool:
-        """验证10: 模板继承验证"""
+        """验证10: 模板继承验证 (修正版)"""
         self.console.print("\n[bold cyan]🔟 验证模板继承...[/bold cyan]")
         
         passed = True
         test_cases = []
         
-        # 检查模板基类
-        base_template_found = False
-        derived_template_found = False
+        # 步骤 1: 精确查找主模板定义
+        base_template_def = None
+        derived_template_def = None
         
         for usr, class_data in classes_map.items():
             class_name = class_data.get('name', 'unknown')
             cpp_extensions = class_data.get('cpp_oop_extensions', {})
-            base_classes = cpp_extensions.get('base_classes', [])
+            # 主模板定义有template_parameters，但没有template_specialization_args
+            is_primary_template = (
+                cpp_extensions.get('template_parameters') and 
+                not cpp_extensions.get('template_specialization_args')
+            )
             
-            if 'BaseTemplate' in class_name:
-                base_template_found = True
-                test_cases.append({
-                    'test': 'template_base_class',
-                    'entity': class_name,
-                    'usr': usr,
-                    'status': 'PASS',
-                    'message': f'找到模板基类: {class_name}'
-                })
-            
-            if 'DerivedTemplate' in class_name:
-                derived_template_found = True
-                inheritance_list = cpp_extensions.get('inheritance_list', [])
-                # 检查是否继承自BaseTemplate
-                inherits_base = any('BaseTemplate' in item.get('base_class_usr_id', '') for item in inheritance_list)
-                
-                test_cases.append({
-                    'test': 'template_derived_class',
-                    'entity': class_name,
-                    'usr': usr,
-                    'status': 'PASS' if inherits_base else 'FAIL',
-                    'message': f'找到模板派生类: {class_name}, 继承检测: {inherits_base}'
-                })
-                if not inherits_base:
-                    passed = False
-        
-        if not base_template_found:
+            if is_primary_template:
+                if class_name == 'BaseTemplate':
+                    base_template_def = class_data
+                elif class_name == 'DerivedTemplate':
+                    derived_template_def = class_data
+
+        # 步骤 2: 验证BaseTemplate
+        if base_template_def:
             test_cases.append({
-                'test': 'template_base_class',
+                'test': 'template_base_class_definition',
+                'entity': 'BaseTemplate',
+                'usr': base_template_def.get('usr_id', 'N/A'),
+                'status': 'PASS',
+                'message': '找到模板基类的主定义'
+            })
+        else:
+            test_cases.append({
+                'test': 'template_base_class_definition',
                 'entity': 'BaseTemplate',
                 'usr': 'N/A',
                 'status': 'FAIL',
-                'message': '未找到模板基类BaseTemplate'
+                'message': '未找到模板基类BaseTemplate的主定义'
             })
             passed = False
-        
-        if not derived_template_found:
+
+        # 步骤 3: 验证DerivedTemplate及其继承关系
+        if derived_template_def:
+            # 检查继承信息
+            parent_classes = derived_template_def.get('parent_classes', [])
+            inheritance_list = derived_template_def.get('cpp_oop_extensions', {}).get('inheritance_list', [])
+            
+            # 检查是否继承自BaseTemplate
+            # 我们需要BaseTemplate的USR来进行精确匹配
+            base_usr_to_check = base_template_def.get('usr_id') if base_template_def else ''
+            
+            inherits_base = False
+            if base_usr_to_check:
+                inherits_base = (
+                    any(base_usr_to_check == parent_usr for parent_usr in parent_classes) or
+                    any(base_usr_to_check == item.get('base_class_usr_id', '') for item in inheritance_list)
+                )
+
             test_cases.append({
-                'test': 'template_derived_class',
+                'test': 'template_derived_class_definition',
+                'entity': 'DerivedTemplate',
+                'usr': derived_template_def.get('usr_id', 'N/A'),
+                'status': 'PASS' if inherits_base else 'FAIL',
+                'message': f'找到模板派生类的主定义, 继承检测: {inherits_base}'
+            })
+            if not inherits_base:
+                passed = False
+        else:
+            test_cases.append({
+                'test': 'template_derived_class_definition',
                 'entity': 'DerivedTemplate',
                 'usr': 'N/A',
                 'status': 'FAIL',
-                'message': '未找到模板派生类DerivedTemplate'
+                'message': '未找到模板派生类DerivedTemplate的主定义'
             })
             passed = False
         
