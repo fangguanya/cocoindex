@@ -13,6 +13,24 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from cpp_clang.analyzer.cpp_analyzer import CppAnalyzer, AnalysisConfig
 
+def make_comparable(obj):
+    """
+    递归地处理一个对象，使其具有可比较性，主要是通过对列表进行排序。
+    这对于比较由并行进程生成的、顺序不确定的数据结构至关重要。
+    """
+    if isinstance(obj, dict):
+        # 对字典的键进行排序，并递归处理其值
+        return {k: make_comparable(v) for k, v in sorted(obj.items())}
+    if isinstance(obj, list):
+        # 对列表中的元素进行递归处理，然后对它们进行排序。
+        # 如果列表中的元素是字典等不可直接排序的类型，
+        # 我们通过将其转换为规范的JSON字符串作为排序的key。
+        try:
+            return sorted([make_comparable(x) for x in obj])
+        except TypeError:
+            return sorted([make_comparable(x) for x in obj], key=lambda i: json.dumps(i, sort_keys=True))
+    return obj
+
 class EnhancedValidator:
     """增强验证器，用于验证C++代码分析器的各种功能，包括高级模板特性"""
     
@@ -997,39 +1015,46 @@ class EnhancedValidator:
             self.validation_results['multicore_stability_validation'] = test_cases
             return passed
         
-        # 比较结果一致性
+        # 将第一个结果作为基准
         base_result = results[0]
         base_functions = {f_usr: f_data for f_usr, f_data in base_result.get('functions', {}).items() if self.is_project_function(f_usr)}
         base_classes = base_result.get('classes', {})
+
+        # 将基准结果转换为规范的可比较形式
+        comparable_base_functions = make_comparable(base_functions)
+        comparable_base_classes = make_comparable(base_classes)
         
         for i, result in enumerate(results[1:], 1):
             current_functions = {f_usr: f_data for f_usr, f_data in result.get('functions', {}).items() if self.is_project_function(f_usr)}
             current_classes = result.get('classes', {})
-            
-            # 检查数量一致性
-            functions_match = len(current_functions) == len(base_functions)
-            classes_match = len(current_classes) == len(base_classes)
-            
-            # 检查内容一致性（忽略顺序）
-            if functions_match:
-                # 比较键是否一致
-                base_func_keys = set(base_functions.keys())
-                curr_func_keys = set(current_functions.keys())
-                if base_func_keys != curr_func_keys:
-                    functions_match = False
-                else:
-                    # 逐个比较值
-                    functions_match = all(current_functions[usr] == data for usr, data in base_functions.items())
 
-            if classes_match:
-                # 比较键是否一致
-                base_cls_keys = set(base_classes.keys())
-                curr_cls_keys = set(current_classes.keys())
-                if base_cls_keys != curr_cls_keys:
-                    classes_match = False
-                else:
-                    # 逐个比较值
-                    classes_match = all(current_classes[usr] == data for usr, data in base_classes.items())
+            # 转换为可比较形式
+            comparable_current_functions = make_comparable(current_functions)
+            comparable_current_classes = make_comparable(current_classes)
+
+            # 进行比较
+            functions_match = (comparable_current_functions == comparable_base_functions)
+            classes_match = (comparable_current_classes == comparable_base_classes)
+
+            if not functions_match:
+                self.console.print(f"[bold red]  - [运行 {i+1}] 函数结果不一致！[/bold red]")
+                dump_path = Path(f"stability_diff_functions_run_{i+1}.log")
+                with open(dump_path, 'w', encoding='utf-8') as f:
+                    f.write("--- BASELINE (run 1) ---\n")
+                    json.dump(comparable_base_functions, f, indent=2)
+                    f.write("\n\n--- CURRENT (run {i+1}) ---\n")
+                    json.dump(comparable_current_functions, f, indent=2)
+                self.console.print(f"    [yellow]详细函数差异已写入: {dump_path}[/yellow]")
+
+            if not classes_match:
+                self.console.print(f"[bold red]  - [运行 {i+1}] 类结果不一致！[/bold red]")
+                dump_path = Path(f"stability_diff_classes_run_{i+1}.log")
+                with open(dump_path, 'w', encoding='utf-8') as f:
+                    f.write("--- BASELINE (run 1) ---\n")
+                    json.dump(comparable_base_classes, f, indent=2)
+                    f.write("\n\n--- CURRENT (run {i+1}) ---\n")
+                    json.dump(comparable_current_classes, f, indent=2)
+                self.console.print(f"    [yellow]详细类差异已写入: {dump_path}[/yellow]")
 
             overall_match = functions_match and classes_match
             
@@ -1038,7 +1063,7 @@ class EnhancedValidator:
                 'entity': f'run_{i+1}',
                 'usr': 'N/A',
                 'status': 'PASS' if overall_match else 'FAIL',
-                'message': f'运行{i+1}: 函数{len(current_functions)}({functions_match}), 类{len(current_classes)}({classes_match})'
+                'message': f'运行{i+1}: 函数({len(current_functions)}), 类({len(current_classes)})'
             })
             
             if not overall_match:
