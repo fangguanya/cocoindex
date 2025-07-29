@@ -460,7 +460,8 @@ class CppAnalyzer:
                     elif new_func.is_definition and existing_func.is_definition:
                         # 两个都是定义（例如，头文件中的inline函数），合并信息
                         existing_func.declaration_locations.extend(new_func.declaration_locations)
-                        existing_func.calls_to.extend(new_func.calls_to)
+                        existing_func.calls_to = list(set(existing_func.calls_to + new_func.calls_to))
+                        # 简单的合并，未来可以优化为更智能的合并策略
                         existing_func.call_details.extend(new_func.call_details)
                     else: # new_func是声明
                         existing_func.declaration_locations.extend(new_func.declaration_locations)
@@ -477,8 +478,12 @@ class CppAnalyzer:
                         merged_classes[usr] = new_class
                     else:
                         existing_class.declaration_locations.extend(new_class.declaration_locations)
-                        existing_class.methods.extend(new_class.methods)
-                        existing_class.parent_classes.extend(new_class.parent_classes)
+                        existing_class.methods = list(set(existing_class.methods + new_class.methods))
+                        existing_class.parent_classes = list(set(existing_class.parent_classes + new_class.parent_classes))
+                        if hasattr(existing_class, 'cpp_oop_extensions') and hasattr(new_class, 'cpp_oop_extensions'):
+                            existing_class.cpp_oop_extensions.base_classes = list(set(
+                                existing_class.cpp_oop_extensions.base_classes + new_class.cpp_oop_extensions.base_classes
+                            ))
 
             # 合并命名空间
             for usr, ns_dict in result.namespaces.items():

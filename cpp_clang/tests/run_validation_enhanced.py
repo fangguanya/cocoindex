@@ -31,6 +31,7 @@ class EnhancedValidator:
             'template_inheritance_validation': [],
             'multicore_stability_validation': []
         }
+        self.file_mappings: Dict[str, str] = {}
     
     def is_project_function(self, usr_id: str) -> bool:
         """判断是否为项目内的函数（排除标准库函数）"""
@@ -54,6 +55,7 @@ class EnhancedValidator:
         functions_map = data.get('functions', {})
         classes_map = data.get('classes', {})
         variables_map = data.get('variables', {})
+        self.file_mappings = data.get('file_mappings', {})
         
         self.console.print(f"📊 分析数据概览:")
         self.console.print(f"  - 函数数量: {len(functions_map)}")
@@ -576,28 +578,32 @@ class EnhancedValidator:
         # 检查跨文件调用
         for usr, func_data in functions_map.items():
             func_name = func_data.get('name', 'unknown')
-            func_file_id = func_data.get('definition_file_id', '')
+            func_file_id = func_data.get('definition_file_id')
+            if not func_file_id: continue
+
+            caller_file_path = self.file_mappings.get(func_file_id, "")
             callto = func_data.get('calls_to', [])
             
             for call_usr in callto:
                 if not self.is_project_function(call_usr):
                     continue
                     
-                # 查找被调用函数的文件
-                for called_usr_key, called_func_data in functions_map.items():
-                    if called_usr_key == call_usr:
-                        called_file_id = called_func_data.get('definition_file_id', '')
-                        called_func_name = called_func_data.get('name', 'unknown')
-                        
-                        if func_file_id != called_file_id and func_file_id and called_file_id:
-                            cross_file_calls += 1
-                            cross_file_call_details.append({
-                                'caller': func_name,
-                                'caller_file': func_file_id,
-                                'callee': called_func_name,
-                                'callee_file': called_file_id
-                            })
-                        break
+                called_func_data = functions_map.get(call_usr)
+                if called_func_data:
+                    called_file_id = called_func_data.get('definition_file_id')
+                    if not called_file_id: continue
+
+                    callee_file_path = self.file_mappings.get(called_file_id, "")
+                    called_func_name = called_func_data.get('name', 'unknown')
+                    
+                    if caller_file_path != callee_file_path and caller_file_path and callee_file_path:
+                        cross_file_calls += 1
+                        cross_file_call_details.append({
+                            'caller': func_name,
+                            'caller_file': caller_file_path,
+                            'callee': called_func_name,
+                            'callee_file': callee_file_path
+                        })
         
         self.console.print(f"📁 跨文件调用统计: {cross_file_calls}个跨文件调用")
         
@@ -910,16 +916,19 @@ class EnhancedValidator:
             
             if 'DerivedTemplate' in class_name:
                 derived_template_found = True
+                inheritance_list = cpp_extensions.get('inheritance_list', [])
                 # 检查是否继承自BaseTemplate
-                inherits_base = any('BaseTemplate' in str(base) for base in base_classes)
+                inherits_base = any('BaseTemplate' in item.get('base_class_usr_id', '') for item in inheritance_list)
                 
                 test_cases.append({
                     'test': 'template_derived_class',
                     'entity': class_name,
                     'usr': usr,
-                    'status': 'PASS' if inherits_base else 'WARN',
+                    'status': 'PASS' if inherits_base else 'FAIL',
                     'message': f'找到模板派生类: {class_name}, 继承检测: {inherits_base}'
                 })
+                if not inherits_base:
+                    passed = False
         
         if not base_template_found:
             test_cases.append({
@@ -971,28 +980,31 @@ class EnhancedValidator:
         
         # 比较结果一致性
         base_result = results[0]
-        base_functions = len(base_result.get('functions', {}))
-        base_classes = len(base_result.get('classes', {}))
-        base_variables = len(base_result.get('variables', {}))
+        base_functions = {f_usr: f_data for f_usr, f_data in base_result.get('functions', {}).items() if self.is_project_function(f_usr)}
+        base_classes = base_result.get('classes', {})
         
         for i, result in enumerate(results[1:], 1):
-            current_functions = len(result.get('functions', {}))
-            current_classes = len(result.get('classes', {}))
-            current_variables = len(result.get('variables', {}))
+            current_functions = {f_usr: f_data for f_usr, f_data in result.get('functions', {}).items() if self.is_project_function(f_usr)}
+            current_classes = result.get('classes', {})
             
             # 检查数量一致性
-            functions_match = current_functions == base_functions
-            classes_match = current_classes == base_classes
-            variables_match = current_variables == base_variables
+            functions_match = len(current_functions) == len(base_functions)
+            classes_match = len(current_classes) == len(base_classes)
             
-            overall_match = functions_match and classes_match and variables_match
+            # 检查内容一致性
+            if functions_match:
+                functions_match = all(current_functions.get(usr) == data for usr, data in base_functions.items())
+            if classes_match:
+                classes_match = all(current_classes.get(usr) == data for usr, data in base_classes.items())
+
+            overall_match = functions_match and classes_match
             
             test_cases.append({
                 'test': 'result_consistency',
                 'entity': f'run_{i+1}',
                 'usr': 'N/A',
                 'status': 'PASS' if overall_match else 'FAIL',
-                'message': f'运行{i+1}: 函数{current_functions}({functions_match}), 类{current_classes}({classes_match}), 变量{current_variables}({variables_match})'
+                'message': f'运行{i+1}: 函数{len(current_functions)}({functions_match}), 类{len(current_classes)}({classes_match})'
             })
             
             if not overall_match:
