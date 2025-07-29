@@ -350,6 +350,11 @@ class ClangParser:
                 errors = [d for d in tu.diagnostics if d.severity >= Diagnostic.Error]
                 if errors:
                     self.logger.warning(f"文件 '{file_path}' 解析时出现 {len(errors)} 个错误。")
+                    for diag in errors:
+                        self.logger.error(
+                            f"  - {diag.severity.name}: {diag.spelling}\n"
+                            f"    at {diag.location.file}:{diag.location.line}:{diag.location.column}"
+                        )
 
             total_time = logger.finish("解析成功")
             
