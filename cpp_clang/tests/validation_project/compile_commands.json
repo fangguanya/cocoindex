@@ -1,27 +1,37 @@
 [
 	{
 	"directory": "L:/ai-cocoindex-clangcpp/cpp_clang/tests/validation_project",
-	"command": "clang++ -Iinclude -c src/base.cpp -o src/base.o",
+	"command": "clang++ -std=c++17 -Wno-error -Iinclude -c src/base.cpp -o src/base.o",
 	"file": "src/base.cpp"
 	},
 	{
 	"directory": "L:/ai-cocoindex-clangcpp/cpp_clang/tests/validation_project",
-	"command": "clang++ -Iinclude -c src/derived.cpp -o src/derived.o",
+	"command": "clang++ -std=c++17 -Wno-error -Iinclude -c src/derived.cpp -o src/derived.o",
 	"file": "src/derived.cpp"
 	},
 	{
 	"directory": "L:/ai-cocoindex-clangcpp/cpp_clang/tests/validation_project",
-	"command": "clang++ -Iinclude -c src/utils.cpp -o src/utils.o",
+	"command": "clang++ -std=c++17 -Wno-error -Iinclude -c src/utils.cpp -o src/utils.o",
 	"file": "src/utils.cpp"
 	},
 	{
 	"directory": "L:/ai-cocoindex-clangcpp/cpp_clang/tests/validation_project",
-	"command": "clang++ -Iinclude -c src/templates.cpp -o src/templates.o",
+	"command": "clang++ -std=c++17 -Wno-error -Iinclude -c src/templates.cpp -o src/templates.o",
 	"file": "src/templates.cpp"
 	},
 	{
 	"directory": "L:/ai-cocoindex-clangcpp/cpp_clang/tests/validation_project",
-	"command": "clang++ -Iinclude -c src/main.cpp -o src/main.o",
+	"command": "clang++ -std=c++17 -Wno-error -ferror-limit=0 -Iinclude -c src/advanced_templates.cpp -o src/advanced_templates.o",
+	"file": "src/advanced_templates.cpp"
+	},
+	{
+	"directory": "L:/ai-cocoindex-clangcpp/cpp_clang/tests/validation_project",
+	"command": "clang++ -std=c++17 -Wno-error -Iinclude -c src/complex.cpp -o src/complex.o",
+	"file": "src/complex.cpp"
+	},
+	{
+	"directory": "L:/ai-cocoindex-clangcpp/cpp_clang/tests/validation_project",
+	"command": "clang++ -std=c++17 -Wno-error -Iinclude -c src/main.cpp -o src/main.o",
 	"file": "src/main.cpp"
 	}
 ]

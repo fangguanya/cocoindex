@@ -481,9 +481,16 @@ class CppAnalyzer:
                         existing_class.methods = list(set(existing_class.methods + new_class.methods))
                         existing_class.parent_classes = list(set(existing_class.parent_classes + new_class.parent_classes))
                         if hasattr(existing_class, 'cpp_oop_extensions') and hasattr(new_class, 'cpp_oop_extensions'):
-                            existing_class.cpp_oop_extensions.base_classes = list(set(
-                                existing_class.cpp_oop_extensions.base_classes + new_class.cpp_oop_extensions.base_classes
-                            ))
+                            # 合并继承信息 - 使用inheritance_list而不是base_classes
+                            existing_inheritance = existing_class.cpp_oop_extensions.inheritance_list or []
+                            new_inheritance = new_class.cpp_oop_extensions.inheritance_list or []
+                            
+                            # 基于base_class_usr_id去重合并
+                            inheritance_dict = {}
+                            for inheritance in existing_inheritance + new_inheritance:
+                                inheritance_dict[inheritance.base_class_usr_id] = inheritance
+                            
+                            existing_class.cpp_oop_extensions.inheritance_list = list(inheritance_dict.values())
 
             # 合并命名空间
             for usr, ns_dict in result.namespaces.items():

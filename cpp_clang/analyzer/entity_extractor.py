@@ -556,9 +556,7 @@ class EntityExtractor:
                         if base_usr not in cls.parent_classes:
                             cls.parent_classes.append(base_usr)
                         
-                        # 同时更新 CppOopExtensions 中的 base_classes
-                        if base_usr not in cls.cpp_oop_extensions.base_classes:
-                            cls.cpp_oop_extensions.base_classes.append(base_usr)
+                        # 注意：base_classes信息已经通过inheritance_list处理，这里不需要重复添加
                         
                         inheritance_list.append(InheritanceInfo(
                             base_class_usr_id=base_usr,

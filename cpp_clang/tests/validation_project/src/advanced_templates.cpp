@@ -315,7 +315,7 @@ template class TemplateTemplateExample<std::vector, int>;
 template class TemplateTemplateExample<std::vector, std::string>;
 
 // 显式实例化一些模板函数
-template int add_values<int>(int, int);
+// template int add_values<int>(int, int);  // 注释掉，因为已经有显式特化
 template double add_values<double>(double, double);
 
 template void process_data<int, std::string, 3>(int, std::string, const std::array<int, 3>&);
