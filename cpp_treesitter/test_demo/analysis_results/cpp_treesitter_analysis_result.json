@@ -1,7 +1,7 @@
 {
   "version": "2.4",
   "language": "cpp",
-  "timestamp": "2025-07-29T01:41:23.235310",
+  "timestamp": "2025-07-29T10:09:43.939969",
   "file_mappings": {"f001": "test_demo/demo_test.cpp"},
   "data_quality": {"consistency_check": {"total_entities": 34, "total_orphaned_calls": 0, "total_invalid_references": 0}, "validated_call_graph": true, "total_entities": 34},
   "entities": {
@@ -88,7 +88,7 @@
     ],
     "type_inference_info": {}
   },
-  "metadata": {"generated_at": "2025-07-29T01:41:23.243311", "generator": "cpp_treesitter_v2.4", "project_name": "test_demo", "total_files": 1, "analysis_time_seconds": 0, "schema_version": "2.4", "parser_version": "tree-sitter", "features_enabled": ["usr_generation", "status_flags", "file_mapping", "signature_keys", "type_inference", "overload_resolution", "class_methods", "data_validation", "call_graph_consistency"], "performance_stats": {"read_acquisitions": 463, "write_acquisitions": 83, "average_write_wait_ms": 0.0, "total_write_wait_time": 0.0, "current_readers": 1, "writers_waiting": 0, "writer_active": false}, "data_quality_score": 1.0},
+  "metadata": {"generated_at": "2025-07-29T10:09:43.948146", "generator": "cpp_treesitter_v2.4", "project_name": "test_demo", "total_files": 1, "analysis_time_seconds": 0, "schema_version": "2.4", "parser_version": "tree-sitter", "features_enabled": ["usr_generation", "status_flags", "file_mapping", "signature_keys", "type_inference", "overload_resolution", "class_methods", "data_validation", "call_graph_consistency"], "performance_stats": {"read_acquisitions": 463, "write_acquisitions": 83, "average_write_wait_ms": 0.0, "total_write_wait_time": 0.0, "current_readers": 1, "writers_waiting": 0, "writer_active": false}, "data_quality_score": 1.0},
   "config": {"parser_type": "tree-sitter", "features_enabled": ["template_analysis", "type_inference", "operator_overloading", "parallel_processing", "data_validation", "call_graph_consistency_check"], "analysis_mode": "two_phase", "max_workers": 1, "project_root": "test_demo", "scan_directory": "test_demo", "include_function_body": true, "generate_usr": true, "use_file_mapping": true, "enable_data_validation": true, "schema_version": "2.4"},
   "project_call_graph": {
     "project_info": {"name": "test_demo", "total_files": 1, "total_functions": 26, "total_classes": 6, "total_namespaces": 1},

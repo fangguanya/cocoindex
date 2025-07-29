@@ -1,7 +1,7 @@
 {
   "version": "2.4",
   "language": "cpp",
-  "timestamp": "2025-07-29T01:41:23.862531",
+  "timestamp": "2025-07-29T10:09:44.584864",
   "file_mappings": {"f001": "rich_demo/advanced/multiple_inheritance.cpp", "f002": "rich_demo/advanced/multiple_inheritance.h", "f003": "rich_demo/advanced/template_container.cpp", "f004": "rich_demo/advanced/template_container.h", "f005": "rich_demo/data/person.cpp", "f006": "rich_demo/data/person.h", "f007": "rich_demo/geometry.cpp", "f008": "rich_demo/geometry.h", "f009": "rich_demo/interactions.h", "f010": "rich_demo/main.cpp", "f011": "rich_demo/utils/math_utils.cpp", "f012": "rich_demo/utils/math_utils.h"},
   "data_quality": {"consistency_check": {"total_entities": 388, "total_orphaned_calls": 20, "total_invalid_references": 0}, "validated_call_graph": true, "total_entities": 388},
   "entities": {
@@ -419,7 +419,7 @@
     ],
     "type_inference_info": {}
   },
-  "metadata": {"generated_at": "2025-07-29T01:41:23.885734", "generator": "cpp_treesitter_v2.4", "project_name": "rich_demo", "total_files": 12, "analysis_time_seconds": 0, "schema_version": "2.4", "parser_version": "tree-sitter", "features_enabled": ["usr_generation", "status_flags", "file_mapping", "signature_keys", "type_inference", "overload_resolution", "class_methods", "data_validation", "call_graph_consistency"], "performance_stats": {"read_acquisitions": 2821, "write_acquisitions": 566, "average_write_wait_ms": 0.0, "total_write_wait_time": 0.001, "current_readers": 1, "writers_waiting": 0, "writer_active": false}, "data_quality_score": 0.948},
+  "metadata": {"generated_at": "2025-07-29T10:09:44.610373", "generator": "cpp_treesitter_v2.4", "project_name": "rich_demo", "total_files": 12, "analysis_time_seconds": 0, "schema_version": "2.4", "parser_version": "tree-sitter", "features_enabled": ["usr_generation", "status_flags", "file_mapping", "signature_keys", "type_inference", "overload_resolution", "class_methods", "data_validation", "call_graph_consistency"], "performance_stats": {"read_acquisitions": 2821, "write_acquisitions": 566, "average_write_wait_ms": 0.0, "total_write_wait_time": 0.0, "current_readers": 1, "writers_waiting": 0, "writer_active": false}, "data_quality_score": 0.948},
   "config": {"parser_type": "tree-sitter", "features_enabled": ["template_analysis", "type_inference", "operator_overloading", "parallel_processing", "data_validation", "call_graph_consistency_check"], "analysis_mode": "two_phase", "max_workers": 1, "project_root": "rich_demo", "scan_directory": "rich_demo", "include_function_body": true, "generate_usr": true, "use_file_mapping": true, "enable_data_validation": true, "schema_version": "2.4"},
   "project_call_graph": {
     "project_info": {"name": "rich_demo", "total_files": 12, "total_functions": 313, "total_classes": 32, "total_namespaces": 4},
