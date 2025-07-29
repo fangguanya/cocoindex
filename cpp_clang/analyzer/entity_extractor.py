@@ -526,6 +526,17 @@ class EntityExtractor:
                         cpp_call_info=cpp_call_info
                     ))
 
+    def _get_primary_template_cursor(self, cursor: clang.Cursor) -> clang.Cursor:
+        """
+        如果给定的游标是模板特化，则返回其主模板的游标。
+        否则，返回原始游标。
+        """
+        if hasattr(cursor, 'get_specialized_template'):
+            primary_template = cursor.get_specialized_template()
+            if primary_template:
+                return primary_template
+        return cursor
+
     def _extract_inheritance_for_class(self, cursor: clang.Cursor):
         cls = self.classes.get(cursor.get_usr())
         if not cls: return
@@ -535,28 +546,17 @@ class EntityExtractor:
             if base.kind == clang.CursorKind.CXX_BASE_SPECIFIER:
                 base_decl = base.type.get_declaration()
                 
-                # 对于模板特化，我们需要找到主模板定义
-                # 以获得基类的一致USR。
-                if base_decl and hasattr(base_decl, 'get_specialized_template'):
-                    primary_template = base_decl.get_specialized_template()
-                    if primary_template:
-                        base_decl = primary_template
-
-                if base_decl and base_decl.kind in [clang.CursorKind.CLASS_DECL, clang.CursorKind.STRUCT_DECL, clang.CursorKind.CLASS_TEMPLATE, clang.CursorKind.CLASS_TEMPLATE_PARTIAL_SPECIALIZATION]:
-                    
-                    # 确保我们获取的是主模板的USR，以实现一致性
-                    final_decl = base_decl
-                    if hasattr(base_decl, 'get_specialized_template'):
-                        primary_template = base_decl.get_specialized_template()
-                        if primary_template:
-                            final_decl = primary_template
-
+                if base_decl and base_decl.kind in [
+                    clang.CursorKind.CLASS_DECL, clang.CursorKind.STRUCT_DECL, 
+                    clang.CursorKind.CLASS_TEMPLATE, clang.CursorKind.CLASS_TEMPLATE_PARTIAL_SPECIALIZATION
+                ]:
+                    # 统一处理，获取主模板的USR以确保一致性
+                    final_decl = self._get_primary_template_cursor(base_decl)
                     base_usr = final_decl.get_usr()
+
                     if base_usr:
                         if base_usr not in cls.parent_classes:
                             cls.parent_classes.append(base_usr)
-                        
-                        # 注意：base_classes信息已经通过inheritance_list处理，这里不需要重复添加
                         
                         inheritance_list.append(InheritanceInfo(
                             base_class_usr_id=base_usr,
