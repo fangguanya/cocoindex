@@ -75,6 +75,7 @@ class EntityExtractor:
         self.namespaces: Dict[str, Namespace] = {}
         self.global_nodes: Dict[str, EntityNode] = {}
         self._processed_usrs: Set[str] = set()
+        self._functions_with_calls_extracted: Set[str] = set()
         
         # 性能优化：缓存常用查询结果
         self._cursor_cache: Dict[str, Any] = {}
@@ -146,6 +147,7 @@ class EntityExtractor:
             self.classes.clear()
             self.namespaces.clear()
             self.global_nodes.clear()
+            self._functions_with_calls_extracted.clear()
             self._processed_usrs.clear()
             self._cursor_cache.clear()
             self._qualified_name_cache.clear()
@@ -275,9 +277,27 @@ class EntityExtractor:
             self._extract_function(cursor)
     
     def _extract_relationships_only(self, cursor):
-        """第二遍：只提取关系"""
-        if cursor.kind in [clang.CursorKind.CALL_EXPR, clang.CursorKind.MEMBER_REF_EXPR, clang.CursorKind.DECL_REF_EXPR]:
-            self._extract_call_relationship(cursor)
+        """第二遍：提取关系（调用和继承）"""
+        # 提取调用关系
+        if cursor.is_definition() and cursor.kind in [
+            clang.CursorKind.FUNCTION_DECL, clang.CursorKind.CXX_METHOD,
+            clang.CursorKind.CONSTRUCTOR, clang.CursorKind.DESTRUCTOR,
+            clang.CursorKind.FUNCTION_TEMPLATE
+        ]:
+            usr = cursor.get_usr()
+            # 确保函数在我们的跟踪列表中，并且尚未处理
+            if usr and usr in self.functions and usr not in self._functions_with_calls_extracted:
+                self._extract_calls_for_function(cursor)
+                self._functions_with_calls_extracted.add(usr)
+
+        # 提取继承关系
+        elif cursor.is_definition() and cursor.kind in [
+            clang.CursorKind.CLASS_DECL, clang.CursorKind.STRUCT_DECL, clang.CursorKind.CLASS_TEMPLATE
+        ]:
+            usr = cursor.get_usr()
+            # 确保类在我们的跟踪列表中
+            if usr and usr in self.classes:
+                self._extract_inheritance_for_class(cursor)
     
     def _extract_namespace(self, cursor):
         """提取命名空间 - 优化版"""
@@ -291,19 +311,7 @@ class EntityExtractor:
         """提取函数 - 优化版"""
         self._process_function_cursor(cursor)
     
-    def _extract_call_relationship(self, cursor):
-        """提取调用关系 - 优化版"""
-        # 找到包含此调用的函数
-        parent = cursor.semantic_parent
-        while parent and parent.kind not in [
-            clang.CursorKind.FUNCTION_DECL, clang.CursorKind.CXX_METHOD, 
-            clang.CursorKind.CONSTRUCTOR, clang.CursorKind.DESTRUCTOR,
-            clang.CursorKind.FUNCTION_TEMPLATE
-        ]:
-            parent = parent.semantic_parent
-        
-        if parent:
-            self._extract_calls_for_function(parent)
+    
 
     def _process_function_cursor(self, cursor: clang.Cursor):
         """处理函数游标 - 线程安全和性能优化版"""
@@ -484,28 +492,39 @@ class EntityExtractor:
         for child in cursor.walk_preorder():
             if child.kind == clang.CursorKind.CALL_EXPR:
                 callee_cursor = child.referenced
-                if callee_cursor and callee_cursor.get_usr():
-                    callee_usr = callee_cursor.get_usr()
-                    if callee_usr == caller_usr: continue
+                if callee_cursor and callee_cursor.kind.is_declaration():
+                    # 优先使用定义游标，因为它包含最准确的信息
+                    target_cursor = callee_cursor.get_definition() or callee_cursor
                     
+                    callee_usr = target_cursor.get_usr()
+                    if not callee_usr or callee_usr == caller_usr:
+                        continue
+
+                    # 添加调用关系 (USR)
                     if callee_usr not in caller_func.calls_to:
                         caller_func.calls_to.append(callee_usr)
+
+                    # 添加详细调用信息
+                    def_loc = target_cursor.extent.start
+                    file_id = self.file_id_manager.get_file_id(def_loc.file.name) if def_loc.file else None
                     
-                    def_loc_cursor = callee_cursor.get_definition() or callee_cursor
-                    def_loc = def_loc_cursor.extent.start
-                    file_id = self.file_id_manager.get_file_id(def_loc.file.name)
-                    if file_id:
+                    resolved_def_loc = None
+                    if file_id and def_loc.line is not None:
                         resolved_def_loc = ResolvedDefinitionLocation(file_id=file_id, line=def_loc.line, column=def_loc.column)
-                        cpp_call_info = CppCallInfo(
-                            call_status_flags=self._get_call_status_flags(child),
-                            resolved_overload=callee_usr,
-                            resolved_definition_location=resolved_def_loc,
-                            template_args=self._extract_template_arguments(child)
-                        )
-                        caller_func.call_details.append(CallInfo(
-                            to_usr_id=callee_usr, line=child.location.line,
-                            column=child.location.column, cpp_call_info=cpp_call_info
-                        ))
+
+                    cpp_call_info = CppCallInfo(
+                        call_status_flags=self._get_call_status_flags(child),
+                        resolved_overload=callee_usr,
+                        resolved_definition_location=resolved_def_loc,
+                        template_args=self._extract_template_arguments(child)
+                    )
+                    
+                    caller_func.call_details.append(CallInfo(
+                        to_usr_id=callee_usr,
+                        line=child.location.line,
+                        column=child.location.column,
+                        cpp_call_info=cpp_call_info
+                    ))
 
     def _extract_inheritance_for_class(self, cursor: clang.Cursor):
         cls = self.classes.get(cursor.get_usr())
@@ -515,8 +534,24 @@ class EntityExtractor:
         for base in cursor.get_children():
             if base.kind == clang.CursorKind.CXX_BASE_SPECIFIER:
                 base_decl = base.type.get_declaration()
-                if base_decl and base_decl.kind in [clang.CursorKind.CLASS_DECL, clang.CursorKind.STRUCT_DECL, clang.CursorKind.CLASS_TEMPLATE]:
-                    base_usr = base_decl.get_usr()
+                
+                # 对于模板特化，我们需要找到主模板定义
+                # 以获得基类的一致USR。
+                if base_decl and hasattr(base_decl, 'get_specialized_template'):
+                    primary_template = base_decl.get_specialized_template()
+                    if primary_template:
+                        base_decl = primary_template
+
+                if base_decl and base_decl.kind in [clang.CursorKind.CLASS_DECL, clang.CursorKind.STRUCT_DECL, clang.CursorKind.CLASS_TEMPLATE, clang.CursorKind.CLASS_TEMPLATE_PARTIAL_SPECIALIZATION]:
+                    
+                    # 确保我们获取的是主模板的USR，以实现一致性
+                    final_decl = base_decl
+                    if hasattr(base_decl, 'get_specialized_template'):
+                        primary_template = base_decl.get_specialized_template()
+                        if primary_template:
+                            final_decl = primary_template
+
+                    base_usr = final_decl.get_usr()
                     if base_usr:
                         if base_usr not in cls.parent_classes:
                             cls.parent_classes.append(base_usr)

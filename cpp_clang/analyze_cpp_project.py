@@ -30,7 +30,7 @@ def main():
     parser = argparse.ArgumentParser(description="C++ 项目分析工具")
     parser.add_argument("--project_root", default="N:/c7_enginedev/Engine", help="项目根目录")
     parser.add_argument("--scan_directory", default="N:/c7_enginedev/Client", help="要分析的代码目录 (仅用于过滤)")
-    parser.add_argument("--compile_commands_path", default="L:/ai-cocoindex-clangcpp/cpp_clang/compile_commands.json", help="compile_commands.json 文件的路径")
+    parser.add_argument("--compile_commands_path", default="N:/c7_enginedev/compile_commands.json", help="compile_commands.json 文件的路径")
     parser.add_argument("--output_file", default="cpp_analysis_result.json", help="输出 JSON 文件路径")
     parser.add_argument("--verbose", action="store_true", help="显示详细输出")
     parser.add_argument("--max_files", type=int, default=None, help="限制处理的文件数量，None 表示不限制")

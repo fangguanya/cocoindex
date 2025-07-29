@@ -6,6 +6,7 @@
 
 from pathlib import Path
 from typing import Dict, Optional, List
+import os
 from dataclasses import dataclass
 
 from .logger import get_logger
@@ -65,16 +66,26 @@ class DistributedFileIdManager:
             if not path.is_absolute():
                 path = self.project_root / path
             
-            # 解析路径以消除 ".." 等
             resolved_path = path.resolve()
-            
-            # 计算相对于项目根目录的路径
             relative_path = resolved_path.relative_to(self.project_root)
-            
             return str(relative_path).replace('\\', '/')
         except (ValueError, TypeError):
-            # 如果路径不在项目根目录下，或路径类型错误，则返回原始的、正斜杠格式的路径
-            return file_path.replace('\\', '/')
+            try:
+                resolved_path = Path(file_path).resolve()
+                if not self.project_root.is_absolute():
+                     return file_path.replace('\\', '/')
+
+                common_base = Path(os.path.commonpath([str(resolved_path), str(self.project_root)]))
+                relative_to_common = resolved_path.relative_to(common_base)
+                
+                up_parts = self.project_root.relative_to(common_base).parts
+                if up_parts == ('.',):
+                    up_parts = ()
+                
+                final_path = Path(*(['..'] * len(up_parts))) / relative_to_common
+                return str(final_path).replace('\\', '/')
+            except Exception:
+                return file_path.replace('\\', '/')
 
     def get_file_mappings(self) -> Dict[str, str]:
         """获取所有文件映射（file_id -> path）"""
