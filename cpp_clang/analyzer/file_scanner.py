@@ -259,9 +259,15 @@ class FileScanner:
             abs_file_path = file_path.resolve()
             abs_dir_path = directory_path.resolve()
             
-            # 使用 os.path.commonpath 来进行可靠的检查
-            common = os.path.commonpath([str(abs_file_path), str(abs_dir_path)])
-            return common == str(abs_dir_path)
+            # 使用更可靠的方法检查路径包含关系
+            try:
+                # 尝试计算相对路径，如果成功则说明文件在目录下
+                abs_file_path.relative_to(abs_dir_path)
+                return True
+            except ValueError:
+                # 如果relative_to抛出ValueError，说明文件不在目录下
+                return False
+                
         except (OSError, ValueError):
             # 如果路径解析失败，则认为不在目录下
             return False

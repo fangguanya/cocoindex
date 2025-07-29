@@ -28,6 +28,7 @@ from clang.cindex import TranslationUnit, Diagnostic
 from rich.console import Console
 from rich.progress import Progress, TaskID
 from .logger import get_logger
+from .performance_profiler import profiler, profile_function, DetailedLogger
 
 class DiagnosticInfo:
     """诊断信息 - 性能优化版"""
@@ -188,7 +189,17 @@ class ClangParser:
             
             if command:
                 args = self._process_compile_args(shlex.split(command, posix=False) if platform.system() == 'Windows' else shlex.split(command))
-                file_commands[self._normalize_path(file_path)] = {"args": args, "directory": directory}
+                
+                # 正确处理相对路径和绝对路径
+                if os.path.isabs(file_path):
+                    # 绝对路径直接使用
+                    normalized_path = self._normalize_path(file_path)
+                else:
+                    # 相对路径需要结合directory来构造完整路径
+                    full_path = os.path.join(directory, file_path)
+                    normalized_path = self._normalize_path(full_path)
+                
+                file_commands[normalized_path] = {"args": args, "directory": directory}
         return file_commands
 
     def _process_compile_args(self, raw_args: List[str]) -> List[str]:
@@ -243,60 +254,107 @@ class ClangParser:
         """规范化路径"""
         return str(Path(path).resolve()).replace('\\', '/')
 
+    @profile_function("ClangParser.parse_file")
     def parse_file(self, file_path: str) -> Optional[ParsedFile]:
-        """解析单个文件 - 性能优化版"""
-        self.logger.debug(f"开始解析文件: {file_path}")
+        """解析单个文件 - 深度性能分析版"""
+        logger = DetailedLogger(f"解析文件: {Path(file_path).name}")
+        
+        with profiler.timer("parse_file_validation", {'file': file_path}):
+            # 尝试直接匹配标准化路径
+            normalized_file_path = self._normalize_path(file_path)
+            compile_info = self.compile_commands.get(normalized_file_path)
+            
+            # 如果直接匹配失败，尝试其他匹配策略
+            if not compile_info:
+                # 尝试匹配文件名（用于调试）
+                file_name = os.path.basename(file_path)
+                matching_keys = [key for key in self.compile_commands.keys() if os.path.basename(key) == file_name]
+                
+                if matching_keys:
+                    self.logger.info(f"文件路径匹配失败，但找到同名文件: {matching_keys}")
+                    # 使用第一个匹配的文件
+                    compile_info = self.compile_commands[matching_keys[0]]
+                    normalized_file_path = matching_keys[0]
+                else:
+                    self.logger.warning(f"在 compile_commands.json 中未找到文件 '{file_path}' 的编译命令")
+                    self.logger.debug(f"已注册的文件路径: {list(self.compile_commands.keys())[:5]}...")
+                    return None
 
-        compile_info = self.compile_commands.get(self._normalize_path(file_path))
-        if not compile_info:
-            self.logger.warning(f"在 compile_commands.json 中未找到文件 '{file_path}' 的编译命令，跳过。")
-            return None
+            args = compile_info["args"]
+            directory = compile_info["directory"]
 
-        args = compile_info["args"]
-        directory = compile_info["directory"]
+            if not Path(file_path).exists():
+                self.logger.error(f"文件路径不存在: {file_path}")
+                return None
+            if not Path(directory).exists():
+                self.logger.error(f"工作目录不存在: {directory}")
+                return None
 
-        if not Path(file_path).exists():
-            self.logger.error(f"文件路径不存在: {file_path}")
-            return None
-        if not Path(directory).exists():
-            self.logger.error(f"工作目录不存在: {directory}")
-            return None
+        logger.checkpoint("验证完成", args_count=len(args), directory=directory)
 
         # 检查缓存
-        cache_key = f"{file_path}:{hash(tuple(args))}"
-        if self._tu_cache:
-            cached_tu = self._tu_cache.get(cache_key)
-            if cached_tu:
-                self.logger.debug(f"使用缓存的TranslationUnit: {file_path}")
-                return ParsedFile(
-                    file_path=file_path,
-                    translation_unit=cached_tu,
-                    success=True,
-                    diagnostics=[],
-                    parse_time=0.0  # 缓存命中，解析时间为0
-                )
+        with profiler.timer("cache_lookup", {'file': file_path}):
+            cache_key = f"{file_path}:{hash(tuple(args))}"
+            if self._tu_cache:
+                cached_tu = self._tu_cache.get(cache_key)
+                if cached_tu:
+                    logger.checkpoint("缓存命中", cache_key=cache_key[:50])
+                    return ParsedFile(
+                        file_path=file_path,
+                        translation_unit=cached_tu,
+                        success=True,
+                        diagnostics=[],
+                        parse_time=0.0  # 缓存命中，解析时间为0
+                    )
+
+        logger.checkpoint("缓存未命中，开始解析")
 
         try:
-            start_time = time.time()
-            original_cwd = os.getcwd()
-            os.chdir(directory)
+            with profiler.timer("clang_parse_setup"):
+                start_time = time.perf_counter()
+                original_cwd = os.getcwd()
+                os.chdir(directory)
             
-            tu = self.index.parse(file_path, args=args, options=clang.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD)
+            logger.checkpoint("环境设置完成", working_dir=directory)
             
-            os.chdir(original_cwd)
-            parse_time = time.time() - start_time
+            # 优化clang解析选项 - 移除PARSE_SKIP_FUNCTION_BODIES以保持函数调用关系提取
+            with profiler.timer("clang_translation_unit_parse", {'file': file_path, 'args_count': len(args)}):
+                # 平衡性能与功能完整性的解析选项
+                parse_options = (
+                    clang.TranslationUnit.PARSE_INCOMPLETE |           # 允许不完整解析
+                    clang.TranslationUnit.PARSE_PRECOMPILED_PREAMBLE   # 使用预编译前导
+                )
+                
+                tu = self.index.parse(
+                    file_path, 
+                    args=args, 
+                    options=parse_options
+                )
+            
+            with profiler.timer("clang_parse_cleanup"):
+                os.chdir(original_cwd)
+                parse_time = time.perf_counter() - start_time
+
+            logger.checkpoint("Clang解析完成", parse_time=f"{parse_time:.4f}s")
 
             if not tu:
                 self.logger.error(f"Clang 未能为文件 '{file_path}' 创建翻译单元。")
                 return None
             
             # 缓存TranslationUnit
-            if self._tu_cache:
-                self._tu_cache.put(cache_key, tu)
+            with profiler.timer("cache_store"):
+                if self._tu_cache:
+                    self._tu_cache.put(cache_key, tu)
             
-            errors = [d for d in tu.diagnostics if d.severity >= Diagnostic.Error]
-            if errors:
-                self.logger.warning(f"文件 '{file_path}' 解析时出现 {len(errors)} 个错误。")
+            with profiler.timer("diagnostic_check"):
+                errors = [d for d in tu.diagnostics if d.severity >= Diagnostic.Error]
+                if errors:
+                    self.logger.warning(f"文件 '{file_path}' 解析时出现 {len(errors)} 个错误。")
+
+            total_time = logger.finish("解析成功")
+            
+            if total_time > 1.0:  # 如果单个文件解析超过1秒，记录警告
+                self.logger.warning(f"⚠️  文件 {Path(file_path).name} 解析耗时过长: {total_time:.2f}s")
 
             return ParsedFile(file_path=file_path, success=True, translation_unit=tu, diagnostics=[], parse_time=parse_time)
 
