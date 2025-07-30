@@ -63,28 +63,6 @@ class FileScanner:
         self._compiled_patterns: List[Pattern] = []  # 复杂模式的正则表达式
         self._process_exclude_patterns()
     
-    def scan_directory(self, config) -> ScanResult:
-        """扫描目录 - 支持双路径设计
-        
-        Args:
-            config: AnalysisConfig对象，包含project_root和scan_directory
-            
-        Returns:
-            ScanResult: 扫描结果，包含文件列表和映射
-        """
-        files = []
-        
-        # 只扫描scan_directory
-        all_files = self._walk_directory(config.scan_directory)
-        for file_path in all_files:
-            if self._should_include_file(file_path, config):
-                files.append(file_path)
-        
-        # 但file_mappings基于project_root计算相对路径
-        file_mappings = self._generate_file_mappings(files, config.project_root)
-        
-        return ScanResult(files=files, file_mappings=file_mappings)
-    
     def _process_exclude_patterns(self):
         """预处理排除模式，提高匹配效率"""
         for pattern in self.DEFAULT_EXCLUDE_PATTERNS:

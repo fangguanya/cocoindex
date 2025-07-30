@@ -30,6 +30,17 @@ from rich.progress import Progress, TaskID
 from .logger import get_logger
 from .performance_profiler import profiler, profile_function, DetailedLogger
 
+def _get_severity_name(severity_int: int) -> str:
+    """将 Diagnostic severity 整数值转换为可读字符串"""
+    severity_map = {
+        0: "Ignored",
+        1: "Note", 
+        2: "Warning",
+        3: "Error",
+        4: "Fatal"
+    }
+    return severity_map.get(severity_int, f"Unknown({severity_int})")
+
 class DiagnosticInfo:
     """诊断信息 - 性能优化版"""
     def __init__(self, severity: str, message: str, file_path: str, line: int, column: int, category: str):
@@ -352,7 +363,7 @@ class ClangParser:
                     self.logger.warning(f"文件 '{file_path}' 解析时出现 {len(errors)} 个错误。")
                     for diag in errors:
                         self.logger.error(
-                            f"  - {diag.severity.name}: {diag.spelling}\n"
+                            f"  - {_get_severity_name(diag.severity)}: {diag.spelling}\n"
                             f"    at {diag.location.file}:{diag.location.line}:{diag.location.column}"
                         )
 

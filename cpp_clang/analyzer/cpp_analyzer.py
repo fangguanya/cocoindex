@@ -216,11 +216,18 @@ class CppAnalyzer:
             # 1.6. 应用文件过滤规则
             self.console.print("\n[bold]1.6. 应用文件过滤规则...[/bold]")
             with profiler.timer("filter_files"):
-                # 临时跳过文件过滤，直接使用所有源文件进行性能测试
-                filtered_files = source_files
+                # 使用FileScanner进行专业的文件过滤
+                file_scanner = FileScanner()
+                filtered_files = file_scanner.filter_files_from_list(source_files, config.scan_directory)
+                
+                self.console.print(f"-> 过滤前: {len(source_files)} 个文件")
+                self.console.print(f"-> 过滤后: {len(filtered_files)} 个文件")
+                self.logger.info(f"文件过滤: {len(source_files)} -> {len(filtered_files)}")
                 
                 if config.max_files is not None and config.max_files > 0:
                     filtered_files = filtered_files[:config.max_files]
+                    self.console.print(f"-> 限制处理: {len(filtered_files)} 个文件")
+                    self.logger.info(f"应用文件数量限制: {config.max_files}")
             
             logger.checkpoint("文件过滤完成", filtered_files_count=len(filtered_files))
 
