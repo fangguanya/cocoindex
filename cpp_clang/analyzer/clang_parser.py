@@ -231,117 +231,187 @@ class ClangParser:
             with open(rsp_path, 'r', encoding='utf-8') as f:
                 content = f.read().strip()
             
-            # 解析响应文件内容
+            # 简单的参数分割
             if platform.system() == 'Windows':
-                # Windows下使用特殊的解析方式
                 args = shlex.split(content, posix=False)
             else:
                 args = shlex.split(content)
             
-            # 递归处理嵌套的响应文件
-            expanded_args = []
-            for arg in args:
-                if arg.startswith('@'):
-                    # 处理嵌套的响应文件
-                    nested_rsp_path = arg[1:].strip('"\'')
-                    if not os.path.isabs(nested_rsp_path):
-                        # 相对路径需要相对于当前响应文件的目录
-                        nested_rsp_path = os.path.join(os.path.dirname(rsp_path), nested_rsp_path)
-                    
-                    nested_args = self._parse_response_file(nested_rsp_path)
-                    expanded_args.extend(nested_args)
-                else:
-                    expanded_args.append(arg)
-            
-            return expanded_args
+            return args
         
         except Exception as e:
             self.logger.error(f"解析响应文件失败 {rsp_path}: {e}")
             return []
+    
+    
 
     def _process_compile_args(self, raw_args: List[str]) -> List[str]:
-        """处理和清理编译参数，包括响应文件展开 - 性能优化版"""
-        # 首先展开所有响应文件
-        expanded_args = []
-        for arg in raw_args:
-            if arg.startswith('@'):
-                # 这是一个响应文件
-                rsp_path = arg[1:].strip('"\'')
-                rsp_args = self._parse_response_file(rsp_path)
-                expanded_args.extend(rsp_args)
-            else:
-                expanded_args.append(arg)
+        """处理和清理编译参数，包括响应文件展开 - 修复版"""
         
-        # 然后处理和清理编译参数
-        processed_args = []
-        skip_next = False
-        
-        # 预编译常用参数映射
-        msvc_to_clang = {
-            '/EHsc': '-fexceptions',
-            '/GR-': '-fno-rtti',
-            '/W1': '-Wall',
-            '/W2': '-Wall',
-            '/W3': '-Wall',
-            '/W4': '-Wall'
-        }
-        
-        for i, arg in enumerate(expanded_args):
-            if skip_next:
-                skip_next = False
-                continue
+        def process_args_recursive(args_list: List[str]) -> List[str]:
+            """递归处理参数列表，包括响应文件展开"""
+            processed = []
+            skip_next = False
             
-            arg_clean = arg.strip('"\'')
-            if arg_clean.endswith(('.exe', '.c', '.cpp', '.cc', '.cxx', '.o', '.obj')):
-                continue
-
-            if arg in ['-o', '-c', '/c'] and i + 1 < len(expanded_args):
-                skip_next = True
-                continue
-
-            if arg.startswith(('-I', '/I')):
-                if len(arg) > 2:
-                    processed_args.append('-I' + arg[2:])
-                elif i + 1 < len(expanded_args):
-                    processed_args.append('-I' + expanded_args[i+1])
+            for i, arg in enumerate(args_list):
+                if skip_next:
+                    skip_next = False
+                    continue
+                
+                # 处理响应文件
+                if arg.startswith('@'):
+                    rsp_path = arg[1:].strip('"\'')
+                    rsp_args = self._parse_response_file(rsp_path)
+                    # 递归处理响应文件中的参数
+                    processed.extend(process_args_recursive(rsp_args))
+                    continue
+                
+                # 跳过文件名和输出文件
+                arg_clean = arg.strip('"\'')
+                if arg_clean.endswith(('.exe', '.c', '.cpp', '.cc', '.cxx', '.o', '.obj')):
+                    continue
+                
+                # 跳过输出相关参数
+                if arg in ['-o', '-c', '/c', '/Fo'] and i + 1 < len(args_list):
                     skip_next = True
-            elif arg.startswith(('-D', '/D')):
-                if len(arg) > 2:
-                    processed_args.append('-D' + arg[2:])
-                elif i + 1 < len(expanded_args):
-                    processed_args.append('-D' + expanded_args[i+1])
-                    skip_next = True
-            elif arg.startswith('/FI'):
-                # 强制包含文件
-                if len(arg) > 3:
-                    processed_args.append('-include')
-                    processed_args.append(arg[3:])
-                elif i + 1 < len(expanded_args):
-                    processed_args.append('-include')
-                    processed_args.append(expanded_args[i+1])
-                    skip_next = True
-            elif arg.startswith('/imsvc'):
-                # MSVC系统包含路径
-                if len(arg) > 6:
-                    processed_args.append('-isystem')
-                    processed_args.append(arg[6:])
-                elif i + 1 < len(expanded_args):
-                    processed_args.append('-isystem')
-                    processed_args.append(expanded_args[i+1])
-                    skip_next = True
-            elif arg.startswith('/'):
-                converted = msvc_to_clang.get(arg)
-                if converted:
-                    processed_args.append(converted)
-                # 忽略其他MSVC特定参数
-            else:
+                    continue
+                
+                # 转换和保留重要的编译参数
+                if arg.startswith(('-I', '/I')):
+                    if len(arg) > 2:
+                        processed.append('-I' + arg[2:].strip('"\''))
+                    elif i + 1 < len(args_list):
+                        processed.append('-I' + args_list[i+1].strip('"\''))
+                        skip_next = True
+                elif arg.startswith(('-D', '/D')):
+                    if len(arg) > 2:
+                        processed.append('-D' + arg[2:])
+                    elif i + 1 < len(args_list):
+                        processed.append('-D' + args_list[i+1])
+                        skip_next = True
+                elif arg.startswith('/FI'):
+                    # 强制包含文件
+                    if len(arg) > 3:
+                        processed.append('-include')
+                        processed.append(arg[3:].strip('"\''))
+                    elif i + 1 < len(args_list):
+                        processed.append('-include')
+                        processed.append(args_list[i+1].strip('"\''))
+                        skip_next = True
+                elif arg.startswith('/imsvc'):
+                    # MSVC系统包含路径
+                    if len(arg) > 6:
+                        processed.append('-isystem')
+                        processed.append(arg[6:].strip('"\''))
+                    elif i + 1 < len(args_list):
+                        processed.append('-isystem')
+                        processed.append(args_list[i+1].strip('"\''))
+                        skip_next = True
+                elif arg.startswith('/std:'):
+                    # C++标准参数，转换为clang格式
+                    std_version = arg[5:]  # 去掉 '/std:'
+                    processed.append(f'-std={std_version}')
+                elif arg == '/EHsc':
+                    processed.append('-fexceptions')
+                elif arg == '/GR-':
+                    processed.append('-fno-rtti')
+                elif arg in ['/W1', '/W2', '/W3', '/W4']:
+                    processed.append('-Wall')
+                elif arg.startswith('/'):
+                    # 过滤掉会被clang误认为链接器参数的MSVC编译选项
+                    msvc_compile_only = [
+                        '/Zc:', '/nologo', '/Oi', '/Gy', '/utf-8', '/wd', '/we', '/Ob', '/Ox', '/Ot', 
+                        '/GF', '/errorReport:', '/Z7', '/MD', '/fp:', '/Zo', '/Zp', '/clang:'
+                    ]
+                    # 只保留真正重要的MSVC参数，过滤掉会导致clang报错的参数
+                    if not any(arg.startswith(prefix) for prefix in msvc_compile_only + ['/Fo', '/Fe', '/Fd', '/link', '/LIBPATH']):
+                        processed.append(arg)
+                else:
+                    # 保留其他参数
+                    processed.append(arg)
+            
+            return processed
+        
+        processed_args = process_args_recursive(raw_args)
+        
+        # 参考UE官方ClangToolChain.cs，添加必要的Clang编译参数
+        # 这些参数解决了UE项目中的各种编译问题
+        
+        # 添加UE官方使用的关键Clang参数
+        ue_clang_args = [
+            # 解决constexpr函数和优化相关问题 (参考ClangToolChain.cs:655)
+            '-fno-delete-null-pointer-checks',
+            
+            # 解决constexpr函数的严格检查问题
+            # 将constexpr相关的错误降级为警告，然后禁用这些警告
+            '-Wno-invalid-constexpr',
+            '-Wno-constexpr-not-const',
+            
+            # 诊断格式设置，便于IDE识别错误 (参考ClangToolChain.cs:586)
+            '-fdiagnostics-format=msvc',
+            '-fdiagnostics-absolute-paths',
+            
+            # FP语义设置，确保精确的浮点运算 (参考ClangToolChain.cs:617)
+            '-ffp-contract=off',
+            
+            # 警告设置 (参考ClangToolChain.cs:564)
+            '-Wall',
+        ]
+        
+        # 检查并添加缺失的UE Clang参数
+        for arg in ue_clang_args:
+            if arg not in processed_args:
                 processed_args.append(arg)
+        
+        # 移除硬编码的宏定义，让项目的Definitions.h来处理
+        # UE官方通过CompileEnvironment.Definitions来管理宏定义，而不是硬编码
+        
+        
         
         return processed_args
 
     def _normalize_path(self, path: str) -> str:
         """规范化路径"""
         return str(Path(path).resolve()).replace('\\', '/')
+    
+    def _validate_include_paths(self, file_path: str, working_directory: str):
+        """验证关键的include文件是否能够找到"""
+        try:
+            # 读取文件内容，检查前几个include语句
+            with open(file_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()[:10]  # 只检查前10行
+            
+            for i, line in enumerate(lines, 1):
+                line = line.strip()
+                if line.startswith('#include "'):
+                    # 提取include路径
+                    start_quote = line.find('"') + 1
+                    end_quote = line.rfind('"')
+                    if start_quote > 0 and end_quote > start_quote:
+                        include_path = line[start_quote:end_quote]
+                        
+                        # 检查相对路径文件是否存在
+                        if not os.path.isabs(include_path):
+                            full_include_path = os.path.join(working_directory, include_path)
+                            if os.path.exists(full_include_path):
+                                self.logger.debug(f"✓ Include文件存在: {include_path}")
+                            else:
+                                self.logger.warning(f"✗ Include文件不存在: {include_path} (完整路径: {full_include_path})")
+                                # 尝试查找文件是否在其他位置
+                                self._suggest_include_path(include_path, working_directory)
+        except Exception as e:
+            self.logger.debug(f"验证include路径时出错: {e}")
+    
+    def _suggest_include_path(self, include_path: str, working_directory: str):
+        """建议可能的include路径"""
+        filename = os.path.basename(include_path)
+        # 在工作目录及其子目录中搜索文件
+        for root, dirs, files in os.walk(working_directory):
+            if filename in files:
+                found_path = os.path.join(root, filename)
+                rel_path = os.path.relpath(found_path, working_directory)
+                self.logger.info(f"  建议路径: {rel_path}")
+                break
     
     def _get_optimal_working_directory(self, directory: str, file_path: str) -> str:
         """
@@ -422,6 +492,13 @@ class ClangParser:
                 
                 # 智能处理UE项目的工作目录
                 working_directory = self._get_optimal_working_directory(directory, file_path)
+                
+                # 确保工作目录存在且切换成功
+                if not os.path.exists(working_directory):
+                    self.logger.error(f"工作目录不存在: {working_directory}")
+                    return None
+                
+                self.logger.debug(f"切换工作目录: {original_cwd} -> {working_directory}")
                 os.chdir(working_directory)
             
             logger.checkpoint("环境设置完成", working_dir=working_directory)

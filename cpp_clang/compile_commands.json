@@ -1,8 +1,8 @@
 [
 	{
-		"file": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGCharacter/Module.KGCharacter.1.cpp",
-		"command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGCharacter/Module.KGCharacter.1.cpp.obj.rsp\"",
+		"file": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.1.cpp",
+		"command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.1.cpp.obj.rsp\"",
 		"directory": "N:/c7_enginedev/Engine/Source",
-		"output": "N:/c7_enginedev/Client/Plugins/KGCharacter/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGCharacter/Module.KGCharacter.1.cpp.obj"
+		"output": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.1.cpp.obj"
 	}
 ]
