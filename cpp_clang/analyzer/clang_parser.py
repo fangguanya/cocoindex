@@ -213,8 +213,66 @@ class ClangParser:
                 file_commands[normalized_path] = {"args": args, "directory": directory}
         return file_commands
 
+    def _parse_response_file(self, rsp_path: str) -> List[str]:
+        """
+        解析响应文件(.rsp)并返回参数列表
+        
+        Args:
+            rsp_path: 响应文件路径
+            
+        Returns:
+            解析后的参数列表
+        """
+        if not os.path.exists(rsp_path):
+            self.logger.warning(f"响应文件不存在: {rsp_path}")
+            return []
+        
+        try:
+            with open(rsp_path, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+            
+            # 解析响应文件内容
+            if platform.system() == 'Windows':
+                # Windows下使用特殊的解析方式
+                args = shlex.split(content, posix=False)
+            else:
+                args = shlex.split(content)
+            
+            # 递归处理嵌套的响应文件
+            expanded_args = []
+            for arg in args:
+                if arg.startswith('@'):
+                    # 处理嵌套的响应文件
+                    nested_rsp_path = arg[1:].strip('"\'')
+                    if not os.path.isabs(nested_rsp_path):
+                        # 相对路径需要相对于当前响应文件的目录
+                        nested_rsp_path = os.path.join(os.path.dirname(rsp_path), nested_rsp_path)
+                    
+                    nested_args = self._parse_response_file(nested_rsp_path)
+                    expanded_args.extend(nested_args)
+                else:
+                    expanded_args.append(arg)
+            
+            return expanded_args
+        
+        except Exception as e:
+            self.logger.error(f"解析响应文件失败 {rsp_path}: {e}")
+            return []
+
     def _process_compile_args(self, raw_args: List[str]) -> List[str]:
-        """处理和清理编译参数 - 性能优化版"""
+        """处理和清理编译参数，包括响应文件展开 - 性能优化版"""
+        # 首先展开所有响应文件
+        expanded_args = []
+        for arg in raw_args:
+            if arg.startswith('@'):
+                # 这是一个响应文件
+                rsp_path = arg[1:].strip('"\'')
+                rsp_args = self._parse_response_file(rsp_path)
+                expanded_args.extend(rsp_args)
+            else:
+                expanded_args.append(arg)
+        
+        # 然后处理和清理编译参数
         processed_args = []
         skip_next = False
         
@@ -228,7 +286,7 @@ class ClangParser:
             '/W4': '-Wall'
         }
         
-        for i, arg in enumerate(raw_args):
+        for i, arg in enumerate(expanded_args):
             if skip_next:
                 skip_next = False
                 continue
@@ -237,33 +295,70 @@ class ClangParser:
             if arg_clean.endswith(('.exe', '.c', '.cpp', '.cc', '.cxx', '.o', '.obj')):
                 continue
 
-            if arg in ['-o', '-c', '/c'] and i + 1 < len(raw_args):
+            if arg in ['-o', '-c', '/c'] and i + 1 < len(expanded_args):
                 skip_next = True
                 continue
 
             if arg.startswith(('-I', '/I')):
                 if len(arg) > 2:
                     processed_args.append('-I' + arg[2:])
-                elif i + 1 < len(raw_args):
-                    processed_args.append('-I' + raw_args[i+1])
+                elif i + 1 < len(expanded_args):
+                    processed_args.append('-I' + expanded_args[i+1])
                     skip_next = True
             elif arg.startswith(('-D', '/D')):
                 if len(arg) > 2:
                     processed_args.append('-D' + arg[2:])
-                elif i + 1 < len(raw_args):
-                    processed_args.append('-D' + raw_args[i+1])
+                elif i + 1 < len(expanded_args):
+                    processed_args.append('-D' + expanded_args[i+1])
+                    skip_next = True
+            elif arg.startswith('/FI'):
+                # 强制包含文件
+                if len(arg) > 3:
+                    processed_args.append('-include')
+                    processed_args.append(arg[3:])
+                elif i + 1 < len(expanded_args):
+                    processed_args.append('-include')
+                    processed_args.append(expanded_args[i+1])
+                    skip_next = True
+            elif arg.startswith('/imsvc'):
+                # MSVC系统包含路径
+                if len(arg) > 6:
+                    processed_args.append('-isystem')
+                    processed_args.append(arg[6:])
+                elif i + 1 < len(expanded_args):
+                    processed_args.append('-isystem')
+                    processed_args.append(expanded_args[i+1])
                     skip_next = True
             elif arg.startswith('/'):
                 converted = msvc_to_clang.get(arg)
                 if converted:
                     processed_args.append(converted)
+                # 忽略其他MSVC特定参数
             else:
                 processed_args.append(arg)
+        
         return processed_args
 
     def _normalize_path(self, path: str) -> str:
         """规范化路径"""
         return str(Path(path).resolve()).replace('\\', '/')
+    
+    def _get_optimal_working_directory(self, directory: str, file_path: str) -> str:
+        """
+        获取最优的工作目录
+        
+        对于UE项目，应该使用compile_commands.json中指定的原始工作目录，
+        因为UnrealBuildTool已经正确配置了相对路径。
+        
+        Args:
+            directory: compile_commands.json中指定的目录
+            file_path: 要编译的文件路径
+            
+        Returns:
+            最优的工作目录路径
+        """
+        # 直接使用原始目录，UnrealBuildTool的配置是正确的
+        return directory
 
     @profile_function("ClangParser.parse_file")
     def parse_file(self, file_path: str) -> Optional[ParsedFile]:
@@ -324,16 +419,20 @@ class ClangParser:
             with profiler.timer("clang_parse_setup"):
                 start_time = time.perf_counter()
                 original_cwd = os.getcwd()
-                os.chdir(directory)
+                
+                # 智能处理UE项目的工作目录
+                working_directory = self._get_optimal_working_directory(directory, file_path)
+                os.chdir(working_directory)
             
-            logger.checkpoint("环境设置完成", working_dir=directory)
+            logger.checkpoint("环境设置完成", working_dir=working_directory)
             
             # 优化clang解析选项 - 移除PARSE_SKIP_FUNCTION_BODIES以保持函数调用关系提取
             with profiler.timer("clang_translation_unit_parse", {'file': file_path, 'args_count': len(args)}):
                 # 平衡性能与功能完整性的解析选项
                 parse_options = (
-                    clang.TranslationUnit.PARSE_INCOMPLETE |           # 允许不完整解析
-                    clang.TranslationUnit.PARSE_PRECOMPILED_PREAMBLE   # 使用预编译前导
+                    clang.TranslationUnit.PARSE_INCOMPLETE |
+                    clang.TranslationUnit.PARSE_PRECOMPILED_PREAMBLE |
+                    clang.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD
                 )
                 
                 tu = self.index.parse(

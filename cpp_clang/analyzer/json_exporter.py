@@ -15,7 +15,7 @@ JSON Exporter (符合 json_format.md v2.4)
 
 import json
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Dict, Any, List
 # 移除dataclass依赖，使用自定义序列化
 from pathlib import Path
 
@@ -102,7 +102,7 @@ class JsonExporter:
                     "global_call_graph": {
                         # 引用到顶层的functions
                         "total_functions": len(extracted_data.get('functions', {})),
-                        "function_references": list(extracted_data.get('functions', {}).keys())
+                        "function_references": self._build_function_call_references(extracted_data.get('functions', {}))
                     },
                     "reverse_call_graph": {} # 反向图信息已合并到函数定义中
                 },
@@ -301,6 +301,28 @@ class JsonExporter:
         """生成compatibility.json的输出路径"""
         path_obj = Path(main_output_path)
         return str(path_obj.parent / f"{path_obj.stem}_compatibility.json")
+
+    def _build_function_call_references(self, functions: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """构建函数调用关系引用列表"""
+        call_references = []
+        
+        for caller_usr, func_obj in functions.items():
+            if hasattr(func_obj, 'calls_to') and func_obj.calls_to:
+                caller_name = func_obj.name if hasattr(func_obj, 'name') else 'Unknown'
+                
+                for callee_usr in func_obj.calls_to:
+                    callee_func = functions.get(callee_usr)
+                    callee_name = callee_func.name if callee_func and hasattr(callee_func, 'name') else 'Unknown'
+                    
+                    call_references.append({
+                        'caller_usr': caller_usr,
+                        'callee_usr': callee_usr,
+                        'caller_name': caller_name,
+                        'callee_name': callee_name,
+                        'call_type': 'function_call'
+                    })
+        
+        return call_references
 
     def _build_reverse_call_graph(self, functions: Dict[str, Any]) -> Dict[str, Any]:
         """
