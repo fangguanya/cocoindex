@@ -381,6 +381,15 @@ class ClangParser:
             
             # 警告设置 (参考ClangToolChain.cs:564)
             '-Wall',
+            
+            # 添加更多兼容性参数来解决解析问题
+            '-fms-compatibility',
+            '-fms-extensions',
+            '-fdelayed-template-parsing',
+            '-Wno-microsoft',
+            '-Wno-unknown-pragmas',
+            '-Wno-unused-value',
+            '-Wno-ignored-attributes',
         ]
         
         # 检查并添加缺失的UE Clang参数
@@ -544,31 +553,7 @@ class ClangParser:
                         options=parse_options
                     )
                 except clang.TranslationUnitLoadError as e:
-                    if is_problematic_file:
-                        # 对于已知的问题文件，尝试更简化的解析选项
-                        self.logger.warning(f"文件 {file_path} 解析失败，尝试简化解析选项: {e}")
-                        try:
-                            simplified_parse_options = clang.TranslationUnit.PARSE_INCOMPLETE
-                            tu = self.index.parse(
-                                file_path,
-                                args=args[:10],  # 只使用前10个参数，避免复杂参数导致的问题
-                                options=simplified_parse_options
-                            )
-                            self.logger.info(f"使用简化选项成功解析文件: {file_path}")
-                        except Exception as e2:
-                            self.logger.error(f"即使使用简化选项也无法解析文件 {file_path}: {e2}")
-                            # 创建一个空的解析结果，标记为失败但不中断整个流程
-                            os.chdir(original_cwd)
-                            return ParsedFile(
-                                file_path=file_path,
-                                translation_unit=None,
-                                success=False,
-                                diagnostics=[],
-                                parse_time=time.perf_counter() - start_time
-                            )
-                    else:
-                        # 对于其他文件，重新抛出异常
-                        raise
+                    raise
             
             with profiler.timer("clang_parse_cleanup"):
                 os.chdir(original_cwd)

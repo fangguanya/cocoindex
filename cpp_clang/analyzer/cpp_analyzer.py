@@ -1,14 +1,14 @@
 """
-C++ Analyzer Main Module (v2.3)
+C++ Analyzer Main Module (v2.3) - 修复版本
 
-Orchestrates the complete C++ code analysis process by coordinating
-file scanning, clang parsing, entity extraction (v2.3), and JSON export (v2.3).
+修复了头文件编译命令创建的问题，正确处理command字段而不是args字段
 """
 
 import time
 import traceback
 import multiprocessing
 import platform
+import shlex
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set
 
@@ -171,7 +171,7 @@ def _parse_and_extract_worker(file_path: str) -> Optional[SerializableExtractedD
         return SerializableExtractedData.empty_result(file_path, str(e))
 
 class CppAnalyzer:
-    """C++代码分析器 (v2.3)"""
+    """C++代码分析器 (v2.3) - 修复版本"""
     
     def __init__(self, console: Optional[Console] = None):
         """初始化分析器"""
@@ -210,22 +210,31 @@ class CppAnalyzer:
             
             logger.checkpoint("compile_commands加载完成", source_files_count=len(source_files))
 
-            # 1.5. 扫描所有相关的头文件
-            self.console.print("\n[bold]1.5. 扫描项目头文件...[/bold]")
-            with profiler.timer("scan_project_files"):
-                all_project_files = self._scan_all_project_files(source_files, temp_parser.compile_commands, config.project_root)
-            logger.checkpoint("头文件扫描完成", total_files_count=len(all_project_files))
+            # 1.5. 扫描所有相关的头文件并为其创建编译命令
+            self.console.print("\n[bold]1.5. 扫描项目头文件并创建编译命令...[/bold]")
+            with profiler.timer("scan_and_prepare_header_files"):
+                header_files, extended_compile_commands = self._scan_and_prepare_header_files(
+                    source_files, temp_parser.compile_commands, config.project_root, config.scan_directory
+                )
+                
+                # 更新解析器的编译命令以包含头文件
+                temp_parser.compile_commands.update(extended_compile_commands)
+                all_files_to_process = source_files + header_files
+                
+            logger.checkpoint("头文件扫描和编译命令创建完成", 
+                            header_files_count=len(header_files),
+                            total_files_count=len(all_files_to_process))
 
             # 1.6. 应用文件过滤规则
             self.console.print("\n[bold]1.6. 应用文件过滤规则...[/bold]")
             with profiler.timer("filter_files"):
                 # 使用FileScanner进行专业的文件过滤
                 file_scanner = FileScanner()
-                filtered_files = file_scanner.filter_files_from_list(source_files, config.scan_directory)
+                filtered_files = file_scanner.filter_files_from_list(all_files_to_process, config.scan_directory)
                 
-                self.console.print(f"-> 过滤前: {len(source_files)} 个文件")
+                self.console.print(f"-> 过滤前: {len(all_files_to_process)} 个文件 (源文件: {len(source_files)}, 头文件: {len(header_files)})")
                 self.console.print(f"-> 过滤后: {len(filtered_files)} 个文件")
-                self.logger.info(f"文件过滤: {len(source_files)} -> {len(filtered_files)}")
+                self.logger.info(f"文件过滤: {len(all_files_to_process)} -> {len(filtered_files)}")
                 
                 if config.max_files is not None and config.max_files > 0:
                     filtered_files = filtered_files[:config.max_files]
@@ -236,7 +245,7 @@ class CppAnalyzer:
 
             # 1.7. 在主进程中创建并初始化确定性的文件管理器
             with profiler.timer("init_file_manager"):
-                file_id_manager = DistributedFileIdManager(config.project_root, all_project_files)
+                file_id_manager = DistributedFileIdManager(config.project_root, all_files_to_process)
 
             # 2. 并行解析和提取
             self.console.print("\n[bold]2. 开始并行解析和提取实体...[/bold]")
@@ -333,6 +342,7 @@ class CppAnalyzer:
                 
                 stats = {
                     "total_files_in_compile_commands": len(source_files),
+                    "total_header_files_added": len(header_files),
                     "total_files_to_process": len(filtered_files),
                     "successful_processed_files": len(successful_files),
                     "total_functions": len(extracted_data.get("functions", {})),
@@ -358,17 +368,38 @@ class CppAnalyzer:
             self.logger.error(f"分析过程中发生严重错误: {e}\n{traceback.format_exc()}")
             return self._create_failure_result("Exception", str(e))
 
-    def _scan_all_project_files(self, source_files: List[str], compile_commands: Dict, project_root: str) -> List[str]:
-        """扫描所有源文件和相关的头文件"""
-        all_files = set(source_files)
+    def _scan_and_prepare_header_files(self, source_files: List[str], compile_commands: Dict, 
+                                     project_root: str, scan_directory: str) -> tuple[List[str], Dict[str, Dict]]:
+        """扫描头文件并为其创建编译命令 - 修复版本"""
+        header_files = []
+        header_compile_commands = {}
         include_dirs = set()
 
+        # 1. 从编译命令中提取include目录 - 修复：正确处理command字段
         for cmd_info in compile_commands.values():
             directory = Path(cmd_info['directory'])
-            for arg in cmd_info['args']:
+            
+            # 关键修复：正确处理command字段而不是args字段
+            args = cmd_info.get('args', [])
+            if not args and 'command' in cmd_info:
+                # 如果没有args字段，从command字段解析参数
+                try:
+                    # 使用shlex.split来正确解析命令行，处理引号和转义
+                    command_parts = shlex.split(cmd_info['command'])
+                    args = command_parts[1:]  # 跳过编译器路径
+                except Exception as e:
+                    self.logger.warning(f"解析编译命令失败: {e}")
+                    continue
+            
+            for arg in args:
+                # 跳过响应文件引用（关键修复）
+                if arg.startswith('@'):
+                    continue
+                
                 if arg.startswith('-I'):
                     path_str = arg[2:].strip()
-                    if not path_str: continue
+                    if not path_str: 
+                        continue
                     
                     include_path = Path(path_str)
                     if not include_path.is_absolute():
@@ -381,17 +412,175 @@ class CppAnalyzer:
                         include_path.relative_to(project_root)
                         include_dirs.add(str(include_path))
                     except ValueError:
-                        continue # 忽略项目外的目录
+                        continue
 
+        # 2. 直接扫描目标目录中的头文件（重要修复）
+        scan_path = Path(scan_directory)
+        if scan_path.exists():
+            try:
+                for p in scan_path.rglob('*'):
+                    if p.is_file() and p.suffix in ['.h', '.hpp']:
+                        header_path = str(p.resolve())
+                        header_files.append(header_path)
+                        self.logger.info(f"发现头文件: {header_path}")
+            except Exception as e:
+                self.logger.warning(f"扫描目标目录 '{scan_directory}' 时出错: {e}")
+
+        # 3. 扫描include目录中的头文件（作为补充）
         for inc_dir in include_dirs:
             try:
                 for p in Path(inc_dir).rglob('*'):
                     if p.is_file() and p.suffix in ['.h', '.hpp']:
-                        all_files.add(str(p))
+                        header_path = str(p.resolve())
+                        # 只包含scan_directory下的头文件
+                        try:
+                            Path(header_path).relative_to(scan_directory)
+                            if header_path not in header_files:  # 避免重复
+                                header_files.append(header_path)
+                        except ValueError:
+                            continue
             except Exception as e:
                 self.logger.warning(f"扫描头文件目录 '{inc_dir}' 时出错: {e}")
 
-        return list(all_files)
+        # 4. 为头文件创建编译命令 - 修复：正确处理command字段
+        # 选择一个代表性的源文件作为模板
+        template_source = None
+        template_cmd_info = None
+        
+        # 优先选择scan_directory下的源文件作为模板
+        for src_file in source_files:
+            try:
+                Path(src_file).relative_to(scan_directory)
+                template_source = src_file
+                template_cmd_info = compile_commands[src_file]
+                break
+            except ValueError:
+                continue
+        
+        # 如果没有找到scan_directory下的源文件，使用第一个源文件作为模板
+        if not template_source and source_files:
+            template_source = source_files[0]
+            template_cmd_info = compile_commands[template_source]
+
+        if template_cmd_info:
+            # 获取模板的编译参数
+            template_args = template_cmd_info.get('args', [])
+            if not template_args and 'command' in template_cmd_info:
+                try:
+                    command_parts = shlex.split(template_cmd_info['command'])
+                    template_args = command_parts[1:]  # 跳过编译器路径
+                except Exception as e:
+                    self.logger.warning(f"解析模板编译命令失败: {e}")
+                    template_args = []
+            
+            # 为每个头文件创建编译命令
+            for header_file in header_files:
+                normalized_header_path = str(Path(header_file).resolve()).replace('\\', '/')
+                
+                # 复制模板的编译参数，但移除一些不适用于头文件的参数
+                header_args = []
+                skip_next = False
+                
+                i = 0
+                while i < len(template_args):
+                    arg = template_args[i]
+                    
+                    # 跳过响应文件引用（关键修复）
+                    if arg.startswith('@'):
+                        i += 1
+                        continue
+                    
+                    # 检查并跳过-Xclang -x -Xclang c++序列
+                    if (arg == '-Xclang' and i + 3 < len(template_args) and 
+                        template_args[i+1:i+4] == ['-x', '-Xclang', 'c++']):
+                        # 跳过整个-Xclang -x -Xclang c++序列
+                        print(f"跳过-Xclang序列: {template_args[i:i+4]}")
+                        i += 4
+                        continue
+                    elif (arg == '-Xclang' and i + 3 < len(template_args) and 
+                          template_args[i+1:i+4] == ['-x', '-Xclang', '"c++"']):
+                        # 跳过整个-Xclang -x -Xclang "c++"序列（带引号版本）
+                        print(f"跳过-Xclang序列（带引号）: {template_args[i:i+4]}")
+                        i += 4
+                        continue
+                    
+                    # 跳过PCH相关参数（可能导致解析失败）
+                    if arg in ['-include'] and i + 1 < len(template_args):
+                        next_arg = template_args[i + 1]
+                        if 'PCH.' in next_arg or 'Definitions.h' in next_arg:
+                            i += 2  # 跳过-include和下一个参数
+                            continue
+                    
+                    # 跳过输出相关参数
+                    if arg in ['-o', '-c', '/c', '/Fo'] and i + 1 < len(template_args):
+                        i += 2  # 跳过参数和值
+                        continue
+                    
+                    # 跳过源文件特定的参数
+                    if arg.endswith(('.cpp', '.cc', '.cxx', '.c')):
+                        i += 1
+                        continue
+                    
+                    # 跳过有问题的参数格式
+                    if arg in ['"c++"', 'c++']:
+                        # 检查是否是-x c++序列的一部分
+                        if i >= 1 and template_args[i-1] in ['-x']:
+                            # 这是-x c++序列，跳过
+                            i += 1
+                            continue
+                        else:
+                            # 这是一个独立的c++参数，也跳过
+                            i += 1
+                            continue
+                    
+                    # 跳过可能有问题的UE特定参数
+                    if 'PCH.' in arg or 'Definitions.h' in arg:
+                        i += 1
+                        continue
+                    
+                    header_args.append(arg)
+                    i += 1
+                
+                # 确保包含必要的include路径
+                if not any(arg.startswith('-I') for arg in header_args):
+                    # 从现有的include目录中添加基本路径，避免硬编码
+                    if include_dirs:
+                        # 使用已发现的include目录
+                        for inc_dir in sorted(include_dirs)[:4]:  # 限制数量避免过多参数
+                            header_args.append(f'-I{inc_dir}')
+                    else:
+                        # 如果没有发现include目录，添加相对于项目根目录的基本路径
+                        project_path = Path(project_root)
+                        basic_includes = [
+                            project_path / "Source",
+                            project_path / "Public", 
+                            project_path / "Private"
+                        ]
+                        for inc_path in basic_includes:
+                            if inc_path.exists():
+                                header_args.append(f'-I{inc_path}')
+                
+                # 添加头文件特定的参数（避免重复）
+                additional_args = [
+                    '-x', 'c++',  # 指定为C++文件
+                    '-DPLATFORM_WINDOWS=1',
+                    '-D_WIN64=1'
+                ]
+                
+                # 只添加不存在的参数，避免重复
+                for arg in additional_args:
+                    if arg not in header_args:
+                        header_args.append(arg)
+                
+                header_compile_commands[normalized_header_path] = {
+                    "args": header_args,
+                    "directory": template_cmd_info['directory']
+                }
+
+        self.console.print(f"-> 发现头文件: {len(header_files)} 个")
+        self.console.print(f"-> 创建头文件编译命令: {len(header_compile_commands)} 个")
+        
+        return header_files, header_compile_commands
 
     def _print_performance_report(self, stats: Dict[str, Any], total_time: float):
         """打印详细的性能报告"""
@@ -400,6 +589,7 @@ class CppAnalyzer:
         
         # 基本统计
         self.console.print(f"📁 处理文件数: {stats['successful_processed_files']}/{stats['total_files_to_process']}")
+        self.console.print(f"📄 源文件: {stats['total_files_in_compile_commands']}, 头文件: {stats['total_header_files_added']}")
         self.console.print(f"🔍 发现实体: 函数 {stats['total_functions']}, 类 {stats['total_classes']}, 命名空间 {stats['total_namespaces']}")
         self.console.print(f"⏱️  总耗时: {total_time:.2f} 秒")
         

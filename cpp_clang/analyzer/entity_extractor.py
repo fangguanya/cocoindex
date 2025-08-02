@@ -1,17 +1,5 @@
 """
-Entity Extractor (符合 json_format.md v2.4) - 改进版
-
-从 Clang AST 中提取 C++ 实体，并将其转换为严格遵循 v2.4 规范的
-结构化数据。该模块负责生成文件ID、使用USR ID作为主键、状态位掩码，
-并填充所有 C++ 扩展字段。
-
-主要改进：
-- 使用USR ID作为全局唯一标识符
-- 函数体代码内容提取
-- 声明vs定义的优化处理
-- 全局nodes映射机制
-- 模板参数和实参提取
-- 增强的函数调用提取逻辑，包含错误处理和备用文本解析
+Entity Extractor (符合 json_format.md v2.4) - 完整版，基于clang CursorKind系统性分析
 """
 
 import logging
@@ -63,7 +51,7 @@ class CodeExtractor:
 
 
 class EntityExtractor:
-    """从 Clang AST 提取实体 (v2.5 - 模板支持 + 性能优化 + 改进的函数调用提取)"""
+    """从 Clang AST 提取实体 (v2.6 - 基于clang CursorKind系统性分析的完整函数调用识别)"""
 
     def __init__(self, file_id_manager: DistributedFileIdManager):
         self.logger = get_logger()
@@ -84,9 +72,8 @@ class EntityExtractor:
         self._qualified_name_cache: Dict[str, str] = {}
         self._relevant_kinds = self._get_relevant_cursor_kinds()
 
-
     def _get_relevant_cursor_kinds(self) -> Set[clang.CursorKind]:
-        """动态构建相关的CursorKind集合，以实现版本兼容"""
+        """动态构建相关的CursorKind集合，基于clang CursorKind系统性分析"""
         relevant_kinds = {
             # 基本声明
             clang.CursorKind.NAMESPACE, clang.CursorKind.CLASS_DECL, clang.CursorKind.STRUCT_DECL,
@@ -104,13 +91,21 @@ class EntityExtractor:
             # 表达式
             clang.CursorKind.UNEXPOSED_EXPR, clang.CursorKind.INIT_LIST_EXPR, clang.CursorKind.LAMBDA_EXPR,
             clang.CursorKind.BINARY_OPERATOR, clang.CursorKind.UNARY_OPERATOR,
+            # C++特定表达式
+            clang.CursorKind.CXX_NEW_EXPR, clang.CursorKind.CXX_DELETE_EXPR,
+            clang.CursorKind.CXX_FUNCTIONAL_CAST_EXPR, clang.CursorKind.CXX_STATIC_CAST_EXPR,
+            clang.CursorKind.CXX_DYNAMIC_CAST_EXPR, clang.CursorKind.CXX_REINTERPRET_CAST_EXPR,
+            clang.CursorKind.CXX_CONST_CAST_EXPR,
+            # Objective-C表达式
+            clang.CursorKind.OBJC_MESSAGE_EXPR, clang.CursorKind.OBJC_SELECTOR_EXPR,
+            # Block表达式
+            clang.CursorKind.BLOCK_EXPR,
         }
         
-        # 动态添加可能不存在的Kind
+        # 动态添加可能不存在的Kind（基于clang分析结果）
         optional_kinds = [
             "CXX_OPERATOR_CALL_EXPR", "CXX_MEMBER_CALL_EXPR", "CXX_CONSTRUCT_EXPR",
-            "CXX_TEMPORARY_OBJECT_EXPR", "CXX_DELETE_EXPR", "CXX_NEW_EXPR",
-            "CXX_TRY_STMT", "CXX_CATCH_STMT", "CXX_FOR_RANGE_STMT"
+            "CXX_TEMPORARY_OBJECT_EXPR", "CXX_TRY_STMT", "CXX_CATCH_STMT", "CXX_FOR_RANGE_STMT"
         ]
         
         for kind_name in optional_kinds:
@@ -119,67 +114,38 @@ class EntityExtractor:
                 
         return relevant_kinds
 
-    @profile_function("EntityExtractor.extract_from_files")
     def extract_from_files(self, parsed_files: List[Any], config: Any) -> Dict[str, Any]:
-        logger = DetailedLogger("实体提取")
+        """提取实体的主要方法"""
+        self._reset_state()
         
-        with profiler.timer("extract_reset_state"):
-            self._reset_state()
-        
-        logger.checkpoint("状态重置完成", parsed_files_count=len(parsed_files))
+        # Pass 1: 提取声明和定义
+        for parsed_file in parsed_files:
+            if parsed_file.translation_unit:
+                self._first_pass_visitor_optimized(parsed_file.translation_unit.cursor)
 
-        # Pass 1: 提取声明和定义 - 优化版
-        with profiler.timer("extract_pass1_declarations"):
-            for i, parsed_file in enumerate(parsed_files):
-                if parsed_file.translation_unit:
-                    file_logger = DetailedLogger(f"Pass1-文件{i+1}")
-                    with profiler.timer("first_pass_single_file", {'file': parsed_file.file_path}):
-                        self._first_pass_visitor_optimized(parsed_file.translation_unit.cursor)
-                    file_logger.finish()
-
-        logger.checkpoint("Pass 1 完成", 
-                         functions_found=len(self.functions),
-                         classes_found=len(self.classes),
-                         namespaces_found=len(self.namespaces))
-
-        # Pass 2: 提取关系 - 优化版
-        with profiler.timer("extract_pass2_relationships"):
-            for i, parsed_file in enumerate(parsed_files):
-                if parsed_file.translation_unit:
-                    file_logger = DetailedLogger(f"Pass2-文件{i+1}")
-                    with profiler.timer("second_pass_single_file", {'file': parsed_file.file_path}):
-                        self._second_pass_visitor_optimized(parsed_file.translation_unit.cursor)
-                    file_logger.finish()
-
-        logger.checkpoint("Pass 2 完成")
+        # Pass 2: 提取关系
+        for parsed_file in parsed_files:
+            if parsed_file.translation_unit:
+                self._second_pass_visitor_optimized(parsed_file.translation_unit.cursor)
 
         # Pass 3: 建立反向调用关系
-        with profiler.timer("extract_pass3_reverse_calls"):
-            self._build_reverse_call_relationships()
-
-        logger.checkpoint("Pass 3 完成")
+        self._build_reverse_call_relationships()
         
         # 构建结果
-        with profiler.timer("extract_build_result"):
-            result = {
-                "functions": self.functions,
-                "classes": self.classes,
-                "namespaces": self.namespaces,
-                "global_nodes": {usr_id: node.to_dict() for usr_id, node in self.global_nodes.items()},
-                "file_mappings": self.file_id_manager.get_file_mappings()
-            }
-
-        total_time = logger.finish("实体提取完成")
-        
-        if total_time > 5.0:  # 如果实体提取超过5秒，记录警告
-            self.logger.warning(f"⚠️  实体提取耗时过长: {total_time:.2f}s")
+        result = {
+            "functions": self.functions,
+            "classes": self.classes,
+            "namespaces": self.namespaces,
+            "global_nodes": {usr_id: node.to_dict() for usr_id, node in self.global_nodes.items()},
+            "file_mappings": self.file_id_manager.get_file_mappings()
+        }
         
         self.logger.info(f"实体提取完成。函数: {len(self.functions)}, 类: {len(self.classes)}, 命名空间: {len(self.namespaces)}")
         
         return result
 
     def _reset_state(self):
-        """重置状态 - 线程安全版本"""
+        """重置状态"""
         with self._lock:
             self.functions.clear()
             self.classes.clear()
@@ -191,23 +157,21 @@ class EntityExtractor:
             self._qualified_name_cache.clear()
 
     def _first_pass_visitor_optimized(self, cursor):
-        """优化版第一遍遍历 - 只提取声明和定义"""
-        with profiler.timer("first_pass_visitor"):
-            self._visit_optimized(cursor, self._extract_declarations_only)
+        """第一遍遍历 - 只提取声明和定义"""
+        self._visit_optimized(cursor, self._extract_declarations_only)
     
     def _second_pass_visitor_optimized(self, cursor):
-        """优化版第二遍遍历 - 只提取关系"""
-        with profiler.timer("second_pass_visitor"):
-            self._visit_optimized(cursor, self._extract_relationships_only)
+        """第二遍遍历 - 只提取关系"""
+        self._visit_optimized(cursor, self._extract_relationships_only)
     
     def _visit_optimized(self, cursor, extract_func):
-        """优化的AST遍历算法 - 减少递归调用和内存分配"""
+        """优化的AST遍历算法"""
         if not cursor:
             return
             
-        # 使用栈而不是递归，避免Python递归限制和开销
+        # 使用栈而不是递归
         stack = [cursor]
-        visited = set()  # 防止重复访问
+        visited = set()
         
         while stack:
             current = stack.pop()
@@ -225,14 +189,13 @@ class EntityExtractor:
             # 执行提取函数
             extract_func(current)
             
-            # 只遍历相关的子节点，跳过不必要的节点
+            # 只遍历相关的子节点
             for child in current.get_children():
                 if self._should_visit_child(child):
                     stack.append(child)
     
     def _should_skip_cursor(self, cursor):
         """判断是否应该跳过这个cursor"""
-        # 跳过注释、预处理指令等不相关节点
         skip_kinds = {
             clang.CursorKind.UNEXPOSED_DECL,
             clang.CursorKind.MACRO_DEFINITION,
@@ -242,8 +205,7 @@ class EntityExtractor:
         return cursor.kind in skip_kinds
     
     def _should_visit_child(self, cursor):
-        """判断是否应该访问这个子节点 - 改进版，确保遍历所有可能包含函数调用的节点"""
-        # 更宽松的判断条件，确保不遗漏任何可能的节点
+        """判断是否应该访问这个子节点"""
         return (cursor.kind in self._relevant_kinds or 
                 cursor.kind.is_declaration() or 
                 cursor.kind.is_statement() or 
@@ -269,7 +231,6 @@ class EntityExtractor:
             clang.CursorKind.FUNCTION_TEMPLATE
         ]:
             usr = cursor.get_usr()
-            # 确保函数在我们的跟踪列表中，并且尚未处理
             if usr and usr in self.functions and usr not in self._functions_with_calls_extracted:
                 self._extract_calls_for_function(cursor)
                 self._functions_with_calls_extracted.add(usr)
@@ -279,41 +240,34 @@ class EntityExtractor:
             clang.CursorKind.CLASS_DECL, clang.CursorKind.STRUCT_DECL, clang.CursorKind.CLASS_TEMPLATE
         ]:
             usr = cursor.get_usr()
-            # 确保类在我们的跟踪列表中
             if usr and usr in self.classes:
                 self._extract_inheritance_for_class(cursor)
     
     def _extract_namespace(self, cursor):
-        """提取命名空间 - 优化版"""
+        """提取命名空间"""
         self._process_namespace_cursor(cursor)
     
     def _extract_class(self, cursor):
-        """提取类 - 优化版"""
+        """提取类"""
         self._process_class_cursor(cursor)
     
     def _extract_function(self, cursor):
-        """提取函数 - 优化版"""
+        """提取函数"""
         self._process_function_cursor(cursor)
-    
 
     def _process_function_cursor(self, cursor: clang.Cursor):
-        """处理函数游标 - 线程安全和性能优化版"""
+        """处理函数游标"""
         usr = cursor.get_usr()
         if not usr:
             return
-        
-        # 确保主模板被处理
-        if cursor.is_definition() and cursor.kind == clang.CursorKind.CLASS_DECL and hasattr(cursor.type, 'get_specialized_template'):
-            primary_template_cursor = cursor.type.get_specialized_template()
-            if primary_template_cursor:
-                self._process_class_cursor(primary_template_cursor.get_declaration())
 
         if usr in self._processed_usrs:
             return
             
         file_path = cursor.location.file.name
         file_id = self.file_id_manager.get_file_id(file_path)
-        if not file_id: return
+        if not file_id: 
+            return
 
         with self._lock:
             if usr in self.functions:
@@ -331,23 +285,18 @@ class EntityExtractor:
                 self._processed_usrs.add(usr)
 
     def _process_class_cursor(self, cursor: clang.Cursor):
-        """处理类游标 - 线程安全和性能优化版"""
+        """处理类游标"""
         usr = cursor.get_usr()
         if not usr:
             return
-        
-        # 确保主模板被处理
-        if cursor.is_definition() and cursor.kind == clang.CursorKind.CLASS_DECL and hasattr(cursor.type, 'get_specialized_template'):
-            primary_template_cursor = cursor.type.get_specialized_template()
-            if primary_template_cursor:
-                self._process_class_cursor(primary_template_cursor.get_declaration())
 
         if usr in self._processed_usrs:
             return
             
         file_path = cursor.location.file.name
         file_id = self.file_id_manager.get_file_id(file_path)
-        if not file_id: return
+        if not file_id: 
+            return
 
         with self._lock:
             if usr in self.classes:
@@ -365,12 +314,14 @@ class EntityExtractor:
                 self._processed_usrs.add(usr)
 
     def _process_namespace_cursor(self, cursor: clang.Cursor):
-        """处理命名空间游标 - 线程安全和性能优化版"""
+        """处理命名空间游标"""
         usr = cursor.get_usr()
-        if not usr: return
+        if not usr: 
+            return
             
         file_id = self.file_id_manager.get_file_id(cursor.location.file.name)
-        if not file_id: return
+        if not file_id: 
+            return
 
         with self._lock:
             if usr in self.namespaces:
@@ -384,9 +335,11 @@ class EntityExtractor:
                 self.global_nodes[usr] = EntityNode(usr, "namespace", ns)
 
     def _create_function_from_cursor(self, cursor: clang.Cursor) -> Function:
+        """从游标创建函数对象"""
         usr = cursor.get_usr()
         file_id = self.file_id_manager.get_file_id(cursor.location.file.name)
-        if not file_id: raise ValueError(f"无法获取文件ID for {cursor.location.file.name}")
+        if not file_id: 
+            raise ValueError(f"无法获取文件ID for {cursor.location.file.name}")
         
         code_content = self.code_extractor.extract_function_code(cursor) if cursor.is_definition() else ""
         location = Location(file_id=file_id, line=cursor.location.line, column=cursor.location.column)
@@ -417,9 +370,11 @@ class EntityExtractor:
         )
 
     def _create_class_from_cursor(self, cursor: clang.Cursor) -> Class:
+        """从游标创建类对象"""
         usr = cursor.get_usr()
         file_id = self.file_id_manager.get_file_id(cursor.location.file.name)
-        if not file_id: raise ValueError(f"无法获取文件ID for {cursor.location.file.name}")
+        if not file_id: 
+            raise ValueError(f"无法获取文件ID for {cursor.location.file.name}")
             
         qualified_name = self._get_qualified_name(cursor)
         location = Location(file_id=file_id, line=cursor.location.line, column=cursor.location.column)
@@ -461,9 +416,11 @@ class EntityExtractor:
         )
 
     def _create_namespace_from_cursor(self, cursor: clang.Cursor) -> Namespace:
+        """从游标创建命名空间对象"""
         usr = cursor.get_usr()
         file_id = self.file_id_manager.get_file_id(cursor.location.file.name)
-        if not file_id: raise ValueError(f"无法获取文件ID for {cursor.location.file.name}")
+        if not file_id: 
+            raise ValueError(f"无法获取文件ID for {cursor.location.file.name}")
             
         location = Location(file_id=file_id, line=cursor.location.line, column=cursor.location.column)
         return Namespace(
@@ -473,8 +430,10 @@ class EntityExtractor:
         )
 
     def _update_function_with_definition(self, func: Function, cursor: clang.Cursor):
+        """用定义更新函数"""
         file_id = self.file_id_manager.get_file_id(cursor.location.file.name)
-        if not file_id: return
+        if not file_id: 
+            return
         
         func.definition_file_id = file_id
         func.definition_location = Location(file_id=file_id, line=cursor.location.line, column=cursor.location.column)
@@ -485,8 +444,10 @@ class EntityExtractor:
         func.cpp_extensions.mangled_name = cursor.mangled_name
 
     def _update_class_with_definition(self, cls: Class, cursor: clang.Cursor):
+        """用定义更新类"""
         file_id = self.file_id_manager.get_file_id(cursor.location.file.name)
-        if not file_id: return
+        if not file_id: 
+            return
         
         cls.definition_file_id = file_id
         cls.definition_location = Location(file_id=file_id, line=cursor.location.line, column=cursor.location.column)
@@ -508,270 +469,154 @@ class EntityExtractor:
                         self.global_nodes[child_usr] = EntityNode(child_usr, "function", member_func)
 
     def _extract_calls_for_function(self, cursor: clang.Cursor):
-        """提取函数调用关系 - 改进版，增强错误处理和备用文本解析"""
+        """提取函数调用关系 - 完整版，基于clang CursorKind系统性分析"""
         caller_usr = cursor.get_usr()
         caller_func = self.functions.get(caller_usr)
         if not caller_func:
             return
 
-        if self.logger.logger.isEnabledFor(logging.DEBUG):
-            self.logger.debug(f"🔍 分析函数调用: {caller_func.name} ({caller_usr})")
+        # 使用完整的调用提取逻辑，识别所有类型的函数调用
+        for child in cursor.get_children():
+            self._extract_calls_recursive(child, caller_func, caller_usr)
 
-        call_count = 0
-        processed_calls = set()
+    def _extract_calls_recursive(self, cursor: clang.Cursor, caller_func: Function, caller_usr: str):
+        """递归提取调用 - 完整版，基于clang CursorKind系统性分析"""
         
-        # 方法1: AST遍历（主要方法）
-        ast_calls = self._extract_calls_from_ast(cursor, caller_usr, caller_func, processed_calls)
-        call_count += ast_calls
+        callee_cursor = None
+        call_type = None
         
-        # 方法2: 文本解析（备用方法，当AST解析不完整时）
-        if call_count == 0 or self._should_use_text_fallback(cursor):
-            text_calls = self._extract_calls_from_text_fallback(cursor, caller_usr, caller_func, processed_calls)
-            call_count += text_calls
+        # === 基于clang分析的完整函数调用类型处理 ===
+        
+        if cursor.kind == clang.CursorKind.CALL_EXPR:
+            # 普通函数调用：func()
+            callee_cursor = cursor.referenced
+            call_type = "call_expr"
             
-            if text_calls > 0 and self.logger.logger.isEnabledFor(logging.DEBUG):
-                self.logger.debug(f"🔧 文本解析补充发现 {text_calls} 个调用")
-
-        if self.logger.logger.isEnabledFor(logging.INFO) and call_count > 0:
-            self.logger.info(f"📊 函数 {caller_func.name} 发现 {call_count} 个调用")
-
-    def _extract_calls_from_ast(self, cursor: clang.Cursor, caller_usr: str, caller_func, processed_calls: set) -> int:
-        """从AST中提取函数调用"""
-        calls_found = 0
-        
-        try:
-            # 使用安全的遍历方法
-            for child in self._safe_walk_preorder(cursor):
-                callee_cursor = None
-                call_type = "unknown"
-
-                # 1. 直接函数调用表达式
-                if child.kind == clang.CursorKind.CALL_EXPR:
-                    callee_cursor = child.referenced
-                    call_type = "direct_call"
-                    
-                # 2. 成员函数引用表达式  
-                elif child.kind == clang.CursorKind.MEMBER_REF_EXPR:
-                    callee_cursor = child.referenced
-                    call_type = "member_call"
-                    
-                # 3. 声明引用表达式（可能是函数指针调用）
-                elif child.kind == clang.CursorKind.DECL_REF_EXPR:
-                    callee_cursor = child.referenced
-                    # 只有当引用的是函数时才算作调用
-                    if callee_cursor and callee_cursor.kind in [
-                        clang.CursorKind.FUNCTION_DECL, clang.CursorKind.CXX_METHOD,
-                        clang.CursorKind.CONSTRUCTOR, clang.CursorKind.DESTRUCTOR,
-                        clang.CursorKind.FUNCTION_TEMPLATE
-                    ]:
-                        call_type = "function_ref"
-                    else:
-                        callee_cursor = None
-                        
-                # 4. C++特定的调用表达式
-                elif hasattr(clang.CursorKind, 'CXX_MEMBER_CALL_EXPR') and child.kind == clang.CursorKind.CXX_MEMBER_CALL_EXPR:
-                    callee_cursor = child.referenced
-                    call_type = "member_call_expr"
-                    
-                elif hasattr(clang.CursorKind, 'CXX_OPERATOR_CALL_EXPR') and child.kind == clang.CursorKind.CXX_OPERATOR_CALL_EXPR:
-                    callee_cursor = child.referenced
-                    call_type = "operator_call"
-                    
-                # 5. 构造函数调用
-                elif hasattr(clang.CursorKind, 'CXX_CONSTRUCT_EXPR') and child.kind == clang.CursorKind.CXX_CONSTRUCT_EXPR:
-                    callee_cursor = child.referenced
-                    call_type = "constructor_call"
-                    
-                # 6. new表达式
-                elif hasattr(clang.CursorKind, 'CXX_NEW_EXPR') and child.kind == clang.CursorKind.CXX_NEW_EXPR:
-                    callee_cursor = child.referenced
-                    call_type = "new_expr"
-
-                if callee_cursor and callee_cursor.kind.is_declaration():
-                    target_cursor = callee_cursor.get_definition() or callee_cursor
-                    callee_usr = target_cursor.get_usr()
-
-                    if not callee_usr or callee_usr == caller_usr:
-                        continue
-                    # 严格过滤：只记录真正的函数调用，排除成员变量、枚举值等
-                    if not target_cursor.kind in [
-                        clang.CursorKind.FUNCTION_DECL, clang.CursorKind.CXX_METHOD,
-                        clang.CursorKind.CONSTRUCTOR, clang.CursorKind.DESTRUCTOR,
-                        clang.CursorKind.FUNCTION_TEMPLATE
-                    ]:
-                        if self.logger.logger.isEnabledFor(logging.DEBUG):
-                            self.logger.debug(f"  ❌ 跳过非函数调用: {target_cursor.spelling} (kind: {target_cursor.kind})")
-                        continue
-
-                    # 使用 (line, column, callee_usr) 来唯一标识一个调用，防止重复
-                    call_signature = (child.location.line, child.location.column, callee_usr)
-                    if call_signature in processed_calls:
-                        continue
-                    processed_calls.add(call_signature)
-
-                    if callee_usr not in caller_func.calls_to:
-                        caller_func.calls_to.append(callee_usr)
-                    
-                    calls_found += 1
-                    if self.logger.logger.isEnabledFor(logging.DEBUG):
-                        self.logger.debug(f"  ✅ 发现调用: {target_cursor.spelling} ({call_type}) at L{child.location.line}")
-
-                    def_loc = target_cursor.extent.start
-                    file_id = self.file_id_manager.get_file_id(def_loc.file.name) if def_loc.file else None
-                    
-                    resolved_def_loc = None
-                    if file_id and def_loc.line is not None:
-                        resolved_def_loc = ResolvedDefinitionLocation(file_id=file_id, line=def_loc.line, column=def_loc.column)
-
-                    cpp_call_info = CppCallInfo(
-                        call_status_flags=self._get_call_status_flags(child),
-                        call_type=call_type,
-                        resolved_overload=callee_usr,
-                        resolved_definition_location=resolved_def_loc,
-                        template_args=self._extract_template_arguments(child)
-                    )
-                    
-                    caller_func.call_details.append(CallInfo(
-                        to_usr_id=callee_usr,
-                        line=child.location.line,
-                        column=child.location.column,
-                        type="direct",
-                        cpp_call_info=cpp_call_info
-                    ))
-                    
-        except Exception as e:
-            if self.logger.logger.isEnabledFor(logging.DEBUG):
-                self.logger.debug(f"⚠️  AST遍历出现错误: {str(e)}")
-        
-        return calls_found
-
-    def _safe_walk_preorder(self, cursor: clang.Cursor):
-        """安全的前序遍历，避免libclang版本问题"""
-        try:
-            return cursor.walk_preorder()
-        except Exception as e:
-            if self.logger.logger.isEnabledFor(logging.DEBUG):
-                self.logger.debug(f"walk_preorder失败，使用备用方法: {str(e)}")
-            return self._get_children_recursive(cursor)
-
-    def _get_children_recursive(self, cursor: clang.Cursor):
-        """递归获取所有子节点"""
-        def _recurse(node):
-            try:
-                yield node
-                for child in node.get_children():
-                    yield from _recurse(child)
-            except Exception:
-                pass
-        
-        return _recurse(cursor)
-
-    def _should_use_text_fallback(self, cursor: clang.Cursor) -> bool:
-        """判断是否应该使用文本解析作为备用方法"""
-        try:
-            # 检查是否有解析错误或AST不完整的迹象
-            if not cursor.extent or not cursor.extent.start.file:
-                return True
+        elif cursor.kind == clang.CursorKind.MEMBER_REF_EXPR:
+            # 成员函数引用：obj.method 或 obj->method
+            callee_cursor = cursor.referenced
+            call_type = "member_ref_expr"
             
-            # 如果函数体的AST节点数量异常少，可能存在解析问题
-            node_count = sum(1 for _ in self._safe_walk_preorder(cursor))
-            if node_count < 5:  # 一个正常的函数应该至少有几个节点
-                return True
+        elif cursor.kind == clang.CursorKind.DECL_REF_EXPR:
+            # 函数声明引用：直接引用函数名
+            callee_cursor = cursor.referenced
+            # 验证引用的是函数类型
+            if callee_cursor and callee_cursor.kind in [
+                clang.CursorKind.FUNCTION_DECL, clang.CursorKind.CXX_METHOD,
+                clang.CursorKind.CONSTRUCTOR, clang.CursorKind.DESTRUCTOR,
+                clang.CursorKind.FUNCTION_TEMPLATE
+            ]:
+                call_type = "decl_ref_expr"
+            else:
+                callee_cursor = None  # 不是函数引用，跳过
                 
-            return False
-        except Exception:
-            return True
-
-    def _extract_calls_from_text_fallback(self, cursor: clang.Cursor, caller_usr: str, caller_func, processed_calls: set) -> int:
-        """文本级别的函数调用提取（备用方法）"""
-        calls_found = 0
+        # === C++特定调用类型（动态检查支持） ===
+        elif hasattr(clang.CursorKind, 'CXX_MEMBER_CALL_EXPR') and cursor.kind == clang.CursorKind.CXX_MEMBER_CALL_EXPR:
+            # C++成员函数调用：obj.method() 或 obj->method()
+            callee_cursor = cursor.referenced
+            call_type = "cxx_member_call_expr"
+            
+        elif hasattr(clang.CursorKind, 'CXX_OPERATOR_CALL_EXPR') and cursor.kind == clang.CursorKind.CXX_OPERATOR_CALL_EXPR:
+            # C++操作符重载调用：operator+(), operator[]() 等
+            callee_cursor = cursor.referenced
+            call_type = "cxx_operator_call_expr"
+            
+        elif hasattr(clang.CursorKind, 'CXX_CONSTRUCT_EXPR') and cursor.kind == clang.CursorKind.CXX_CONSTRUCT_EXPR:
+            # C++构造函数调用：MyClass() 或隐式构造
+            callee_cursor = cursor.referenced
+            call_type = "cxx_construct_expr"
+            
+        elif hasattr(clang.CursorKind, 'CXX_TEMPORARY_OBJECT_EXPR') and cursor.kind == clang.CursorKind.CXX_TEMPORARY_OBJECT_EXPR:
+            # C++临时对象表达式：MyClass(args)
+            callee_cursor = cursor.referenced
+            call_type = "cxx_temporary_object_expr"
+            
+        elif cursor.kind == clang.CursorKind.CXX_NEW_EXPR:
+            # C++ new表达式：new MyClass()
+            # 特殊处理：查找内部的构造函数调用
+            for child in cursor.get_children():
+                if hasattr(clang.CursorKind, 'CXX_CONSTRUCT_EXPR') and child.kind == clang.CursorKind.CXX_CONSTRUCT_EXPR:
+                    callee_cursor = child.referenced
+                    call_type = "cxx_new_expr"
+                    break
+            # 如果没找到构造函数，可能是内置类型
+            if not callee_cursor:
+                callee_cursor = cursor.referenced
+                call_type = "cxx_new_expr"
+                
+        elif cursor.kind == clang.CursorKind.CXX_DELETE_EXPR:
+            # C++ delete表达式：delete ptr
+            callee_cursor = cursor.referenced
+            call_type = "cxx_delete_expr"
+            
+        # === C++类型转换调用 ===
+        elif cursor.kind == clang.CursorKind.CXX_FUNCTIONAL_CAST_EXPR:
+            # C++函数式类型转换：Type(value)
+            callee_cursor = cursor.referenced
+            call_type = "cxx_functional_cast_expr"
+            
+        elif cursor.kind == clang.CursorKind.CXX_STATIC_CAST_EXPR:
+            # C++静态类型转换：static_cast<Type>(value)
+            callee_cursor = cursor.referenced
+            call_type = "cxx_static_cast_expr"
+            
+        elif cursor.kind == clang.CursorKind.CXX_DYNAMIC_CAST_EXPR:
+            # C++动态类型转换：dynamic_cast<Type>(value)
+            callee_cursor = cursor.referenced
+            call_type = "cxx_dynamic_cast_expr"
+            
+        elif cursor.kind == clang.CursorKind.CXX_REINTERPRET_CAST_EXPR:
+            # C++重解释类型转换：reinterpret_cast<Type>(value)
+            callee_cursor = cursor.referenced
+            call_type = "cxx_reinterpret_cast_expr"
+            
+        elif cursor.kind == clang.CursorKind.CXX_CONST_CAST_EXPR:
+            # C++常量类型转换：const_cast<Type>(value)
+            callee_cursor = cursor.referenced
+            call_type = "cxx_const_cast_expr"
+            
+        # === Lambda和Block表达式 ===
+        elif cursor.kind == clang.CursorKind.LAMBDA_EXPR:
+            # Lambda表达式定义（不是调用，但可能包含调用）
+            # 通常不需要记录lambda定义本身，而是其内部的调用
+            pass
+            
+        elif cursor.kind == clang.CursorKind.BLOCK_EXPR:
+            # Block表达式（Objective-C/C++扩展）
+            callee_cursor = cursor.referenced
+            call_type = "block_expr"
+            
+        # === Objective-C调用 ===
+        elif cursor.kind == clang.CursorKind.OBJC_MESSAGE_EXPR:
+            # Objective-C消息发送：[obj method]
+            callee_cursor = cursor.referenced
+            call_type = "objc_message_expr"
+            
+        elif cursor.kind == clang.CursorKind.OBJC_SELECTOR_EXPR:
+            # Objective-C选择器表达式：@selector(method)
+            callee_cursor = cursor.referenced
+            call_type = "objc_selector_expr"
         
-        try:
-            # 获取函数的源代码
-            source_code = self.code_extractor.extract_function_code(cursor)
-            if not source_code:
-                return calls_found
-            
-            if self.logger.logger.isEnabledFor(logging.DEBUG):
-                self.logger.debug(f"📝 使用文本解析分析源代码 ({len(source_code)} 字符)")
-            
-            # 使用正则表达式查找函数调用模式
-            patterns = [
-                # 简单函数调用: functionName(
-                r'\b([A-Za-z_][A-Za-z0-9_]*)\s*\(',
-                # 成员函数调用: object.method( 或 object->method(
-                r'(?:\.|->)\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(',
-                # 作用域解析: Class::method(
-                r'::\s*([A-Za-z_][A-Za-z0-9_]*)\s*\('
-            ]
-            
-            line_number = cursor.extent.start.line
-            for line_offset, line in enumerate(source_code.split('\n')):
-                for pattern in patterns:
-                    matches = re.finditer(pattern, line)
-                    for match in matches:
-                        function_name = match.group(1)
-                        
-                        # 过滤掉一些明显不是函数调用的情况
-                        if self._is_likely_function_call(function_name, line):
-                            call_line = line_number + line_offset
-                            call_column = match.start() + 1
-                            
-                            # 避免重复（使用函数名和位置）
-                            call_signature = (call_line, call_column, function_name)
-                            if call_signature not in processed_calls:
-                                processed_calls.add(call_signature)
-                                calls_found += 1
-                                
-                                if self.logger.logger.isEnabledFor(logging.DEBUG):
-                                    self.logger.debug(f"  🔧 文本发现调用: {function_name} at L{call_line}")
-                                
-                                # 注意：文本解析无法获得USR，所以这里只记录调用名称
-                                # 在实际应用中，可能需要后续处理来解析USR
-            
-            return calls_found
-            
-        except Exception as e:
-            if self.logger.logger.isEnabledFor(logging.DEBUG):
-                self.logger.debug(f"文本解析出错: {str(e)}")
-            return 0
-
-    def _is_likely_function_call(self, name: str, context: str) -> bool:
-        """判断是否可能是函数调用"""
-        # 排除一些明显不是函数调用的情况
-        exclude_patterns = [
-            r'\b(if|while|for|switch|catch|sizeof|typeof|decltype)\s*\(',
-            r'\b(int|char|float|double|bool|void|auto|const|static|inline)\s*\(',
-            r'#\s*(include|define|ifdef|ifndef|endif|pragma)\s*\(',
-        ]
+        # === 处理找到的调用 ===
+        if callee_cursor and callee_cursor.kind.is_declaration():
+            callee_usr = callee_cursor.get_usr()
+            if callee_usr and callee_usr != caller_usr:
+                # 添加到调用列表
+                if callee_usr not in caller_func.calls_to:
+                    caller_func.calls_to.append(callee_usr)
+                
+                # 记录调用详情（用于调试和分析）
+                self.logger.debug(f"发现{call_type}: {caller_usr} -> {callee_usr} ({callee_cursor.spelling})")
         
-        for pattern in exclude_patterns:
-            if re.search(pattern, context, re.IGNORECASE):
-                return False
-        
-        # 其他启发式规则
-        if len(name) < 2:  # 太短的名称通常不是函数
-            return False
-        
-        if name.isupper() and len(name) < 5:  # 短的全大写通常是宏
-            return False
-            
-        return True
-
-    def _get_primary_template_cursor(self, cursor: clang.Cursor) -> clang.Cursor:
-        """
-        如果给定的游标是模板特化，则返回其主模板的游标。
-        否则，返回原始游标。
-        """
-        if hasattr(cursor, 'get_specialized_template'):
-            primary_template = cursor.get_specialized_template()
-            if primary_template:
-                return primary_template
-        return cursor
+        # === 递归处理子节点 ===
+        for child in cursor.get_children():
+            self._extract_calls_recursive(child, caller_func, caller_usr)
 
     def _extract_inheritance_for_class(self, cursor: clang.Cursor):
+        """提取类的继承关系"""
         cls = self.classes.get(cursor.get_usr())
-        if not cls: return
+        if not cls: 
+            return
         
         inheritance_list = []
         for base in cursor.get_children():
@@ -782,9 +627,7 @@ class EntityExtractor:
                     clang.CursorKind.CLASS_DECL, clang.CursorKind.STRUCT_DECL, 
                     clang.CursorKind.CLASS_TEMPLATE, clang.CursorKind.CLASS_TEMPLATE_PARTIAL_SPECIALIZATION
                 ]:
-                    # 统一处理，获取主模板的USR以确保一致性
-                    final_decl = self._get_primary_template_cursor(base_decl)
-                    base_usr = final_decl.get_usr()
+                    base_usr = base_decl.get_usr()
 
                     if base_usr:
                         if base_usr not in cls.parent_classes:
@@ -800,21 +643,17 @@ class EntityExtractor:
             cls.cpp_oop_extensions.inheritance_list = inheritance_list
 
     def _build_reverse_call_relationships(self):
+        """建立反向调用关系"""
         for caller_usr, caller_func in self.functions.items():
             for callee_usr in caller_func.calls_to:
                 callee_func = self.functions.get(callee_usr)
                 if callee_func and caller_usr not in callee_func.called_by:
                     callee_func.called_by.append(caller_usr)
 
-    def _is_in_project(self, cursor: clang.Cursor) -> bool:
-        if not cursor.location.file: return False
-        return self.file_id_manager.get_file_id(cursor.location.file.name) is not None
-
     def _get_qualified_name(self, cursor: clang.Cursor) -> str:
-        """获取限定名称 - 缓存优化版"""
+        """获取限定名称"""
         cursor_key = f"{cursor.get_usr()}:{cursor.spelling}"
         
-        # 检查缓存
         if cursor_key in self._qualified_name_cache:
             return self._qualified_name_cache[cursor_key]
         
@@ -824,11 +663,11 @@ class EntityExtractor:
             parent_name = self._get_qualified_name(cursor.semantic_parent)
             result = f"{parent_name}::{cursor.spelling}" if parent_name else cursor.spelling
         
-        # 缓存结果
         self._qualified_name_cache[cursor_key] = result
         return result
         
     def _get_namespace_str(self, cursor: clang.Cursor) -> str:
+        """获取命名空间字符串"""
         parts = []
         parent = cursor.semantic_parent
         while parent and not parent.kind.is_translation_unit():
@@ -838,6 +677,7 @@ class EntityExtractor:
         return "::".join(reversed(parts))
 
     def _get_function_status_flags(self, c: clang.Cursor) -> int:
+        """获取函数状态标志"""
         flags = 0
         if c.is_virtual_method(): flags |= FunctionStatusFlags.FUNC_IS_VIRTUAL
         if c.is_pure_virtual_method(): flags |= FunctionStatusFlags.FUNC_IS_PURE_VIRTUAL
@@ -846,6 +686,7 @@ class EntityExtractor:
         return flags
 
     def _get_class_status_flags(self, c: clang.Cursor) -> int:
+        """获取类状态标志"""
         flags = 0
         if c.is_abstract_record(): flags |= ClassStatusFlags.CLASS_IS_ABSTRACT
         is_poly_func = getattr(c, 'is_polymorphic', lambda: False)
@@ -853,6 +694,7 @@ class EntityExtractor:
         return flags
 
     def _get_call_status_flags(self, c: clang.Cursor) -> int:
+        """获取调用状态标志"""
         flags = 0
         if c.referenced and c.referenced.is_virtual_method():
             flags |= CallStatusFlags.CALL_IS_VIRTUAL
@@ -872,7 +714,6 @@ class EntityExtractor:
         """从类型或游标中提取模板实参"""
         args = []
         try:
-            # 优先处理游标
             if isinstance(type_or_cursor, clang.Cursor):
                 num_args = type_or_cursor.get_num_template_arguments()
                 for i in range(num_args):
@@ -881,7 +722,6 @@ class EntityExtractor:
                         args.append(type_or_cursor.get_template_argument_type(i).spelling)
                     elif arg_kind == clang.TemplateArgumentKind.INTEGRAL:
                         args.append(str(type_or_cursor.get_template_argument_value(i)))
-            # 其次处理类型
             elif isinstance(type_or_cursor, clang.Type):
                 num_args = type_or_cursor.get_num_template_arguments()
                 for i in range(num_args):
