@@ -282,8 +282,19 @@ class ClangParser:
                 if arg_clean.endswith(('.exe', '.c', '.cpp', '.cc', '.cxx', '.o', '.obj')):
                     continue
                 
-                # 跳过输出相关参数
+                # 跳过输出相关参数和PCH相关参数
                 if arg in ['-o', '-c', '/c', '/Fo'] and i + 1 < len(args_list):
+                    skip_next = True
+                    continue
+                
+                # 跳过MSVC预编译头文件参数
+                if arg.startswith('/Yc') or arg.startswith('/Fp'):
+                    # /Yc 和 /Fp 参数用于创建和指定预编译头文件
+                    # 这些参数对于clang解析AST来说不是必需的，且会被误认为链接器参数
+                    continue
+                
+                # 跳过单独的PCH参数
+                if arg in ['/Yc', '/Fp'] and i + 1 < len(args_list):
                     skip_next = True
                     continue
                 
@@ -334,8 +345,11 @@ class ClangParser:
                         '/Zc:', '/nologo', '/Oi', '/Gy', '/utf-8', '/wd', '/we', '/Ob', '/Ox', '/Ot', 
                         '/GF', '/errorReport:', '/Z7', '/MD', '/fp:', '/Zo', '/Zp', '/clang:'
                     ]
+                    # PCH相关参数需要被过滤掉
+                    pch_params = ['/Yc', '/Fp', '/Yu']
+                    
                     # 只保留真正重要的MSVC参数，过滤掉会导致clang报错的参数
-                    if not any(arg.startswith(prefix) for prefix in msvc_compile_only + ['/Fo', '/Fe', '/Fd', '/link', '/LIBPATH']):
+                    if not any(arg.startswith(prefix) for prefix in msvc_compile_only + pch_params + ['/Fo', '/Fe', '/Fd', '/link', '/LIBPATH']):
                         processed.append(arg)
                 else:
                     # 保留其他参数
@@ -523,11 +537,38 @@ class ClangParser:
                     clang.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD
                 )
                 
-                tu = self.index.parse(
-                    file_path, 
-                    args=args, 
-                    options=parse_options
-                )
+                try:
+                    tu = self.index.parse(
+                        file_path, 
+                        args=args, 
+                        options=parse_options
+                    )
+                except clang.TranslationUnitLoadError as e:
+                    if is_problematic_file:
+                        # 对于已知的问题文件，尝试更简化的解析选项
+                        self.logger.warning(f"文件 {file_path} 解析失败，尝试简化解析选项: {e}")
+                        try:
+                            simplified_parse_options = clang.TranslationUnit.PARSE_INCOMPLETE
+                            tu = self.index.parse(
+                                file_path,
+                                args=args[:10],  # 只使用前10个参数，避免复杂参数导致的问题
+                                options=simplified_parse_options
+                            )
+                            self.logger.info(f"使用简化选项成功解析文件: {file_path}")
+                        except Exception as e2:
+                            self.logger.error(f"即使使用简化选项也无法解析文件 {file_path}: {e2}")
+                            # 创建一个空的解析结果，标记为失败但不中断整个流程
+                            os.chdir(original_cwd)
+                            return ParsedFile(
+                                file_path=file_path,
+                                translation_unit=None,
+                                success=False,
+                                diagnostics=[],
+                                parse_time=time.perf_counter() - start_time
+                            )
+                    else:
+                        # 对于其他文件，重新抛出异常
+                        raise
             
             with profiler.timer("clang_parse_cleanup"):
                 os.chdir(original_cwd)
@@ -561,9 +602,42 @@ class ClangParser:
 
             return ParsedFile(file_path=file_path, success=True, translation_unit=tu, diagnostics=[], parse_time=parse_time)
 
+        except clang.TranslationUnitLoadError as e:
+            # 专门处理TranslationUnitLoadError
+            self.logger.error(f"解析文件 '{file_path}' 时发生翻译单元加载错误: {e}")
+            if "Module.GMESDK.cpp" in file_path:
+                self.logger.info(f"跳过已知问题文件: {file_path}")
+                # 返回一个失败的解析结果，但不中断整个流程
+                return ParsedFile(
+                    file_path=file_path,
+                    translation_unit=None,
+                    success=False,
+                    diagnostics=[],
+                    parse_time=0.0
+                )
+            else:
+                # 对于其他文件，也返回失败结果而不是None
+                return ParsedFile(
+                    file_path=file_path,
+                    translation_unit=None,
+                    success=False,
+                    diagnostics=[],
+                    parse_time=0.0
+                )
         except Exception as e:
             self.logger.error(f"解析文件 '{file_path}' 时发生未知异常: {e}\n{traceback.format_exc()}")
-            return None
+            # 确保工作目录被恢复
+            try:
+                os.chdir(original_cwd)
+            except:
+                pass
+            return ParsedFile(
+                file_path=file_path,
+                translation_unit=None,
+                success=False,
+                diagnostics=[],
+                parse_time=0.0
+            )
     
     def clear_cache(self):
         """清空TranslationUnit缓存"""
