@@ -131,6 +131,7 @@ class CppAnalyzerLogger:
 
 # 全局日志实例
 _global_logger: Optional[CppAnalyzerLogger] = None
+_root_configured = False
 
 def get_logger() -> CppAnalyzerLogger:
     """获取全局日志实例"""
@@ -138,6 +139,68 @@ def get_logger() -> CppAnalyzerLogger:
     if _global_logger is None:
         _global_logger = CppAnalyzerLogger()
     return _global_logger
+
+def configure_root_logger(log_file: Optional[str] = None):
+    """配置根日志器，确保所有 logging.xxx() 调用都能正确输出到文件"""
+    global _root_configured
+    if _root_configured:
+        return
+    
+    # 清除根日志器的现有处理器
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    # 设置日志文件路径
+    if log_file is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_file = f"root_logger_{timestamp}.log"
+    
+    # 创建文件处理器 - 确保所有日志都写入文件
+    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler.setLevel(logging.DEBUG)
+    
+    # 创建控制台处理器
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    
+    # 创建格式器
+    formatter = logging.Formatter(
+        '%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'
+    )
+    file_handler.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
+    
+    # 配置根日志器
+    root_logger.setLevel(logging.DEBUG)
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(console_handler)
+    
+    _root_configured = True
+    
+    # 记录配置信息
+    root_logger.info(f"根日志器配置完成，日志文件: {log_file}")
+    root_logger.debug("根日志器DEBUG级别测试 - 这条消息应该出现在日志文件中")
+
+def setup_logging_for_script(script_name: str) -> logging.Logger:
+    """
+    为脚本设置完整的日志配置，包括根日志器
+    
+    Args:
+        script_name: 脚本名称，用于生成日志文件名
+    
+    Returns:
+        配置好的标准日志器
+    """
+    import time
+    timestamp = int(time.time())
+    
+    # 配置根日志器
+    root_log_file = f"{script_name}_debug_{timestamp}.log"
+    configure_root_logger(root_log_file)
+    
+    # 返回根日志器
+    return logging.getLogger()
 
 def set_quiet_mode():
     """设置静默模式（只输出ERROR级别到控制台）"""

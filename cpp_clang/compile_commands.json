@@ -1,8 +1,80 @@
 [
 	{
+		"file": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUIEditor/Module.KGUIEditor.1.cpp",
+		"command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUIEditor/Module.KGUIEditor.1.cpp.obj.rsp\"",
+		"directory": "N:/c7_enginedev/Engine/Source",
+		"output": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUIEditor/Module.KGUIEditor.1.cpp.obj"
+	},
+	{
+		"file": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUIEditor/Module.KGUIEditor.2.cpp",
+		"command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUIEditor/Module.KGUIEditor.2.cpp.obj.rsp\"",
+		"directory": "N:/c7_enginedev/Engine/Source",
+		"output": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUIEditor/Module.KGUIEditor.2.cpp.obj"
+	},
+	{
+		"file": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUIEditor/Module.KGUIEditor.3.cpp",
+		"command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUIEditor/Module.KGUIEditor.3.cpp.obj.rsp\"",
+		"directory": "N:/c7_enginedev/Engine/Source",
+		"output": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUIEditor/Module.KGUIEditor.3.cpp.obj"
+	},
+	{
 		"file": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.1.cpp",
 		"command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.1.cpp.obj.rsp\"",
 		"directory": "N:/c7_enginedev/Engine/Source",
 		"output": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.1.cpp.obj"
+	},
+	{
+		"file": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.10.cpp",
+		"command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.10.cpp.obj.rsp\"",
+		"directory": "N:/c7_enginedev/Engine/Source",
+		"output": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.10.cpp.obj"
+	},
+	{
+		"file": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.2.cpp",
+		"command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.2.cpp.obj.rsp\"",
+		"directory": "N:/c7_enginedev/Engine/Source",
+		"output": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.2.cpp.obj"
+	},
+	{
+		"file": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.3.cpp",
+		"command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.3.cpp.obj.rsp\"",
+		"directory": "N:/c7_enginedev/Engine/Source",
+		"output": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.3.cpp.obj"
+	},
+	{
+		"file": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.4.cpp",
+		"command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.4.cpp.obj.rsp\"",
+		"directory": "N:/c7_enginedev/Engine/Source",
+		"output": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.4.cpp.obj"
+	},
+	{
+		"file": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.5.cpp",
+		"command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.5.cpp.obj.rsp\"",
+		"directory": "N:/c7_enginedev/Engine/Source",
+		"output": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.5.cpp.obj"
+	},
+	{
+		"file": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.6.cpp",
+		"command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.6.cpp.obj.rsp\"",
+		"directory": "N:/c7_enginedev/Engine/Source",
+		"output": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.6.cpp.obj"
+	},
+	{
+		"file": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.7.cpp",
+		"command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.7.cpp.obj.rsp\"",
+		"directory": "N:/c7_enginedev/Engine/Source",
+		"output": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.7.cpp.obj"
+	},
+	{
+		"file": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.8.cpp",
+		"command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.8.cpp.obj.rsp\"",
+		"directory": "N:/c7_enginedev/Engine/Source",
+		"output": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.8.cpp.obj"
+	},
+	{
+		"file": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.9.cpp",
+		"command": "\"C:/Program Files/LLVM/bin/clang-cl.exe\" @\"N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.9.cpp.obj.rsp\"",
+		"directory": "N:/c7_enginedev/Engine/Source",
+		"output": "N:/c7_enginedev/Client/Plugins/KGUI/Intermediate/Build/Win64/x64/UnrealEditor/Development/KGUI/Module.KGUI.9.cpp.obj"
 	}
 ]

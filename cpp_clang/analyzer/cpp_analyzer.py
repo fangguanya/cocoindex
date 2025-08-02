@@ -89,12 +89,14 @@ def _init_worker(compile_commands: Dict[str, Any], project_root: str, file_id_ma
         g_file_manager = file_id_manager
         g_extractor = EntityExtractor(g_file_manager)
         
-        print(f"Worker initialized successfully with cache enabled")
+        from .logger import get_logger
+        logger = get_logger()
+        logger.info(f"Worker initialized successfully with cache enabled")
         
     except Exception as e:
-        print(f"ERROR: Failed to initialize worker: {e}")
+        logger.error(f"Failed to initialize worker: {e}")
         import traceback
-        print(f"Traceback: {traceback.format_exc()}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         g_parser = None
         g_extractor = None
         g_file_manager = None
@@ -107,7 +109,8 @@ def _parse_and_extract_worker(file_path: str) -> Optional[SerializableExtractedD
     
     try:
         if not g_parser or not g_extractor or not g_compile_commands:
-            print(f"ERROR: Worker not initialized properly for file {file_path}")
+            import logging
+            logging.error(f"Worker not initialized properly for file {file_path}")
             return SerializableExtractedData.empty_result(file_path, "Worker not initialized")
 
         # 关键修复：在解析前切换到正确的工作目录
@@ -120,7 +123,7 @@ def _parse_and_extract_worker(file_path: str) -> Optional[SerializableExtractedD
             normalized_path = str(Path(file_path).resolve()).replace('\\', '/')
             compile_info = g_compile_commands.get(normalized_path)
             if not compile_info:
-                print(f"ERROR: No compile info found for {file_path}")
+                logging.error(f"No compile info found for {file_path}")
                 return SerializableExtractedData.empty_result(file_path, "No compile info")
             
         directory = compile_info.get("directory")
@@ -162,9 +165,9 @@ def _parse_and_extract_worker(file_path: str) -> Optional[SerializableExtractedD
         return serializable_result
 
     except Exception as e:
-        print(f"EXCEPTION in _parse_and_extract_worker for {file_path}: {e}")
+        logging.error(f"EXCEPTION in _parse_and_extract_worker for {file_path}: {e}")
         import traceback
-        print(f"Traceback: {traceback.format_exc()}")
+        logging.error(f"Traceback: {traceback.format_exc()}")
         return SerializableExtractedData.empty_result(file_path, str(e))
 
 class CppAnalyzer:

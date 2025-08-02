@@ -10,9 +10,12 @@ import threading
 import cProfile
 import pstats
 import io
+import logging
 from typing import Dict, List, Any, Optional
 from contextlib import contextmanager
 from collections import defaultdict, deque
+
+logger = logging.getLogger(__name__)
 
 class PerformanceProfiler:
     """性能分析器 - 提供详细的性能分析功能"""
@@ -127,33 +130,33 @@ class PerformanceProfiler:
     
     def print_report(self, show_details: bool = False):
         """打印性能报告"""
-        print("\n" + "="*60)
-        print("🔍 性能分析报告")
-        print("="*60)
+        logger.info("\n" + "="*60)
+        logger.info("🔍 性能分析报告")
+        logger.info("="*60)
         
         hotspots = self.get_hotspots(15)
         if hotspots:
-            print("\n📊 性能热点 (按总耗时排序):")
-            print("-" * 60)
-            print(f"{'函数名':<40} {'总耗时':<10} {'平均':<8} {'调用次数':<8} {'占比':<6}")
-            print("-" * 60)
+            logger.info("\n📊 性能热点 (按总耗时排序):")
+            logger.info("-" * 60)
+            logger.info(f"{'函数名':<40} {'总耗时':<10} {'平均':<8} {'调用次数':<8} {'占比':<6}")
+            logger.info("-" * 60)
             
             for hotspot in hotspots:
-                print(f"{hotspot['name']:<40} "
+                logger.info(f"{hotspot['name']:<40} "
                       f"{hotspot['total_time']:<10.3f} "
                       f"{hotspot['avg_time']:<8.4f} "
                       f"{hotspot['count']:<8} "
                       f"{hotspot['percentage']:<6.1f}%")
         
         if show_details and self._detailed_logs:
-            print(f"\n📝 详细日志 (最近20条):")
-            print("-" * 80)
+            logger.info(f"\n📝 详细日志 (最近20条):")
+            logger.info("-" * 80)
             recent_logs = self._detailed_logs[-20:]
             for log in recent_logs:
-                print(f"[{log['start_time']:.3f}] {log['name']}: {log['duration']:.4f}s")
+                logger.info(f"[{log['start_time']:.3f}] {log['name']}: {log['duration']:.4f}s")
                 if log['details']:
                     for key, value in log['details'].items():
-                        print(f"  {key}: {value}")
+                        logger.info(f"  {key}: {value}")
     
     def save_profile(self, filename: str):
         """保存性能分析结果到文件"""
@@ -169,7 +172,7 @@ class PerformanceProfiler:
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         
-        print(f"性能分析结果已保存到: {filename}")
+        logger.info(f"性能分析结果已保存到: {filename}")
     
     def clear(self):
         """清空所有统计数据"""
@@ -214,12 +217,12 @@ class DetailedLogger:
         elapsed = current_time - self.last_checkpoint
         total_elapsed = current_time - self.start_time
         
-        print(f"[{self.name}] {message}")
-        print(f"  ⏱️  步骤耗时: {elapsed:.4f}s, 总耗时: {total_elapsed:.4f}s")
+        logger.info(f"[{self.name}] {message}")
+        logger.info(f"  ⏱️  步骤耗时: {elapsed:.4f}s, 总耗时: {total_elapsed:.4f}s")
         
         if details:
             for key, value in details.items():
-                print(f"  📊 {key}: {value}")
+                logger.info(f"  📊 {key}: {value}")
         
         self.last_checkpoint = current_time
         return elapsed, total_elapsed
@@ -227,8 +230,8 @@ class DetailedLogger:
     def finish(self, message: str = "完成"):
         """完成并记录总耗时"""
         total_time = time.perf_counter() - self.start_time
-        print(f"[{self.name}] {message}")
-        print(f"  🎯 总耗时: {total_time:.4f}s")
+        logger.info(f"[{self.name}] {message}")
+        logger.info(f"  🎯 总耗时: {total_time:.4f}s")
         return total_time
 
 def create_cprofile_decorator(filename: str):
@@ -250,7 +253,7 @@ def create_cprofile_decorator(filename: str):
                 s = io.StringIO()
                 ps = pstats.Stats(pr, stream=s)
                 ps.sort_stats('cumulative').print_stats(20)
-                print(f"\n📊 cProfile 分析结果 (top 20):\n{s.getvalue()}")
+                logger.info(f"\n📊 cProfile 分析结果 (top 20):\n{s.getvalue()}")
                 
             return result
         return wrapper
