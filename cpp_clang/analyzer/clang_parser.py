@@ -259,8 +259,19 @@ class ClangParser:
     def _process_compile_args(self, raw_args: List[str], working_directory: str = None) -> List[str]:
         """处理和清理编译参数，包括响应文件展开 - 修复版"""
         
+		# 已移除delayed-template-parsing参数（在C++20后被弃用）
+        # 已移除delayed-template-parsing参数（在C++20后被弃用）
+        filtered_args = []
+        for arg in raw_args:
+            if 'delayed-template-parsing' not in str(arg):
+                filtered_args.append(arg)
+        raw_args = filtered_args
+        
+        
         def process_args_recursive(args_list: List[str]) -> List[str]:
             """递归处理参数列表，包括响应文件展开"""
+            # 在递归处理中再次过滤delayed-template-parsing参数
+            args_list = [arg for arg in args_list if 'delayed-template-parsing' not in str(arg)]
             processed = []
             skip_next = False
             
@@ -385,7 +396,7 @@ class ClangParser:
             # 添加更多兼容性参数来解决解析问题
             '-fms-compatibility',
             '-fms-extensions',
-            # 移除 -fdelayed-template-parsing，它在C++20中被弃用且对头文件解析有害
+            # 已移除delayed-template-parsing参数（在C++20后被弃用）
             '-Wno-microsoft',
             '-Wno-unknown-pragmas',
             '-Wno-unused-value',
@@ -403,7 +414,7 @@ class ClangParser:
             header_specific_args = [
                 '-Wno-pragma-once-outside-header',  # 允许头文件中的#pragma once
                 '-Wno-include-next-outside-header', # 允许头文件中的#include_next
-                '-fno-delayed-template-parsing',    # 禁用延迟模板解析，对头文件更安全
+            	# 已移除delayed-template-parsing参数（在C++20后被弃用）
             ]
             
             for arg in header_specific_args:
@@ -411,7 +422,9 @@ class ClangParser:
                     processed_args.append(arg)
         
         # 移除硬编码的宏定义，让项目的Definitions.h来处理
-        # UE官方通过CompileEnvironment.Definitions来管理宏定义，而不是硬编码
+        # UE官方通过CompileEnvironment.Definitions来管理宏定义，而不是硬编码        
+        # 最终过滤：确保没有任何delayed-template-parsing参数泄漏
+        processed_args = [arg for arg in processed_args if 'delayed-template-parsing' not in str(arg)]
         
         
         
@@ -535,18 +548,18 @@ class ClangParser:
         try:
             with profiler.timer("clang_parse_setup"):
                 start_time = time.perf_counter()
-                original_cwd = os.getcwd()
+                # 移除工作目录切换逻辑 - 让clang直接处理路径
                 
-                # 智能处理UE项目的工作目录
+                # 获取工作目录但不切换
                 working_directory = self._get_optimal_working_directory(directory, file_path)
                 
-                # 确保工作目录存在且切换成功
+                # 验证工作目录存在但不切换
                 if not os.path.exists(working_directory):
                     self.logger.error(f"工作目录不存在: {working_directory}")
                     return None
                 
-                self.logger.debug(f"切换工作目录: {original_cwd} -> {working_directory}")
-                os.chdir(working_directory)
+                self.logger.debug(f"使用工作目录: {working_directory} (不切换)")
+                # os.chdir(working_directory)  # 已移除工作目录切换
             
             logger.checkpoint("环境设置完成", working_dir=working_directory)
             
@@ -569,7 +582,7 @@ class ClangParser:
                     raise
             
             with profiler.timer("clang_parse_cleanup"):
-                os.chdir(original_cwd)
+                # os.chdir(original_cwd)  # 已移除工作目录恢复
                 parse_time = time.perf_counter() - start_time
 
             logger.checkpoint("Clang解析完成", parse_time=f"{parse_time:.4f}s")
@@ -624,11 +637,7 @@ class ClangParser:
                 )
         except Exception as e:
             self.logger.error(f"解析文件 '{file_path}' 时发生未知异常: {e}\n{traceback.format_exc()}")
-            # 确保工作目录被恢复
-            try:
-                os.chdir(original_cwd)
-            except:
-                pass
+            # 工作目录恢复逻辑已移除（不再需要切换工作目录）
             return ParsedFile(
                 file_path=file_path,
                 translation_unit=None,
