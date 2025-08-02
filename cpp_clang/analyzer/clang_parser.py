@@ -199,7 +199,10 @@ class ClangParser:
             command = entry.get('command', '')
             
             if command:
-                args = self._process_compile_args(shlex.split(command, posix=False) if platform.system() == 'Windows' else shlex.split(command))
+                args = self._process_compile_args(
+                    shlex.split(command, posix=False) if platform.system() == 'Windows' else shlex.split(command),
+                    directory
+                )
                 
                 # 正确处理相对路径和绝对路径
                 if os.path.isabs(file_path):
@@ -213,22 +216,29 @@ class ClangParser:
                 file_commands[normalized_path] = {"args": args, "directory": directory}
         return file_commands
 
-    def _parse_response_file(self, rsp_path: str) -> List[str]:
+    def _parse_response_file(self, rsp_path: str, working_directory: str = None) -> List[str]:
         """
         解析响应文件(.rsp)并返回参数列表
         
         Args:
-            rsp_path: 响应文件路径
+            rsp_path: 响应文件路径（可能是相对路径）
+            working_directory: 工作目录，用于解析相对路径
             
         Returns:
             解析后的参数列表
         """
-        if not os.path.exists(rsp_path):
-            self.logger.warning(f"响应文件不存在: {rsp_path}")
+        # 处理相对路径：如果rsp_path是相对路径且提供了工作目录，则相对于工作目录解析
+        if working_directory and not os.path.isabs(rsp_path):
+            full_rsp_path = os.path.join(working_directory, rsp_path)
+        else:
+            full_rsp_path = rsp_path
+        
+        if not os.path.exists(full_rsp_path):
+            self.logger.warning(f"响应文件不存在: {rsp_path} (完整路径: {full_rsp_path})")
             return []
         
         try:
-            with open(rsp_path, 'r', encoding='utf-8') as f:
+            with open(full_rsp_path, 'r', encoding='utf-8') as f:
                 content = f.read().strip()
             
             # 简单的参数分割
@@ -237,6 +247,7 @@ class ClangParser:
             else:
                 args = shlex.split(content)
             
+            self.logger.debug(f"成功解析响应文件: {rsp_path} -> {len(args)} 个参数")
             return args
         
         except Exception as e:
@@ -245,7 +256,7 @@ class ClangParser:
     
     
 
-    def _process_compile_args(self, raw_args: List[str]) -> List[str]:
+    def _process_compile_args(self, raw_args: List[str], working_directory: str = None) -> List[str]:
         """处理和清理编译参数，包括响应文件展开 - 修复版"""
         
         def process_args_recursive(args_list: List[str]) -> List[str]:
@@ -261,7 +272,7 @@ class ClangParser:
                 # 处理响应文件
                 if arg.startswith('@'):
                     rsp_path = arg[1:].strip('"\'')
-                    rsp_args = self._parse_response_file(rsp_path)
+                    rsp_args = self._parse_response_file(rsp_path, working_directory)
                     # 递归处理响应文件中的参数
                     processed.extend(process_args_recursive(rsp_args))
                     continue
