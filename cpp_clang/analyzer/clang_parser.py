@@ -385,7 +385,7 @@ class ClangParser:
             # 添加更多兼容性参数来解决解析问题
             '-fms-compatibility',
             '-fms-extensions',
-            '-fdelayed-template-parsing',
+            # 移除 -fdelayed-template-parsing，它在C++20中被弃用且对头文件解析有害
             '-Wno-microsoft',
             '-Wno-unknown-pragmas',
             '-Wno-unused-value',
@@ -396,6 +396,19 @@ class ClangParser:
         for arg in ue_clang_args:
             if arg not in processed_args:
                 processed_args.append(arg)
+        
+        # 特殊处理头文件解析
+        if '-x' in processed_args and 'c++-header' in processed_args:
+            # 为头文件解析添加特殊参数
+            header_specific_args = [
+                '-Wno-pragma-once-outside-header',  # 允许头文件中的#pragma once
+                '-Wno-include-next-outside-header', # 允许头文件中的#include_next
+                '-fno-delayed-template-parsing',    # 禁用延迟模板解析，对头文件更安全
+            ]
+            
+            for arg in header_specific_args:
+                if arg not in processed_args:
+                    processed_args.append(arg)
         
         # 移除硬编码的宏定义，让项目的Definitions.h来处理
         # UE官方通过CompileEnvironment.Definitions来管理宏定义，而不是硬编码
