@@ -94,6 +94,8 @@ def _init_worker(compile_commands: Dict[str, Any], project_root: str, file_id_ma
         logger.info(f"Worker initialized successfully with cache enabled")
         
     except Exception as e:
+        from .logger import get_logger
+        logger = get_logger()
         logger.error(f"Failed to initialize worker: {e}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
@@ -108,9 +110,12 @@ def _parse_and_extract_worker(file_path: str) -> Optional[SerializableExtractedD
     start_time = time.time()
     
     try:
+        # 修复logging导入问题
+        from .logger import get_logger
+        logger = get_logger()
+        
         if not g_parser or not g_extractor or not g_compile_commands:
-            import logging
-            logging.error(f"Worker not initialized properly for file {file_path}")
+            logger.error(f"Worker not initialized properly for file {file_path}")
             return SerializableExtractedData.empty_result(file_path, "Worker not initialized")
 
         # 关键修复：在解析前切换到正确的工作目录
@@ -123,7 +128,7 @@ def _parse_and_extract_worker(file_path: str) -> Optional[SerializableExtractedD
             normalized_path = str(Path(file_path).resolve()).replace('\\', '/')
             compile_info = g_compile_commands.get(normalized_path)
             if not compile_info:
-                logging.error(f"No compile info found for {file_path}")
+                logger.error(f"No compile info found for {file_path}")
                 return SerializableExtractedData.empty_result(file_path, "No compile info")
             
         directory = compile_info.get("directory")
@@ -136,6 +141,7 @@ def _parse_and_extract_worker(file_path: str) -> Optional[SerializableExtractedD
             parsed_file = g_parser.parse_file(file_path)
         finally:
             os.chdir(original_cwd)
+            
         if not parsed_file:
             return SerializableExtractedData.empty_result(file_path, "Parsing failed")
         
@@ -165,9 +171,11 @@ def _parse_and_extract_worker(file_path: str) -> Optional[SerializableExtractedD
         return serializable_result
 
     except Exception as e:
-        logging.error(f"EXCEPTION in _parse_and_extract_worker for {file_path}: {e}")
+        from .logger import get_logger
+        logger = get_logger()
+        logger.error(f"EXCEPTION in _parse_and_extract_worker for {file_path}: {e}")
         import traceback
-        logging.error(f"Traceback: {traceback.format_exc()}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return SerializableExtractedData.empty_result(file_path, str(e))
 
 class CppAnalyzer:
@@ -370,51 +378,75 @@ class CppAnalyzer:
 
     def _scan_and_prepare_header_files(self, source_files: List[str], compile_commands: Dict, 
                                      project_root: str, scan_directory: str) -> tuple[List[str], Dict[str, Dict]]:
-        """扫描头文件并为其创建编译命令 - 修复版本"""
+        """扫描头文件并为其创建编译命令 - 智能继承版本"""
         header_files = []
         header_compile_commands = {}
-        include_dirs = set()
-
-        # 1. 从编译命令中提取include目录 - 修复：正确处理command字段
-        for cmd_info in compile_commands.values():
+        
+        # 1. 收集所有源文件的编译信息
+        all_include_dirs = set()
+        all_macro_definitions = set()
+        source_file_args_map = {}  # 源文件路径 -> 编译参数映射
+        
+        self.logger.info("正在分析源文件编译参数...")
+        
+        for src_file, cmd_info in compile_commands.items():
             directory = Path(cmd_info['directory'])
             
-            # 关键修复：正确处理command字段而不是args字段
-            args = cmd_info.get('args', [])
+            # 获取编译参数 - 修复版本
+            args = cmd_info.get('arguments', [])  # 首先尝试arguments字段
+            if not args:
+                args = cmd_info.get('args', [])  # 然后尝试args字段
+            
             if not args and 'command' in cmd_info:
-                # 如果没有args字段，从command字段解析参数
                 try:
-                    # 使用shlex.split来正确解析命令行，处理引号和转义
-                    command_parts = shlex.split(cmd_info['command'])
-                    args = command_parts[1:]  # 跳过编译器路径
+                    # 处理command字段，需要正确解析shell命令
+                    command_str = cmd_info['command']
+                    if isinstance(command_str, str):
+                        # 使用shlex正确分割命令行
+                        command_parts = shlex.split(command_str)
+                        if len(command_parts) > 1:
+                            args = command_parts[1:]  # 跳过编译器路径
+                        else:
+                            self.logger.warning(f"编译命令格式异常: {command_str}")
+                            continue
+                    else:
+                        self.logger.warning(f"编译命令不是字符串格式: {type(command_str)}")
+                        continue
                 except Exception as e:
-                    self.logger.warning(f"解析编译命令失败: {e}")
+                    self.logger.warning(f"解析编译命令失败 {src_file}: {e}")
                     continue
             
-            for arg in args:
-                # 跳过响应文件引用（关键修复）
-                if arg.startswith('@'):
-                    continue
+            if not args:
+                self.logger.warning(f"源文件 {src_file} 没有找到编译参数")
+                continue
                 
+            source_file_args_map[src_file] = args
+            
+            # 提取include路径和宏定义
+            for i, arg in enumerate(args):
+                if arg.startswith('@'):  # 跳过响应文件引用
+                    continue
+                    
                 if arg.startswith('-I'):
                     path_str = arg[2:].strip()
-                    if not path_str: 
-                        continue
-                    
-                    include_path = Path(path_str)
-                    if not include_path.is_absolute():
-                        include_path = (directory / include_path).resolve()
-                    else:
-                        include_path = include_path.resolve()
-                    
-                    # 确保只添加项目内的头文件目录
-                    try:
-                        include_path.relative_to(project_root)
-                        include_dirs.add(str(include_path))
-                    except ValueError:
-                        continue
+                    if path_str:
+                        include_path = Path(path_str)
+                        if not include_path.is_absolute():
+                            include_path = (directory / include_path).resolve()
+                        else:
+                            include_path = include_path.resolve()
+                        
+                        # 添加所有include路径，不限制项目内
+                        all_include_dirs.add(str(include_path))
+                        
+                elif arg.startswith('-D'):
+                    macro_def = arg[2:] if len(arg) > 2 else (args[i+1] if i+1 < len(args) else '')
+                    if macro_def:
+                        all_macro_definitions.add(macro_def)
 
-        # 2. 直接扫描目标目录中的头文件（重要修复）
+        self.logger.info(f"收集到 {len(all_include_dirs)} 个include目录，{len(all_macro_definitions)} 个宏定义")
+
+        # 2. 扫描头文件
         scan_path = Path(scan_directory)
         if scan_path.exists():
             try:
@@ -422,165 +454,150 @@ class CppAnalyzer:
                     if p.is_file() and p.suffix in ['.h', '.hpp']:
                         header_path = str(p.resolve())
                         header_files.append(header_path)
-                        self.logger.info(f"发现头文件: {header_path}")
             except Exception as e:
                 self.logger.warning(f"扫描目标目录 '{scan_directory}' 时出错: {e}")
 
-        # 3. 扫描include目录中的头文件（作为补充）
-        for inc_dir in include_dirs:
-            try:
-                for p in Path(inc_dir).rglob('*'):
-                    if p.is_file() and p.suffix in ['.h', '.hpp']:
-                        header_path = str(p.resolve())
-                        # 只包含scan_directory下的头文件
-                        try:
-                            Path(header_path).relative_to(scan_directory)
-                            if header_path not in header_files:  # 避免重复
-                                header_files.append(header_path)
-                        except ValueError:
-                            continue
-            except Exception as e:
-                self.logger.warning(f"扫描头文件目录 '{inc_dir}' 时出错: {e}")
-
-        # 4. 为头文件创建编译命令 - 修复：正确处理command字段
-        # 选择一个代表性的源文件作为模板
-        template_source = None
-        template_cmd_info = None
+        # 3. 为每个头文件智能选择最佳的编译参数模板
+        self.logger.info("为头文件创建智能编译命令...")
         
-        # 优先选择scan_directory下的源文件作为模板
-        for src_file in source_files:
-            try:
-                Path(src_file).relative_to(scan_directory)
-                template_source = src_file
-                template_cmd_info = compile_commands[src_file]
-                break
-            except ValueError:
-                continue
-        
-        # 如果没有找到scan_directory下的源文件，使用第一个源文件作为模板
-        if not template_source and source_files:
-            template_source = source_files[0]
-            template_cmd_info = compile_commands[template_source]
-
-        if template_cmd_info:
-            # 获取模板的编译参数
-            template_args = template_cmd_info.get('args', [])
-            if not template_args and 'command' in template_cmd_info:
-                try:
-                    command_parts = shlex.split(template_cmd_info['command'])
-                    template_args = command_parts[1:]  # 跳过编译器路径
-                except Exception as e:
-                    self.logger.warning(f"解析模板编译命令失败: {e}")
-                    template_args = []
+        for header_file in header_files:
+            normalized_header_path = str(Path(header_file).resolve()).replace('\\', '/')
             
-            # 为每个头文件创建编译命令
-            for header_file in header_files:
-                normalized_header_path = str(Path(header_file).resolve()).replace('\\', '/')
-                
-                # 复制模板的编译参数，但移除一些不适用于头文件的参数
-                header_args = []
-                skip_next = False
-                
-                i = 0
-                while i < len(template_args):
-                    arg = template_args[i]
-                    
-                    # 跳过响应文件引用（关键修复）
-                    if arg.startswith('@'):
-                        i += 1
-                        continue
-                    
-                    # 检查并跳过-Xclang -x -Xclang c++序列
-                    if (arg == '-Xclang' and i + 3 < len(template_args) and 
-                        template_args[i+1:i+4] == ['-x', '-Xclang', 'c++']):
-                        # 跳过整个-Xclang -x -Xclang c++序列
-                        print(f"跳过-Xclang序列: {template_args[i:i+4]}")
-                        i += 4
-                        continue
-                    elif (arg == '-Xclang' and i + 3 < len(template_args) and 
-                          template_args[i+1:i+4] == ['-x', '-Xclang', '"c++"']):
-                        # 跳过整个-Xclang -x -Xclang "c++"序列（带引号版本）
-                        print(f"跳过-Xclang序列（带引号）: {template_args[i:i+4]}")
-                        i += 4
-                        continue
-                    
-                    # 跳过PCH相关参数（可能导致解析失败）
-                    if arg in ['-include'] and i + 1 < len(template_args):
-                        next_arg = template_args[i + 1]
-                        if 'PCH.' in next_arg or 'Definitions.h' in next_arg:
-                            i += 2  # 跳过-include和下一个参数
-                            continue
-                    
-                    # 跳过输出相关参数
-                    if arg in ['-o', '-c', '/c', '/Fo'] and i + 1 < len(template_args):
-                        i += 2  # 跳过参数和值
-                        continue
-                    
-                    # 跳过源文件特定的参数
-                    if arg.endswith(('.cpp', '.cc', '.cxx', '.c')):
-                        i += 1
-                        continue
-                    
-                    # 跳过有问题的参数格式
-                    if arg in ['"c++"', 'c++']:
-                        # 检查是否是-x c++序列的一部分
-                        if i >= 1 and template_args[i-1] in ['-x']:
-                            # 这是-x c++序列，跳过
-                            i += 1
-                            continue
-                        else:
-                            # 这是一个独立的c++参数，也跳过
-                            i += 1
-                            continue
-                    
-                    # 跳过可能有问题的UE特定参数
-                    if 'PCH.' in arg or 'Definitions.h' in arg:
-                        i += 1
-                        continue
-                    
-                    header_args.append(arg)
-                    i += 1
-                
-                # 确保包含必要的include路径
-                if not any(arg.startswith('-I') for arg in header_args):
-                    # 从现有的include目录中添加基本路径，避免硬编码
-                    if include_dirs:
-                        # 使用已发现的include目录
-                        for inc_dir in sorted(include_dirs)[:4]:  # 限制数量避免过多参数
-                            header_args.append(f'-I{inc_dir}')
-                    else:
-                        # 如果没有发现include目录，添加相对于项目根目录的基本路径
-                        project_path = Path(project_root)
-                        basic_includes = [
-                            project_path / "Source",
-                            project_path / "Public", 
-                            project_path / "Private"
-                        ]
-                        for inc_path in basic_includes:
-                            if inc_path.exists():
-                                header_args.append(f'-I{inc_path}')
-                
-                # 添加头文件特定的参数（避免重复）
-                additional_args = [
-                    '-x', 'c++',  # 指定为C++文件
-                    '-DPLATFORM_WINDOWS=1',
-                    '-D_WIN64=1'
-                ]
-                
-                # 只添加不存在的参数，避免重复
-                for arg in additional_args:
-                    if arg not in header_args:
-                        header_args.append(arg)
-                
-                header_compile_commands[normalized_header_path] = {
-                    "args": header_args,
-                    "directory": template_cmd_info['directory']
-                }
+            # 找到第一个包含该头文件的源文件作为模板
+            best_source_file = self._find_first_including_source(header_file, source_files)
+            
+            if best_source_file and best_source_file in source_file_args_map:
+                template_args = source_file_args_map[best_source_file]
+                template_cmd_info = compile_commands[best_source_file]
+            else:
+                # 回退到第一个可用的源文件
+                if source_files and source_files[0] in source_file_args_map:
+                    template_args = source_file_args_map[source_files[0]]
+                    template_cmd_info = compile_commands[source_files[0]]
+                else:
+                    self.logger.warning(f"无法为头文件 {header_file} 找到合适的编译参数模板")
+                    continue
+            
+            # 创建头文件专用的编译参数
+            header_args = self._create_header_compile_args(
+                template_args, 
+                all_include_dirs, 
+                all_macro_definitions,
+                header_file
+            )
+            
+            header_compile_commands[normalized_header_path] = {
+                "args": header_args,
+                "directory": template_cmd_info['directory']
+            }
 
         self.console.print(f"-> 发现头文件: {len(header_files)} 个")
         self.console.print(f"-> 创建头文件编译命令: {len(header_compile_commands)} 个")
         
         return header_files, header_compile_commands
+    
+    def _find_first_including_source(self, header_file: str, source_files: List[str]) -> Optional[str]:
+        """找到第一个包含该头文件的源文件"""
+        header_path = Path(header_file)
+        header_name = header_path.name
+        
+        # 遍历所有源文件，找到第一个包含该头文件的源文件
+        for src_file in source_files:
+            try:
+                with open(src_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    # 只读取前50行来检查include语句，提高性能
+                    for line_num, line in enumerate(f, 1):
+                        if line_num > 50:  # 限制检查范围
+                            break
+                        
+                        line = line.strip()
+                        if line.startswith('#include'):
+                            # 检查是否包含目标头文件
+                            if f'"{header_name}"' in line or f'<{header_name}>' in line:
+                                self.logger.debug(f"头文件 {header_name} 被源文件 {Path(src_file).name} 包含")
+                                return src_file
+                            
+                            # 也检查相对路径包含
+                            if header_name in line and ('#include "' in line or '#include <' in line):
+                                self.logger.debug(f"头文件 {header_name} 被源文件 {Path(src_file).name} 包含（相对路径）")
+                                return src_file
+                                
+            except Exception as e:
+                self.logger.debug(f"检查源文件 {src_file} 时出错: {e}")
+                continue
+        
+        # 如果没有找到包含关系，返回第一个源文件作为默认模板
+        if source_files:
+            self.logger.debug(f"未找到包含头文件 {header_name} 的源文件，使用第一个源文件作为模板")
+            return source_files[0]
+        
+        return None
+    
+    def _create_header_compile_args(self, template_args: List[str], all_include_dirs: Set[str], 
+                                  all_macro_definitions: Set[str], header_file: str) -> List[str]:
+        """为头文件创建专用的编译参数"""
+        header_args = []
+        
+        # 1. 从模板参数中过滤并保留有用的参数
+        skip_next = False
+        i = 0
+        while i < len(template_args):
+            arg = template_args[i]
+            
+            if skip_next:
+                skip_next = False
+                i += 1
+                continue
+            
+            # 跳过响应文件、输出文件、源文件等
+            if (arg.startswith('@') or 
+                arg.endswith(('.exe', '.c', '.cpp', '.cc', '.cxx', '.o', '.obj')) or
+                arg in ['-o', '-c', '/c', '/Fo'] or
+                'PCH.' in arg or 'Definitions.h' in arg):
+                if arg in ['-o', '-c', '/c', '/Fo'] and i + 1 < len(template_args):
+                    skip_next = True
+                i += 1
+                continue
+            
+            # 跳过复杂的clang参数序列
+            if (arg == '-Xclang' and i + 3 < len(template_args) and 
+                template_args[i+1:i+4] in [['-x', '-Xclang', 'c++'], ['-x', '-Xclang', '"c++"']]):
+                i += 4
+                continue
+            
+            # 保留其他有用的参数
+            if not (arg in ['"c++"', 'c++'] and i >= 1 and template_args[i-1] == '-x'):
+                header_args.append(arg)
+            
+            i += 1
+        
+        # 2. 添加所有收集到的include路径
+        for inc_dir in sorted(all_include_dirs):
+            include_arg = f'-I{inc_dir}'
+            if include_arg not in header_args:
+                header_args.append(include_arg)
+        
+        # 3. 添加所有收集到的宏定义
+        for macro in sorted(all_macro_definitions):
+            macro_arg = f'-D{macro}'
+            if macro_arg not in header_args:
+                header_args.append(macro_arg)
+        
+        # 4. 添加头文件特定的参数
+        header_specific_args = [
+            '-x', 'c++-header',  # 指定为C++头文件
+            '-Wno-pragma-once-outside-header',
+            '-Wno-include-next-outside-header'
+        ]
+        
+        for arg in header_specific_args:
+            if arg not in header_args:
+                header_args.append(arg)
+        
+        
+        
+        self.logger.debug(f"为头文件 {Path(header_file).name} 创建了 {len(header_args)} 个编译参数")
+        return header_args
 
     def _print_performance_report(self, stats: Dict[str, Any], total_time: float):
         """打印详细的性能报告"""

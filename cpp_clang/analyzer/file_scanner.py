@@ -2,8 +2,8 @@
 File Scanner Module
 
 Scans specified directories for C++ source files (.cpp, .cc, .cxx) and 
-header files (.h, .hpp, .hxx). Supports filtering, exclusion patterns,
-and Unreal Engine project structure.
+header files (.h, .hpp, .hxx). Supports filtering and exclusion patterns
+for various project structures.
 """
 
 import os
@@ -27,7 +27,7 @@ class FileScanner:
     HEADER_EXTENSIONS = {'.h', '.hpp', '.hxx', '.hh'}
     ALL_EXTENSIONS = CPP_EXTENSIONS | HEADER_EXTENSIONS
     
-    # 精确的默认排除模式
+    # 通用的默认排除模式
     DEFAULT_EXCLUDE_PATTERNS = {
         '*/Intermediate/*',      # UE中间文件
         '*/Binaries/*',          # UE二进制文件
@@ -54,6 +54,11 @@ class FileScanner:
         "*/Engine/Source/Programs/*",
         "*/ThirdParty/*",
         "*/Client_WwiseProject/*",
+        "*/.*",                  # 隐藏文件和目录
+        "*/temp/*",              # 临时文件
+        "*/tmp/*",               # 临时文件
+        "*/cache/*",             # 缓存目录
+        "*/logs/*",              # 日志目录
     }
     
     def __init__(self):

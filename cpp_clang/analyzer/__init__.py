@@ -1,7 +1,7 @@
 """
 C++ Code Analyzer Package
 
-A comprehensive C++ code analysis toolkit for Unreal Engine projects.
+A comprehensive C++ code analysis toolkit for C++ projects.
 Extracts entities, relationships, and exports to structured JSON format.
 """
 

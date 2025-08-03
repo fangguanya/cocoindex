@@ -253,20 +253,36 @@ class ClangParser:
         except Exception as e:
             self.logger.error(f"解析响应文件失败 {rsp_path}: {e}")
             return []
-    
-    
+
+    def _extract_file_path_from_args(self, args: List[str]) -> Optional[str]:
+        """从编译参数中提取文件路径"""
+        # 查找不以-开头的参数，通常是文件路径
+        for arg in args:
+            if not arg.startswith('-') and (arg.endswith('.h') or arg.endswith('.cpp') or arg.endswith('.cc')):
+                return arg
+        return None
 
     def _process_compile_args(self, raw_args: List[str], working_directory: str = None) -> List[str]:
-        """处理和清理编译参数，包括响应文件展开 - 修复版"""
+        """处理和清理编译参数，包括响应文件展开"""
         
-		# 已移除delayed-template-parsing参数（在C++20后被弃用）
+        # 检测是否为clang-cl命令，如果是则进行参数转换
+        is_clang_cl = any('clang-cl' in str(arg) for arg in raw_args)
+        if is_clang_cl:
+            self.logger.debug("检测到clang-cl命令，启用参数转换")
+            return self._convert_clang_cl_to_libclang(raw_args, working_directory)
+        
+        # 处理标准编译参数
+        return self._process_standard_compile_args(raw_args, working_directory)
+    
+    def _process_standard_compile_args(self, raw_args: List[str], working_directory: str = None) -> List[str]:
+        """处理标准编译参数（非clang-cl）"""
+        
         # 已移除delayed-template-parsing参数（在C++20后被弃用）
         filtered_args = []
         for arg in raw_args:
             if 'delayed-template-parsing' not in str(arg):
                 filtered_args.append(arg)
         raw_args = filtered_args
-        
         
         def process_args_recursive(args_list: List[str]) -> List[str]:
             """递归处理参数列表，包括响应文件展开"""
@@ -370,41 +386,36 @@ class ClangParser:
         
         processed_args = process_args_recursive(raw_args)
         
-        # 参考UE官方ClangToolChain.cs，添加必要的Clang编译参数
-        # 这些参数解决了UE项目中的各种编译问题
-        
-        # 添加UE官方使用的关键Clang参数
-        ue_clang_args = [
-            # 解决constexpr函数和优化相关问题 (参考ClangToolChain.cs:655)
+        # 添加基本的Clang编译参数来解决常见编译问题
+        essential_clang_args = [
+            # 解决constexpr函数和优化相关问题
             '-fno-delete-null-pointer-checks',
             
             # 解决constexpr函数的严格检查问题
-            # 将constexpr相关的错误降级为警告，然后禁用这些警告
             '-Wno-invalid-constexpr',
             '-Wno-constexpr-not-const',
             
-            # 诊断格式设置，便于IDE识别错误 (参考ClangToolChain.cs:586)
+            # 诊断格式设置，便于IDE识别错误
             '-fdiagnostics-format=msvc',
             '-fdiagnostics-absolute-paths',
             
-            # FP语义设置，确保精确的浮点运算 (参考ClangToolChain.cs:617)
+            # FP语义设置，确保精确的浮点运算
             '-ffp-contract=off',
             
-            # 警告设置 (参考ClangToolChain.cs:564)
+            # 警告设置
             '-Wall',
             
             # 添加更多兼容性参数来解决解析问题
             '-fms-compatibility',
             '-fms-extensions',
-            # 已移除delayed-template-parsing参数（在C++20后被弃用）
             '-Wno-microsoft',
             '-Wno-unknown-pragmas',
             '-Wno-unused-value',
             '-Wno-ignored-attributes',
         ]
         
-        # 检查并添加缺失的UE Clang参数
-        for arg in ue_clang_args:
+        # 检查并添加缺失的Clang参数
+        for arg in essential_clang_args:
             if arg not in processed_args:
                 processed_args.append(arg)
         
@@ -414,21 +425,215 @@ class ClangParser:
             header_specific_args = [
                 '-Wno-pragma-once-outside-header',  # 允许头文件中的#pragma once
                 '-Wno-include-next-outside-header', # 允许头文件中的#include_next
-            	# 已移除delayed-template-parsing参数（在C++20后被弃用）
             ]
             
             for arg in header_specific_args:
                 if arg not in processed_args:
                     processed_args.append(arg)
         
-        # 移除硬编码的宏定义，让项目的Definitions.h来处理
-        # UE官方通过CompileEnvironment.Definitions来管理宏定义，而不是硬编码        
-        # 最终过滤：确保没有任何delayed-template-parsing参数泄漏
-        processed_args = [arg for arg in processed_args if 'delayed-template-parsing' not in str(arg)]
-        
-        
-        
         return processed_args
+
+    def _convert_clang_cl_to_libclang(self, raw_args: List[str], working_directory: str = None) -> List[str]:
+        """将clang-cl参数转换为libclang兼容的参数"""
+        self.logger.info("开始clang-cl到libclang参数转换")
+        
+        # 递归解析响应文件并收集所有参数
+        all_args = self._expand_response_files(raw_args, working_directory)
+        self.logger.debug(f"响应文件展开后参数数量: {len(all_args)}")
+        
+        # 转换参数
+        converted_args = self._convert_args_to_libclang_format(all_args, working_directory)
+        
+        # 提取并添加宏定义
+        macro_definitions = self._extract_macros_from_forced_includes(all_args, working_directory)
+        for macro in macro_definitions:
+            macro_arg = f"-D{macro}"
+            if macro_arg not in converted_args:
+                converted_args.append(macro_arg)
+        
+        self.logger.info(f"clang-cl转换完成: {len(raw_args)} -> {len(converted_args)} 参数")
+        self.logger.info(f"提取宏定义: {len(macro_definitions)} 个")
+        
+        return converted_args
+    
+    def _expand_response_files(self, args: List[str], working_directory: str = None) -> List[str]:
+        """递归展开响应文件"""
+        expanded_args = []
+        
+        for arg in args:
+            if arg.startswith('@'):
+                rsp_path = arg[1:].strip('"\'')
+                rsp_args = self._parse_response_file(rsp_path, working_directory)
+                # 递归处理响应文件中的参数
+                expanded_args.extend(self._expand_response_files(rsp_args, working_directory))
+            else:
+                expanded_args.append(arg)
+        
+        return expanded_args
+    
+    def _convert_args_to_libclang_format(self, args: List[str], working_directory: str = None) -> List[str]:
+        """将clang-cl参数转换为libclang格式"""
+        converted = []
+        skip_next = False
+        
+        for i, arg in enumerate(args):
+            if skip_next:
+                skip_next = False
+                continue
+            
+            # 跳过编译器可执行文件和输出文件
+            if arg.endswith(('.exe', '.c', '.cpp', '.cc', '.cxx', '.o', '.obj')):
+                continue
+            
+            # 跳过输出相关参数
+            if arg in ['-o', '/Fo', '/Fe', '/Fd', '-c', '/c']:
+                skip_next = True
+                continue
+            
+            # 跳过PCH相关参数
+            if arg.startswith(('/Yc', '/Yu', '/Fp')):
+                if '=' not in arg and i + 1 < len(args):
+                    skip_next = True
+                continue
+            
+            # 转换include路径
+            if arg.startswith(('/I', '-I')):
+                path = arg[2:].strip('"\'') if len(arg) > 2 else (args[i+1].strip('"\'') if i+1 < len(args) else '')
+                if path:
+                    converted.append(f'-I{path}')
+                    if len(arg) == 2:
+                        skip_next = True
+                continue
+            
+            # 转换宏定义
+            if arg.startswith(('/D', '-D')):
+                macro = arg[2:] if len(arg) > 2 else (args[i+1] if i+1 < len(args) else '')
+                if macro:
+                    converted.append(f'-D{macro}')
+                    if len(arg) == 2:
+                        skip_next = True
+                continue
+            
+            # 转换强制包含文件
+            if arg.startswith('/FI'):
+                include_file = arg[3:].strip('"\'') if len(arg) > 3 else (args[i+1].strip('"\'') if i+1 < len(args) else '')
+                if include_file:
+                    converted.extend(['-include', include_file])
+                    if len(arg) == 3:
+                        skip_next = True
+                continue
+            
+            # 转换系统包含路径
+            if arg.startswith('/imsvc'):
+                path = arg[6:].strip('"\'') if len(arg) > 6 else (args[i+1].strip('"\'') if i+1 < len(args) else '')
+                if path:
+                    converted.extend(['-isystem', path])
+                    if len(arg) == 6:
+                        skip_next = True
+                continue
+            
+            # 转换C++标准
+            if arg.startswith('/std:'):
+                std_version = arg[5:]
+                converted.append(f'-std={std_version}')
+                continue
+            
+            # 转换其他MSVC参数
+            if arg == '/EHsc':
+                converted.append('-fexceptions')
+            elif arg == '/GR-':
+                converted.append('-fno-rtti')
+            elif arg in ['/W1', '/W2', '/W3', '/W4']:
+                converted.append('-Wall')
+            elif arg.startswith('/'):
+                # 跳过其他MSVC特定参数
+                continue
+            else:
+                # 保留其他参数
+                converted.append(arg)
+        
+        # 添加libclang需要的基本参数
+        essential_args = [
+            '-fms-compatibility',
+            '-fms-extensions',
+            '-Wno-microsoft',
+            '-Wno-unknown-pragmas',
+            '-Wno-unused-value',
+            '-Wno-ignored-attributes',
+            '-fno-delete-null-pointer-checks',
+            '-Wno-invalid-constexpr',
+            '-Wno-constexpr-not-const'
+        ]
+        
+        for arg in essential_args:
+            if arg not in converted:
+                converted.append(arg)
+        
+        return converted
+    
+    def _extract_macros_from_forced_includes(self, args: List[str], working_directory: str = None) -> List[str]:
+        """从强制包含文件中提取宏定义"""
+        macros = []
+        
+        # 查找强制包含的文件
+        forced_includes = []
+        skip_next = False
+        
+        for i, arg in enumerate(args):
+            if skip_next:
+                skip_next = False
+                continue
+            
+            if arg.startswith('/FI'):
+                if len(arg) > 3:
+                    forced_includes.append(arg[3:].strip('"\''))
+                elif i + 1 < len(args):
+                    forced_includes.append(args[i+1].strip('"\''))
+                    skip_next = True
+        
+        # 解析每个强制包含文件中的宏定义
+        for include_file in forced_includes:
+            if not os.path.isabs(include_file) and working_directory:
+                full_path = os.path.join(working_directory, include_file)
+            else:
+                full_path = include_file
+            
+            if include_file.endswith('Definitions.h') and os.path.exists(full_path):
+                self.logger.debug(f"解析Definitions.h文件: {full_path}")
+                file_macros = self._parse_definitions_file(full_path)
+                macros.extend(file_macros)
+                self.logger.info(f"从{include_file}提取了{len(file_macros)}个宏定义")
+        
+        return macros
+    
+    def _parse_definitions_file(self, file_path: str) -> List[str]:
+        """解析Definitions.h文件中的宏定义"""
+        macros = []
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            import re
+            
+            # 匹配 #define 宏定义
+            define_pattern = r'#define\s+([A-Z_][A-Z0-9_]*)\s+(.+?)(?=\n|$)'
+            matches = re.findall(define_pattern, content, re.MULTILINE)
+            
+            for name, value in matches:
+                # 清理值，移除注释和多余空白
+                value = re.sub(r'//.*$', '', value).strip()
+                value = re.sub(r'/\*.*?\*/', '', value, flags=re.DOTALL).strip()
+                
+                if value:
+                    macros.append(f"{name}={value}")
+                else:
+                    macros.append(name)
+            
+        except Exception as e:
+            self.logger.warning(f"解析Definitions.h文件失败: {e}")
+        
+        return macros
 
     def _normalize_path(self, path: str) -> str:
         """规范化路径"""
@@ -477,8 +682,8 @@ class ClangParser:
         """
         获取最优的工作目录
         
-        对于UE项目，应该使用compile_commands.json中指定的原始工作目录，
-        因为UnrealBuildTool已经正确配置了相对路径。
+        使用compile_commands.json中指定的原始工作目录，
+        因为构建系统已经正确配置了相对路径。
         
         Args:
             directory: compile_commands.json中指定的目录
@@ -487,7 +692,7 @@ class ClangParser:
         Returns:
             最优的工作目录路径
         """
-        # 直接使用原始目录，UnrealBuildTool的配置是正确的
+        # 直接使用原始目录，构建系统的配置是正确的
         return directory
 
     @profile_function("ClangParser.parse_file")
@@ -559,7 +764,6 @@ class ClangParser:
                     return None
                 
                 self.logger.debug(f"使用工作目录: {working_directory} (不切换)")
-                # os.chdir(working_directory)  # 已移除工作目录切换
             
             logger.checkpoint("环境设置完成", working_dir=working_directory)
             
@@ -582,7 +786,6 @@ class ClangParser:
                     raise
             
             with profiler.timer("clang_parse_cleanup"):
-                # os.chdir(original_cwd)  # 已移除工作目录恢复
                 parse_time = time.perf_counter() - start_time
 
             logger.checkpoint("Clang解析完成", parse_time=f"{parse_time:.4f}s")
@@ -598,6 +801,8 @@ class ClangParser:
             
             with profiler.timer("diagnostic_check"):
                 errors = [d for d in tu.diagnostics if d.severity >= Diagnostic.Error]
+                success = len(errors) == 0
+                
                 if errors:
                     self.logger.warning(f"文件 '{file_path}' 解析时出现 {len(errors)} 个错误。")
                     for diag in errors:
@@ -611,7 +816,7 @@ class ClangParser:
             if total_time > 1.0:  # 如果单个文件解析超过1秒，记录警告
                 self.logger.warning(f"⚠️  文件 {Path(file_path).name} 解析耗时过长: {total_time:.2f}s")
 
-            return ParsedFile(file_path=file_path, success=True, translation_unit=tu, diagnostics=[], parse_time=parse_time)
+            return ParsedFile(file_path=file_path, success=success, translation_unit=tu, diagnostics=[], parse_time=parse_time)
 
         except clang.TranslationUnitLoadError as e:
             # 专门处理TranslationUnitLoadError
@@ -646,8 +851,33 @@ class ClangParser:
                 parse_time=0.0
             )
     
+    def cleanup(self):
+        """清理资源"""
+        # 清理缓存
+        self.clear_cache()
+    
     def clear_cache(self):
         """清空TranslationUnit缓存"""
         if self._tu_cache:
             self._tu_cache.clear()
             self.logger.info("TranslationUnit缓存已清空")
+
+    def __del__(self):
+        """析构函数"""
+        try:
+            self.cleanup()
+        except:
+            pass  # 忽略析构时的异常
+
+
+def create_enhanced_parser(**kwargs) -> ClangParser:
+    """
+    创建增强版解析器的便利函数
+    
+    Args:
+        **kwargs: 传递给ClangParser的参数
+    
+    Returns:
+        ClangParser实例
+    """
+    return ClangParser(**kwargs)
