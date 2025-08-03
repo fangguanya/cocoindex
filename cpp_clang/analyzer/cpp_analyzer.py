@@ -447,10 +447,10 @@ class CppAnalyzer:
 
         self.logger.info(f"收集到 {len(all_include_dirs)} 个include目录，{len(all_macro_definitions)} 个宏定义")
 
-        # 2. 快速头文件扫描 - 极速版本
+        # 2. 快速头文件扫描 - 修复版本：增加扫描限制以支持超大型项目
         scan_path = Path(scan_directory)
-        max_header_files = 50    # 大幅减少到50个文件
-        max_scan_time = 10       # 最大扫描时间10秒
+        max_header_files = 15000  # 增加到15000个文件以支持超大型UE项目（用户期望14000+）
+        max_scan_time = 180       # 增加扫描时间到180秒
         
         if scan_path.exists():
             try:
@@ -462,7 +462,7 @@ class CppAnalyzer:
                 # 优先扫描特定目录，避免全目录递归
                 priority_dirs = ['Source', 'Public', 'Private', 'Classes', 'include', 'Inc']
                 
-                # 先快速检查优先目录
+                # 先快速检查优先目录 - 使用递归扫描
                 for priority_dir in priority_dirs:
                     if len(header_files) >= max_header_files:
                         break
@@ -474,40 +474,77 @@ class CppAnalyzer:
                     if priority_path.exists():
                         self.logger.info(f"扫描优先目录: {priority_path}")
                         try:
-                            # 只扫描前两层，避免深度递归
-                            for header_file in priority_path.glob('*.h'):
-                                if len(header_files) >= max_header_files:
-                                    break
-                                header_files.append(str(header_file.resolve()))
-                                self.logger.debug(f"找到头文件: {header_file.name}")
-                            
-                            # 扫描一层子目录
-                            for subdir in priority_path.iterdir():
+                            # 使用递归glob进行深度扫描
+                            for header_file in priority_path.rglob('*.h'):
                                 if len(header_files) >= max_header_files:
                                     break
                                 if time.time() - start_time > max_scan_time:
                                     break
-                                if subdir.is_dir():
-                                    for header_file in subdir.glob('*.h'):
-                                        if len(header_files) >= max_header_files:
-                                            break
-                                        header_files.append(str(header_file.resolve()))
-                                        self.logger.debug(f"找到头文件: {subdir.name}/{header_file.name}")
+                                header_files.append(str(header_file.resolve()))
+                                self.logger.debug(f"找到头文件: {header_file.relative_to(scan_path)}")
+                            
+                            # 同时扫描hpp文件
+                            for header_file in priority_path.rglob('*.hpp'):
+                                if len(header_files) >= max_header_files:
+                                    break
+                                if time.time() - start_time > max_scan_time:
+                                    break
+                                header_files.append(str(header_file.resolve()))
+                                self.logger.debug(f"找到头文件: {header_file.relative_to(scan_path)}")
                         except Exception as e:
                             self.logger.debug(f"扫描优先目录 {priority_path} 时出错: {e}")
                 
-                # 如果还没达到限制且时间允许，快速扫描根目录
+                # 如果还没达到限制且时间允许，递归扫描整个目录
                 if len(header_files) < max_header_files and time.time() - start_time < max_scan_time:
-                    self.logger.info("快速扫描根目录...")
+                    self.logger.info("递归扫描整个项目目录...")
                     try:
-                        # 只扫描根目录的直接头文件
-                        for header_file in scan_path.glob('*.h'):
+                        # 递归扫描所有头文件，但跳过已经扫描过的优先目录
+                        scanned_priority_dirs = {scan_path / priority_dir for priority_dir in priority_dirs if (scan_path / priority_dir).exists()}
+                        
+                        for header_file in scan_path.rglob('*.h'):
                             if len(header_files) >= max_header_files:
                                 break
-                            header_files.append(str(header_file.resolve()))
-                            self.logger.debug(f"找到根目录头文件: {header_file.name}")
+                            if time.time() - start_time > max_scan_time:
+                                break
+                            
+                            # 跳过已经在优先目录中扫描过的文件
+                            header_path = header_file.resolve()
+                            already_scanned = False
+                            for priority_dir in scanned_priority_dirs:
+                                try:
+                                    header_path.relative_to(priority_dir.resolve())
+                                    already_scanned = True
+                                    break
+                                except ValueError:
+                                    continue
+                            
+                            if not already_scanned:
+                                header_files.append(str(header_path))
+                                self.logger.debug(f"找到头文件: {header_file.relative_to(scan_path)}")
+                        
+                        # 同时扫描hpp文件
+                        for header_file in scan_path.rglob('*.hpp'):
+                            if len(header_files) >= max_header_files:
+                                break
+                            if time.time() - start_time > max_scan_time:
+                                break
+                            
+                            header_path = header_file.resolve()
+                            already_scanned = False
+                            for priority_dir in scanned_priority_dirs:
+                                try:
+                                    header_path.relative_to(priority_dir.resolve())
+                                    already_scanned = True
+                                    break
+                                except ValueError:
+                                    continue
+                            
+                            if not already_scanned:
+                                header_files.append(str(header_path))
+                                self.logger.debug(f"找到头文件: {header_file.relative_to(scan_path)}")
+                                
                     except Exception as e:
-                        self.logger.debug(f"扫描根目录时出错: {e}")
+                        self.logger.debug(f"递归扫描项目目录时出错: {e}")
                 
                 elapsed_time = time.time() - start_time
                 self.logger.info(f"头文件扫描完成，找到 {len(header_files)} 个头文件，耗时 {elapsed_time:.2f}s")
@@ -991,21 +1028,15 @@ class CppAnalyzer:
                 i += 1
                 continue
             
-            # 特别处理强制包含参数 - 移除有问题的强制包含文件
+            # 处理强制包含参数 - 保留所有强制包含文件，依赖compile_commands.json的配置
             if arg == '-include' and i + 1 < len(template_args):
                 include_file = template_args[i + 1]
-                if self._is_problematic_include_file(include_file):
-                    self.logger.info(f"为头文件 {Path(header_file).name} 移除有问题的强制包含文件: {include_file}")
-                    # 跳过 -include 和文件名
-                    i += 2
-                    continue
-                else:
-                    # 保留这个强制包含
-                    header_args.append(arg)
-                    if i + 1 < len(template_args):
-                        header_args.append(template_args[i + 1])
-                    i += 2
-                    continue
+                # 保留所有强制包含文件，UE项目中的PCH文件是正常的
+                header_args.append(arg)
+                if i + 1 < len(template_args):
+                    header_args.append(template_args[i + 1])
+                i += 2
+                continue
             
             # 跳过复杂的clang参数序列
             if (arg == '-Xclang' and i + 3 < len(template_args) and 
@@ -1031,43 +1062,7 @@ class CppAnalyzer:
             if macro_arg not in header_args:
                 header_args.append(macro_arg)
         
-        # 4. 添加UE引擎核心包含路径
-        ue_engine_includes = [
-            # 核心运行时模块
-            'N:/c7_enginedev/Engine/Source/Runtime/CoreUObject/Public',
-            'N:/c7_enginedev/Engine/Source/Runtime/Core/Public',
-            'N:/c7_enginedev/Engine/Source/Runtime/Engine/Public',
-            'N:/c7_enginedev/Engine/Source/Runtime/Engine/Classes',
-            'N:/c7_enginedev/Engine/Source/Runtime/CoreUObject/Classes',
-            'N:/c7_enginedev/Engine/Source/Runtime/Core/Classes',
-            
-            # 编辑器相关模块
-            'N:/c7_enginedev/Engine/Source/Editor/UnrealEd/Public',
-            'N:/c7_enginedev/Engine/Source/Editor/UnrealEd/Classes',
-            'N:/c7_enginedev/Engine/Source/Editor/ComponentVisualizers/Public',
-            'N:/c7_enginedev/Engine/Source/Editor/ToolMenus/Public',
-            'N:/c7_enginedev/Engine/Source/Editor/EditorStyle/Public',
-            'N:/c7_enginedev/Engine/Source/Editor/EditorWidgets/Public',
-            
-            # 开发者设置和工具
-            'N:/c7_enginedev/Engine/Source/Developer/Settings/Public',
-            'N:/c7_enginedev/Engine/Source/Developer/DeveloperSettings/Public',
-            'N:/c7_enginedev/Engine/Source/Developer/TargetPlatform/Public',
-            'N:/c7_enginedev/Engine/Source/Programs/UnrealHeaderTool/Public',
-            
-            # 其他重要模块
-            'N:/c7_enginedev/Engine/Source/Runtime/TraceLog/Public',
-            'N:/c7_enginedev/Engine/Source/Runtime/Slate/Public',
-            'N:/c7_enginedev/Engine/Source/Runtime/SlateCore/Public',
-            'N:/c7_enginedev/Engine/Source/Runtime/ApplicationCore/Public'
-        ]
-        
-        for ue_include in ue_engine_includes:
-            if os.path.exists(ue_include):
-                include_arg = f'-I{ue_include}'
-                if include_arg not in header_args:
-                    header_args.append(include_arg)
-                    self.logger.debug(f"添加UE引擎包含路径: {ue_include}")
+        # 4. 不再添加硬编码的UE引擎包含路径，依赖compile_commands.json中的配置
         
         # 5. 添加头文件特定的参数
         header_specific_args = [
@@ -1085,55 +1080,7 @@ class CppAnalyzer:
         self.logger.debug(f"为头文件 {Path(header_file).name} 创建了 {len(header_args)} 个编译参数")
         return header_args
     
-    def _is_problematic_include_file(self, include_file: str) -> bool:
-        """
-        检查是否是已知有问题的强制包含文件 - 修复版本
-        """
-        import re
-        
-        # 只检查明确已知有问题的文件模式，避免过于激进的判断
-        problematic_patterns = [
-            'PCH.GMESDK.h',  # 特定的有问题的PCH文件
-        ]
-        
-        filename = os.path.basename(include_file)
-        
-        # 精确匹配有问题的文件名，而不是模糊匹配
-        for pattern in problematic_patterns:
-            if filename == pattern:
-                self.logger.debug(f"发现已知有问题的强制包含文件: {filename}")
-                return True
-        
-        # 检查文件是否存在
-        try:
-            if os.path.isabs(include_file):
-                include_path = Path(include_file)
-            else:
-                include_path = Path(os.getcwd()) / include_file
-            
-            if not include_path.exists():
-                # 文件不存在才认为是有问题的
-                self.logger.debug(f"强制包含文件不存在: {include_file}")
-                return True
-            
-            # 对于存在的文件，只有在包含了无法解析的相对路径时才认为有问题
-            # 但是要更加谨慎，避免将正常的UE文件标记为问题文件
-            with open(include_path, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read(2048)  # 只读取前2KB内容
-                
-                # 检查是否包含已知会导致解析失败的特定模式
-                if 'PCH.GMESDK.h' in content and '../' in content:
-                    # 只有当文件同时包含PCH.GMESDK.h引用和相对路径时才认为有问题
-                    self.logger.debug(f"发现包含PCH.GMESDK.h和相对路径的强制包含文件: {include_file}")
-                    return True
-                
-        except Exception as e:
-            self.logger.debug(f"检查强制包含文件 {include_file} 时出错: {e}")
-            # 出错时不再保守地认为有问题，而是允许继续处理
-            return False
-        
-        # 默认认为文件是正常的，不是问题文件
-        return False
+    
 
     def _print_performance_report(self, stats: Dict[str, Any], total_time: float):
         """打印详细的性能报告"""

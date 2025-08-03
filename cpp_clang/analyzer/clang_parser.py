@@ -793,6 +793,101 @@ class ClangParser:
                 i += 1
         
         return fixed_args
+    
+    def _create_permissive_args(self, args: List[str]) -> List[str]:
+        """创建宽松的解析参数，移除可能导致问题的严格检查"""
+        permissive_args = []
+        skip_next = False
+        
+        for i, arg in enumerate(args):
+            if skip_next:
+                skip_next = False
+                continue
+            
+            # 跳过可能导致严格检查的参数
+            if arg in ['-Werror', '-pedantic', '-pedantic-errors']:
+                continue
+            
+            # 跳过某些可能有问题的include参数
+            if arg == '-include' and i + 1 < len(args):
+                include_file = args[i + 1]
+                # 只保留存在的include文件
+                if os.path.exists(include_file):
+                    permissive_args.extend([arg, include_file])
+                skip_next = True
+                continue
+            
+            permissive_args.append(arg)
+        
+        # 添加宽松的编译选项
+        permissive_options = [
+            '-Wno-error',
+            '-Wno-unknown-pragmas',
+            '-Wno-ignored-attributes',
+            '-Wno-unused-value',
+            '-Wno-microsoft',
+            '-fms-compatibility',
+            '-fms-extensions'
+        ]
+        
+        for option in permissive_options:
+            if option not in permissive_args:
+                permissive_args.append(option)
+        
+        return permissive_args
+    
+    def _create_minimal_args(self, args: List[str], file_path: str) -> List[str]:
+        """创建最小化的参数集，只保留最基本的编译参数"""
+        minimal_args = []
+        skip_next = False
+        
+        # 只保留最基本的参数
+        for i, arg in enumerate(args):
+            if skip_next:
+                skip_next = False
+                continue
+            
+            # 保留include路径
+            if arg.startswith('-I'):
+                minimal_args.append(arg)
+                continue
+            
+            # 保留基本的宏定义（但跳过复杂的）
+            if arg.startswith('-D'):
+                macro = arg[2:] if len(arg) > 2 else (args[i+1] if i+1 < len(args) else '')
+                if macro and not any(complex_char in macro for complex_char in ['(', ')', '{', '}', '"']):
+                    minimal_args.append(arg)
+                    if len(arg) == 2:
+                        skip_next = True
+                continue
+            
+            # 保留C++标准
+            if arg.startswith('-std='):
+                minimal_args.append(arg)
+                continue
+            
+            # 跳过所有-include参数
+            if arg == '-include':
+                skip_next = True
+                continue
+        
+        # 添加基本的兼容性参数
+        basic_args = [
+            '-fms-compatibility',
+            '-fms-extensions',
+            '-Wno-microsoft',
+            '-Wno-unknown-pragmas'
+        ]
+        
+        # 根据文件类型添加特定参数
+        if file_path.endswith('.h') or file_path.endswith('.hpp'):
+            basic_args.extend(['-x', 'c++-header'])
+        
+        for arg in basic_args:
+            if arg not in minimal_args:
+                minimal_args.append(arg)
+        
+        return minimal_args
 
     @profile_function("ClangParser.parse_file")
     def parse_file(self, file_path: str) -> Optional[ParsedFile]:
