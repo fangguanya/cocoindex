@@ -1,14 +1,5 @@
 """
-Clang Parser Module - 性能优化版
-
-Core C++ parsing functionality using libclang. Handles AST generation,
-symbol resolution, and extraction of language constructs like functions,
-classes, namespaces, and templates.
-
-性能优化：
-- 移除@dataclass装饰器以提升对象创建性能
-- 添加TranslationUnit缓存机制
-- 优化编译参数处理
+Clang Parser Module - 性能优化版 - 修复版
 """
 
 import os
@@ -160,7 +151,7 @@ class TranslationUnitCache:
             self._access_times.clear()
 
 class ClangParser:
-    """Clang解析器 - 支持compile_commands.json和动态编译参数 - 性能优化版"""
+    """Clang解析器 - 支持compile_commands.json和动态编译参数 - 性能优化版 - 修复版"""
     
     def __init__(self, console: Optional[Console] = None, verbose: bool = True, enable_cache: bool = True):
         self.console = console or Console()
@@ -217,16 +208,7 @@ class ClangParser:
         return file_commands
 
     def _parse_response_file(self, rsp_path: str, working_directory: str = None) -> List[str]:
-        """
-        解析响应文件(.rsp)并返回参数列表
-        
-        Args:
-            rsp_path: 响应文件路径（可能是相对路径）
-            working_directory: 工作目录，用于解析相对路径
-            
-        Returns:
-            解析后的参数列表
-        """
+        """解析响应文件(.rsp)并返回参数列表"""
         # 处理相对路径：如果rsp_path是相对路径且提供了工作目录，则相对于工作目录解析
         if working_directory and not os.path.isabs(rsp_path):
             full_rsp_path = os.path.join(working_directory, rsp_path)
@@ -339,14 +321,26 @@ class ClangParser:
                         processed.append('-D' + args_list[i+1])
                         skip_next = True
                 elif arg.startswith('/FI'):
-                    # 强制包含文件
+                    # 强制包含文件 - 检查文件是否存在
+                    include_file = ""
                     if len(arg) > 3:
-                        processed.append('-include')
-                        processed.append(arg[3:].strip('"\''))
+                        include_file = arg[3:].strip('"\'')
                     elif i + 1 < len(args_list):
-                        processed.append('-include')
-                        processed.append(args_list[i+1].strip('"\''))
+                        include_file = args_list[i+1].strip('"\'')
                         skip_next = True
+                    
+                    if include_file:
+                        # 检查强制包含文件是否存在
+                        if not os.path.isabs(include_file) and working_directory:
+                            full_include_path = os.path.join(working_directory, include_file)
+                        else:
+                            full_include_path = include_file
+                        
+                        if os.path.exists(full_include_path):
+                            processed.append('-include')
+                            processed.append(include_file)
+                        else:
+                            self.logger.warning(f"跳过不存在的强制包含文件: {include_file}")
                 elif arg.startswith('/imsvc'):
                     # MSVC系统包含路径
                     if len(arg) > 6:
@@ -472,7 +466,7 @@ class ClangParser:
         return expanded_args
     
     def _convert_args_to_libclang_format(self, args: List[str], working_directory: str = None) -> List[str]:
-        """将clang-cl参数转换为libclang格式"""
+        """将clang-cl参数转换为libclang格式 - 修复版"""
         converted = []
         skip_next = False
         
@@ -481,8 +475,13 @@ class ClangParser:
                 skip_next = False
                 continue
             
-            # 跳过编译器可执行文件和输出文件
-            if arg.endswith(('.exe', '.c', '.cpp', '.cc', '.cxx', '.o', '.obj')):
+            # 跳过编译器可执行文件、源文件路径和输出文件 - 修复版
+            if (arg.endswith(('.exe', '.c', '.cpp', '.cc', '.cxx', '.o', '.obj')) or 
+                ('clang-cl.exe' in arg) or
+                (arg.startswith('N:') and (arg.endswith('.cpp') or arg.endswith('.h'))) or
+                (arg.startswith('"N:') and (arg.endswith('.cpp"') or arg.endswith('.h"'))) or
+                # 处理响应文件中的绝对路径源文件
+                (os.path.isabs(arg.strip('"\'')) and arg.strip('"\'').endswith(('.cpp', '.c', '.cc', '.cxx', '.h')))):
                 continue
             
             # 跳过输出相关参数
@@ -514,11 +513,21 @@ class ClangParser:
                         skip_next = True
                 continue
             
-            # 转换强制包含文件
+            # 转换强制包含文件 - 修复版：检查文件是否存在
             if arg.startswith('/FI'):
                 include_file = arg[3:].strip('"\'') if len(arg) > 3 else (args[i+1].strip('"\'') if i+1 < len(args) else '')
                 if include_file:
-                    converted.extend(['-include', include_file])
+                    # 检查强制包含文件是否存在
+                    if not os.path.isabs(include_file) and working_directory:
+                        full_include_path = os.path.join(working_directory, include_file)
+                    else:
+                        full_include_path = include_file
+                    
+                    if os.path.exists(full_include_path):
+                        converted.extend(['-include', include_file])
+                    else:
+                        self.logger.warning(f"跳过不存在的强制包含文件: {include_file}")
+                    
                     if len(arg) == 3:
                         skip_next = True
                 continue
@@ -545,12 +554,24 @@ class ClangParser:
                 converted.append('-fno-rtti')
             elif arg in ['/W1', '/W2', '/W3', '/W4']:
                 converted.append('-Wall')
+            elif arg.startswith('/clang:'):
+                # 处理 /clang: 参数，提取其中的clang参数
+                clang_arg = arg[7:]  # 去掉 '/clang:'
+                if clang_arg:
+                    converted.append(clang_arg)
             elif arg.startswith('/'):
-                # 跳过其他MSVC特定参数
+                # 跳过其他MSVC特定参数，但保留一些重要的
+                important_msvc_args = ['/DWIN32', '/D_WINDOWS', '/D_USRDLL']
+                if any(arg.startswith(prefix) for prefix in important_msvc_args):
+                    # 转换为 -D 格式
+                    if arg.startswith('/D'):
+                        converted.append('-D' + arg[2:])
+                # 其他 /xxx 参数跳过
                 continue
             else:
-                # 保留其他参数
-                converted.append(arg)
+                # 保留其他参数，但过滤一些明显的编译器参数
+                if not any(keyword in arg.lower() for keyword in ['clang-cl', '.exe', '.dll']):
+                    converted.append(arg)
         
         # 添加libclang需要的基本参数
         essential_args = [
@@ -679,19 +700,7 @@ class ClangParser:
                 break
     
     def _get_optimal_working_directory(self, directory: str, file_path: str) -> str:
-        """
-        获取最优的工作目录
-        
-        使用compile_commands.json中指定的原始工作目录，
-        因为构建系统已经正确配置了相对路径。
-        
-        Args:
-            directory: compile_commands.json中指定的目录
-            file_path: 要编译的文件路径
-            
-        Returns:
-            最优的工作目录路径
-        """
+        """获取最优的工作目录"""
         # 直接使用原始目录，构建系统的配置是正确的
         return directory
 
