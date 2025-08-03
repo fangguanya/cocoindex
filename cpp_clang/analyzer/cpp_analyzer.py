@@ -379,7 +379,7 @@ class CppAnalyzer:
 
     def _scan_and_prepare_header_files(self, source_files: List[str], compile_commands: Dict, 
                                      project_root: str, scan_directory: str) -> tuple[List[str], Dict[str, Dict]]:
-        """扫描头文件并为其创建编译命令 - 智能继承版本"""
+        """扫描头文件并为其创建编译命令 - 无限制版本"""
         header_files = []
         header_compile_commands = {}
         
@@ -447,16 +447,14 @@ class CppAnalyzer:
 
         self.logger.info(f"收集到 {len(all_include_dirs)} 个include目录，{len(all_macro_definitions)} 个宏定义")
 
-        # 2. 快速头文件扫描 - 修复版本：增加扫描限制以支持超大型项目
+        # 2. 头文件扫描 - 无限制版本：按照正确逻辑运行，不设置人为限制
         scan_path = Path(scan_directory)
-        max_header_files = 15000  # 增加到15000个文件以支持超大型UE项目（用户期望14000+）
-        max_scan_time = 180       # 增加扫描时间到180秒
         
         if scan_path.exists():
             try:
                 import time
                 start_time = time.time()
-                self.logger.info(f"开始快速头文件扫描，限制: {max_header_files} 个文件，最大时间: {max_scan_time}s")
+                self.logger.info(f"开始头文件扫描，无文件数量和时间限制")
                 self.logger.info(f"扫描目录: {scan_directory}")
                 
                 # 优先扫描特定目录，避免全目录递归
@@ -464,94 +462,126 @@ class CppAnalyzer:
                 
                 # 先快速检查优先目录 - 使用递归扫描
                 for priority_dir in priority_dirs:
-                    if len(header_files) >= max_header_files:
-                        break
-                    if time.time() - start_time > max_scan_time:
-                        self.logger.warning(f"头文件扫描达到时间限制 ({max_scan_time}s)")
-                        break
-                        
                     priority_path = scan_path / priority_dir
                     if priority_path.exists():
                         self.logger.info(f"扫描优先目录: {priority_path}")
                         try:
                             # 使用递归glob进行深度扫描
                             for header_file in priority_path.rglob('*.h'):
-                                if len(header_files) >= max_header_files:
-                                    break
-                                if time.time() - start_time > max_scan_time:
-                                    break
                                 header_files.append(str(header_file.resolve()))
                                 self.logger.debug(f"找到头文件: {header_file.relative_to(scan_path)}")
                             
                             # 同时扫描hpp文件
                             for header_file in priority_path.rglob('*.hpp'):
-                                if len(header_files) >= max_header_files:
-                                    break
-                                if time.time() - start_time > max_scan_time:
-                                    break
                                 header_files.append(str(header_file.resolve()))
                                 self.logger.debug(f"找到头文件: {header_file.relative_to(scan_path)}")
                         except Exception as e:
                             self.logger.debug(f"扫描优先目录 {priority_path} 时出错: {e}")
                 
-                # 如果还没达到限制且时间允许，递归扫描整个目录
-                if len(header_files) < max_header_files and time.time() - start_time < max_scan_time:
-                    self.logger.info("递归扫描整个项目目录...")
-                    try:
-                        # 递归扫描所有头文件，但跳过已经扫描过的优先目录
-                        scanned_priority_dirs = {scan_path / priority_dir for priority_dir in priority_dirs if (scan_path / priority_dir).exists()}
+                # 递归扫描整个项目目录
+                self.logger.info("递归扫描整个项目目录...")
+                recursive_scan_start = time.time()
+                
+                try:
+                    # 预处理优先目录路径，转换为字符串集合以提高比较性能
+                    scanned_priority_dirs = {scan_path / priority_dir for priority_dir in priority_dirs if (scan_path / priority_dir).exists()}
+                    scanned_priority_paths = {str(priority_dir.resolve()) for priority_dir in scanned_priority_dirs}
+                    self.logger.info(f"优先目录数量: {len(scanned_priority_dirs)}")
+                    
+                    # 添加计数器和进度日志
+                    h_file_count = 0
+                    hpp_file_count = 0
+                    processed_count = 0
+                    skipped_count = 0
+                    last_log_time = time.time()
+                    
+                    def is_in_priority_dirs(file_path_str):
+                        """快速检查文件是否在优先目录中"""
+                        for priority_path in scanned_priority_paths:
+                            if file_path_str.startswith(priority_path):
+                                return True
+                        return False
+                    
+                    self.logger.info("开始扫描 .h 文件...")
+                    h_scan_start = time.time()
+                    
+                    for header_file in scan_path.rglob('*.h'):
+                        h_file_count += 1
+                        processed_count += 1
+                        current_time = time.time()
                         
-                        for header_file in scan_path.rglob('*.h'):
-                            if len(header_files) >= max_header_files:
-                                break
-                            if time.time() - start_time > max_scan_time:
-                                break
-                            
-                            # 跳过已经在优先目录中扫描过的文件
-                            header_path = header_file.resolve()
-                            already_scanned = False
-                            for priority_dir in scanned_priority_dirs:
-                                try:
-                                    header_path.relative_to(priority_dir.resolve())
-                                    already_scanned = True
-                                    break
-                                except ValueError:
-                                    continue
-                            
-                            if not already_scanned:
-                                header_files.append(str(header_path))
-                                self.logger.debug(f"找到头文件: {header_file.relative_to(scan_path)}")
+                        # 每1000个文件或每10秒输出一次进度
+                        if processed_count % 1000 == 0 or (current_time - last_log_time) > 10:
+                            elapsed = current_time - h_scan_start
+                            self.logger.info(f"已扫描 {processed_count} 个 .h 文件，跳过 {skipped_count} 个，找到 {len(header_files)} 个新头文件，耗时 {elapsed:.2f} 秒")
+                            last_log_time = current_time
                         
-                        # 同时扫描hpp文件
-                        for header_file in scan_path.rglob('*.hpp'):
-                            if len(header_files) >= max_header_files:
-                                break
-                            if time.time() - start_time > max_scan_time:
-                                break
+                        # 性能监控：如果扫描时间过长，输出警告
+                        if (current_time - h_scan_start) > 300:  # 5分钟
+                            self.logger.warning(f"扫描 .h 文件已耗时 {(current_time - h_scan_start):.2f} 秒，可能存在性能问题")
+                        
+                        # 快速检查是否在优先目录中
+                        try:
+                            header_path_str = str(header_file.resolve())
+                            if is_in_priority_dirs(header_path_str):
+                                skipped_count += 1
+                                continue
                             
-                            header_path = header_file.resolve()
-                            already_scanned = False
-                            for priority_dir in scanned_priority_dirs:
-                                try:
-                                    header_path.relative_to(priority_dir.resolve())
-                                    already_scanned = True
-                                    break
-                                except ValueError:
-                                    continue
+                            header_files.append(header_path_str)
+                            if len(header_files) % 500 == 0:  # 每500个新文件输出一次
+                                self.logger.info(f"新增头文件数: {len(header_files)}")
+                        except Exception as file_error:
+                            self.logger.debug(f"处理文件 {header_file} 时出错: {file_error}")
+                            continue
+                    
+                    h_scan_duration = time.time() - h_scan_start
+                    self.logger.info(f"扫描 .h 文件完成，总共扫描了 {h_file_count} 个文件，跳过 {skipped_count} 个，耗时 {h_scan_duration:.2f} 秒")
+                    
+                    self.logger.info("开始扫描 .hpp 文件...")
+                    hpp_scan_start = time.time()
+                    hpp_skipped_count = 0
+                    
+                    for header_file in scan_path.rglob('*.hpp'):
+                        hpp_file_count += 1
+                        processed_count += 1
+                        current_time = time.time()
+                        
+                        # 每1000个文件或每10秒输出一次进度
+                        if processed_count % 1000 == 0 or (current_time - last_log_time) > 10:
+                            elapsed = current_time - hpp_scan_start
+                            self.logger.info(f"已扫描 {processed_count} 个文件，找到 {len(header_files)} 个头文件，耗时 {elapsed:.2f} 秒")
+                            last_log_time = current_time
+                        
+                        # 快速检查是否在优先目录中
+                        try:
+                            header_path_str = str(header_file.resolve())
+                            if is_in_priority_dirs(header_path_str):
+                                hpp_skipped_count += 1
+                                continue
                             
-                            if not already_scanned:
-                                header_files.append(str(header_path))
-                                self.logger.debug(f"找到头文件: {header_file.relative_to(scan_path)}")
-                                
-                    except Exception as e:
-                        self.logger.debug(f"递归扫描项目目录时出错: {e}")
+                            header_files.append(header_path_str)
+                            if len(header_files) % 500 == 0:  # 每500个新文件输出一次
+                                self.logger.info(f"新增头文件数: {len(header_files)}")
+                        except Exception as file_error:
+                            self.logger.debug(f"处理文件 {header_file} 时出错: {file_error}")
+                            continue
+                    
+                    hpp_scan_duration = time.time() - hpp_scan_start
+                    recursive_scan_duration = time.time() - recursive_scan_start
+                    
+                    self.logger.info(f"扫描 .hpp 文件完成，总共扫描了 {hpp_file_count} 个文件，跳过 {hpp_skipped_count} 个，耗时 {hpp_scan_duration:.2f} 秒")
+                    self.logger.info(f"递归扫描统计: .h文件 {h_file_count} 个, .hpp文件 {hpp_file_count} 个, 总共 {h_file_count + hpp_file_count} 个")
+                    self.logger.info(f"跳过统计: .h文件跳过 {skipped_count} 个, .hpp文件跳过 {hpp_skipped_count} 个")
+                    self.logger.info(f"递归扫描总耗时: {recursive_scan_duration:.2f} 秒")
+                            
+                except Exception as e:
+                    self.logger.error(f"递归扫描项目目录时出错: {e}")
+                    import traceback
+                    self.logger.error(f"错误详情: {traceback.format_exc()}")
                 
                 elapsed_time = time.time() - start_time
                 self.logger.info(f"头文件扫描完成，找到 {len(header_files)} 个头文件，耗时 {elapsed_time:.2f}s")
                 
-                if elapsed_time >= max_scan_time:
-                    self.logger.warning(f"头文件扫描达到时间限制，可能未扫描完所有文件")
-                    
             except Exception as e:
                 self.logger.warning(f"扫描目标目录 '{scan_directory}' 时出错: {e}")
         else:
@@ -1120,6 +1150,163 @@ class CppAnalyzer:
                 self.console.print("  • 考虑使用更多并行进程")
             self.console.print("  • 检查是否有大型头文件导致解析缓慢")
             self.console.print("  • 考虑启用更激进的解析优化选项")
+
+    def scan_header_files(self, project_path: str) -> List[str]:
+        """扫描项目中的头文件"""
+        import time
+        start_time = time.time()
+        
+        scan_path = Path(project_path)
+        header_files = []
+        
+        if not scan_path.exists():
+            self.logger.warning(f"项目路径不存在: {project_path}")
+            return header_files
+        
+        self.logger.info(f"开始扫描头文件: {project_path}")
+        
+        try:
+            # 优先扫描常见的头文件目录
+            priority_dirs = [
+                'include', 'src', 'headers', 'inc',
+                'Source', 'Public', 'Private', 'Classes'
+            ]
+            
+            # 首先扫描优先目录
+            priority_start_time = time.time()
+            for priority_dir in priority_dirs:
+                priority_path = scan_path / priority_dir
+                if priority_path.exists() and priority_path.is_dir():
+                    self.logger.info(f"扫描优先目录: {priority_dir}")
+                    for pattern in ['*.h', '*.hpp']:
+                        for header_file in priority_path.rglob(pattern):
+                            header_files.append(str(header_file.resolve()))
+                            self.logger.debug(f"找到头文件: {header_file.relative_to(scan_path)}")
+            
+            priority_duration = time.time() - priority_start_time
+            self.logger.info(f"优先目录扫描完成，找到 {len(header_files)} 个头文件，耗时 {priority_duration:.2f} 秒")
+            
+            # 如果优先目录中找到的头文件数量不足，则扫描整个项目
+            if len(header_files) < 100:  # 阈值可调整
+                # 递归扫描整个项目目录
+                self.logger.info("递归扫描整个项目目录...")
+                recursive_start_time = time.time()
+                
+                try:
+                    # 预处理优先目录路径，转换为字符串集合以提高比较性能
+                    scanned_priority_dirs = {scan_path / priority_dir for priority_dir in priority_dirs if (scan_path / priority_dir).exists()}
+                    scanned_priority_paths = {str(priority_dir.resolve()) for priority_dir in scanned_priority_dirs}
+                    self.logger.info(f"优先目录数量: {len(scanned_priority_dirs)}")
+                    
+                    # 添加计数器和进度日志
+                    h_file_count = 0
+                    hpp_file_count = 0
+                    processed_count = 0
+                    skipped_count = 0
+                    last_log_time = time.time()
+                    
+                    def is_in_priority_dirs(file_path_str):
+                        """快速检查文件是否在优先目录中"""
+                        for priority_path in scanned_priority_paths:
+                            if file_path_str.startswith(priority_path):
+                                return True
+                        return False
+                    
+                    self.logger.info("开始扫描 .h 文件...")
+                    h_scan_start = time.time()
+                    
+                    for header_file in scan_path.rglob('*.h'):
+                        h_file_count += 1
+                        processed_count += 1
+                        current_time = time.time()
+                        
+                        # 每1000个文件或每10秒输出一次进度
+                        if processed_count % 1000 == 0 or (current_time - last_log_time) > 10:
+                            elapsed = current_time - h_scan_start
+                            self.logger.info(f"已扫描 {processed_count} 个 .h 文件，跳过 {skipped_count} 个，找到 {len(header_files)} 个新头文件，耗时 {elapsed:.2f} 秒")
+                            last_log_time = current_time
+                        
+                        # 安全检查：如果扫描时间过长，输出警告
+                        if (current_time - h_scan_start) > 300:  # 5分钟
+                            self.logger.warning(f"扫描 .h 文件已耗时 {(current_time - h_scan_start):.2f} 秒，可能存在性能问题")
+                        
+                        # 快速检查是否在优先目录中
+                        try:
+                            header_path_str = str(header_file.resolve())
+                            if is_in_priority_dirs(header_path_str):
+                                skipped_count += 1
+                                continue
+                            
+                            header_files.append(header_path_str)
+                            if len(header_files) % 500 == 0:  # 每500个新文件输出一次
+                                self.logger.info(f"新增头文件数: {len(header_files)}")
+                        except Exception as file_error:
+                            self.logger.debug(f"处理文件 {header_file} 时出错: {file_error}")
+                            continue
+                    
+                    h_scan_duration = time.time() - h_scan_start
+                    self.logger.info(f"扫描 .h 文件完成，总共扫描了 {h_file_count} 个文件，跳过 {skipped_count} 个，耗时 {h_scan_duration:.2f} 秒")
+                    
+                    self.logger.info("开始扫描 .hpp 文件...")
+                    hpp_scan_start = time.time()
+                    hpp_skipped_count = 0
+                    
+                    for header_file in scan_path.rglob('*.hpp'):
+                        hpp_file_count += 1
+                        processed_count += 1
+                        current_time = time.time()
+                        
+                        # 每1000个文件或每10秒输出一次进度
+                        if processed_count % 1000 == 0 or (current_time - last_log_time) > 10:
+                            elapsed = current_time - hpp_scan_start
+                            self.logger.info(f"已扫描 {processed_count} 个文件，找到 {len(header_files)} 个头文件，耗时 {elapsed:.2f} 秒")
+                            last_log_time = current_time
+                        
+                        # 快速检查是否在优先目录中
+                        try:
+                            header_path_str = str(header_file.resolve())
+                            if is_in_priority_dirs(header_path_str):
+                                hpp_skipped_count += 1
+                                continue
+                            
+                            header_files.append(header_path_str)
+                            if len(header_files) % 500 == 0:  # 每500个新文件输出一次
+                                self.logger.info(f"新增头文件数: {len(header_files)}")
+                        except Exception as file_error:
+                            self.logger.debug(f"处理文件 {header_file} 时出错: {file_error}")
+                            continue
+                    
+                    hpp_scan_duration = time.time() - hpp_scan_start
+                    recursive_duration = time.time() - recursive_start_time
+                    
+                    self.logger.info(f"扫描 .hpp 文件完成，总共扫描了 {hpp_file_count} 个文件，跳过 {hpp_skipped_count} 个，耗时 {hpp_scan_duration:.2f} 秒")
+                    self.logger.info(f"递归扫描统计: .h文件 {h_file_count} 个, .hpp文件 {hpp_file_count} 个, 总共 {h_file_count + hpp_file_count} 个")
+                    self.logger.info(f"跳过统计: .h文件跳过 {skipped_count} 个, .hpp文件跳过 {hpp_skipped_count} 个")
+                    self.logger.info(f"递归扫描总耗时: {recursive_duration:.2f} 秒")
+                            
+                except Exception as e:
+                    self.logger.error(f"递归扫描项目目录时出错: {e}")
+                    import traceback
+                    self.logger.error(f"错误详情: {traceback.format_exc()}")
+            else:
+                self.logger.info("优先目录中已找到足够的头文件，跳过全项目扫描")
+            
+            # 去重
+            dedup_start_time = time.time()
+            unique_headers = list(set(header_files))
+            dedup_duration = time.time() - dedup_start_time
+            
+            total_duration = time.time() - start_time
+            self.logger.info(f"扫描完成，去重前: {len(header_files)} 个，去重后: {len(unique_headers)} 个头文件")
+            self.logger.info(f"去重耗时: {dedup_duration:.2f} 秒，总耗时: {total_duration:.2f} 秒")
+            
+            return unique_headers
+            
+        except Exception as e:
+            self.logger.error(f"扫描头文件时出错: {e}")
+            import traceback
+            self.logger.error(f"错误详情: {traceback.format_exc()}")
+            return header_files
 
     def _create_failure_result(self, stage: str, reason: str) -> AnalysisResult:
         """创建一个表示失败的分析结果"""
