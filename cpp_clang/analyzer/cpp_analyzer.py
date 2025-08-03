@@ -497,41 +497,382 @@ class CppAnalyzer:
         return header_files, header_compile_commands
     
     def _find_first_including_source(self, header_file: str, source_files: List[str]) -> Optional[str]:
-        """找到第一个包含该头文件的源文件"""
+        """找到第一个包含该头文件的源文件（支持间接包含检测）"""
         header_path = Path(header_file)
         header_name = header_path.name
+        
+        # 首先尝试直接包含检测
+        direct_source = self._find_direct_including_source(header_file, source_files)
+        if direct_source:
+            return direct_source
+        
+        # 如果没有找到直接包含，尝试间接包含检测
+        self.logger.debug(f"未找到直接包含头文件 {header_name} 的源文件，尝试间接包含检测...")
+        indirect_source = self._find_indirect_including_source(header_file, source_files)
+        if indirect_source:
+            return indirect_source
+        
+        # 如果都没有找到，使用智能匹配策略
+        smart_source = self._find_smart_matching_source(header_file, source_files)
+        if smart_source:
+            return smart_source
+        
+        # 最后的回退策略：返回第一个源文件作为默认模板
+        if source_files:
+            self.logger.debug(f"使用第一个源文件作为头文件 {header_name} 的模板")
+            return source_files[0]
+        
+        return None
+    
+    def _find_direct_including_source(self, header_file: str, source_files: List[str]) -> Optional[str]:
+        """找到直接包含该头文件的源文件"""
+        header_path = Path(header_file)
+        header_name = header_path.name
+        
+        # 生成可能的包含路径变体
+        possible_include_patterns = self._generate_include_patterns(header_file)
         
         # 遍历所有源文件，找到第一个包含该头文件的源文件
         for src_file in source_files:
             try:
                 with open(src_file, 'r', encoding='utf-8', errors='ignore') as f:
-                    # 只读取前50行来检查include语句，提高性能
+                    # 读取更多行来检查include语句，但设置合理上限
                     for line_num, line in enumerate(f, 1):
-                        if line_num > 50:  # 限制检查范围
+                        if line_num > 200:  # 增加检查范围到200行
                             break
                         
                         line = line.strip()
                         if line.startswith('#include'):
-                            # 检查是否包含目标头文件
-                            if f'"{header_name}"' in line or f'<{header_name}>' in line:
-                                self.logger.debug(f"头文件 {header_name} 被源文件 {Path(src_file).name} 包含")
-                                return src_file
-                            
-                            # 也检查相对路径包含
-                            if header_name in line and ('#include "' in line or '#include <' in line):
-                                self.logger.debug(f"头文件 {header_name} 被源文件 {Path(src_file).name} 包含（相对路径）")
-                                return src_file
-                                
+                            # 检查所有可能的包含模式
+                            for pattern in possible_include_patterns:
+                                if pattern in line:
+                                    self.logger.debug(f"头文件 {header_name} 被源文件 {Path(src_file).name} 直接包含")
+                                    return src_file
+                                    
             except Exception as e:
                 self.logger.debug(f"检查源文件 {src_file} 时出错: {e}")
                 continue
         
-        # 如果没有找到包含关系，返回第一个源文件作为默认模板
-        if source_files:
-            self.logger.debug(f"未找到包含头文件 {header_name} 的源文件，使用第一个源文件作为模板")
-            return source_files[0]
+        return None
+    
+    def _find_indirect_including_source(self, header_file: str, source_files: List[str]) -> Optional[str]:
+        """找到间接包含该头文件的源文件"""
+        header_path = Path(header_file)
+        
+        # 构建头文件包含图
+        include_graph = self._build_include_graph(source_files)
+        
+        # 在包含图中查找间接包含关系
+        for src_file in source_files:
+            if self._has_indirect_include(src_file, header_file, include_graph):
+                self.logger.debug(f"头文件 {header_path.name} 被源文件 {Path(src_file).name} 间接包含")
+                return src_file
         
         return None
+    
+    def _find_smart_matching_source(self, header_file: str, source_files: List[str]) -> Optional[str]:
+        """使用智能匹配策略找到最合适的源文件"""
+        header_path = Path(header_file)
+        header_stem = header_path.stem  # 不包含扩展名的文件名
+        
+        # 策略1: 查找同名的源文件（如 MyClass.h -> MyClass.cpp）
+        for src_file in source_files:
+            src_path = Path(src_file)
+            if src_path.stem == header_stem:
+                self.logger.debug(f"找到同名源文件 {src_path.name} 作为头文件 {header_path.name} 的模板")
+                return src_file
+        
+        # 策略2: 查找同目录下的源文件
+        header_dir = header_path.parent
+        for src_file in source_files:
+            src_path = Path(src_file)
+            if src_path.parent == header_dir:
+                self.logger.debug(f"找到同目录源文件 {src_path.name} 作为头文件 {header_path.name} 的模板")
+                return src_file
+        
+        # 策略3: 查找路径相似度最高的源文件
+        best_source = None
+        best_similarity = 0
+        
+        for src_file in source_files:
+            similarity = self._calculate_path_similarity(header_file, src_file)
+            if similarity > best_similarity:
+                best_similarity = similarity
+                best_source = src_file
+        
+        if best_source and best_similarity > 0.3:  # 相似度阈值
+            self.logger.debug(f"找到路径相似源文件 {Path(best_source).name} 作为头文件 {header_path.name} 的模板（相似度: {best_similarity:.2f}）")
+            return best_source
+        
+        return None
+    
+    def _generate_include_patterns(self, header_file: str) -> List[str]:
+        """生成头文件可能的包含模式"""
+        header_path = Path(header_file)
+        patterns = []
+        
+        # 基本文件名模式
+        header_name = header_path.name
+        patterns.extend([
+            f'"{header_name}"',
+            f'<{header_name}>',
+        ])
+        
+        # 相对路径模式（从项目根目录开始的不同层级）
+        parts = header_path.parts
+        for i in range(len(parts)):
+            relative_path = '/'.join(parts[i:])
+            patterns.extend([
+                f'"{relative_path}"',
+                f'<{relative_path}>',
+            ])
+            
+            # Windows路径分隔符
+            relative_path_win = '\\'.join(parts[i:])
+            patterns.extend([
+                f'"{relative_path_win}"',
+                f'<{relative_path_win}>',
+            ])
+        
+        return list(set(patterns))  # 去重
+    
+    def _build_include_graph(self, source_files: List[str]) -> Dict[str, Set[str]]:
+        """构建文件包含关系图（增强版本，支持头文件和更深层次的分析）"""
+        include_graph = {}
+        
+        # 扩展处理范围，包含更多文件但仍保持合理的性能
+        max_files_to_process = min(len(source_files), 200)  # 增加到200个文件
+        files_to_process = source_files[:max_files_to_process]
+        
+        self.logger.debug(f"构建包含图：处理 {len(files_to_process)} 个文件")
+        
+        # 同时收集所有发现的头文件路径
+        discovered_headers = set()
+        
+        for src_file in files_to_process:
+            try:
+                includes = set()
+                with open(src_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    # 增加读取行数，确保捕获更多include语句
+                    for line_num, line in enumerate(f, 1):
+                        if line_num > 300:  # 增加到300行
+                            break
+                        
+                        line = line.strip()
+                        if line.startswith('#include') and not line.startswith('#include_next'):
+                            # 提取包含的文件名
+                            import re
+                            match = re.search(r'#include\s*[<"]([^>"]+)[>"]', line)
+                            if match:
+                                included_file = match.group(1)
+                                includes.add(included_file)
+                                
+                                # 收集发现的头文件，用于后续处理
+                                if included_file.endswith(('.h', '.hpp', '.hxx')):
+                                    discovered_headers.add(included_file)
+                
+                include_graph[src_file] = includes
+                
+            except Exception as e:
+                self.logger.debug(f"构建包含图时处理文件 {src_file} 出错: {e}")
+                include_graph[src_file] = set()
+        
+        # 尝试为发现的头文件也构建包含关系（如果能找到这些头文件的话）
+        self._extend_include_graph_with_headers(include_graph, discovered_headers, source_files)
+        
+        self.logger.debug(f"包含图构建完成：{len(include_graph)} 个文件，发现 {len(discovered_headers)} 个头文件引用")
+        
+        return include_graph
+    
+    def _extend_include_graph_with_headers(self, include_graph: Dict[str, Set[str]], 
+                                         discovered_headers: Set[str], source_files: List[str]):
+        """扩展包含图以包含头文件的包含关系"""
+        # 尝试找到实际的头文件路径
+        header_file_map = {}
+        
+        # 从源文件路径推断可能的头文件位置
+        for src_file in source_files:
+            src_dir = Path(src_file).parent
+            
+            # 搜索常见的头文件目录
+            potential_header_dirs = [
+                src_dir,
+                src_dir / 'include',
+                src_dir / '..' / 'include',
+                src_dir / '..' / '..' / 'include',
+                src_dir.parent / 'include',
+            ]
+            
+            for header_name in discovered_headers:
+                if header_name in header_file_map:
+                    continue
+                    
+                for header_dir in potential_header_dirs:
+                    try:
+                        if header_dir.exists():
+                            # 递归搜索头文件
+                            for header_path in header_dir.rglob(header_name):
+                                if header_path.is_file():
+                                    header_file_map[header_name] = str(header_path.resolve())
+                                    break
+                    except Exception:
+                        continue
+                    
+                    if header_name in header_file_map:
+                        break
+        
+        # 为找到的头文件构建包含关系
+        processed_headers = 0
+        max_headers_to_process = 50  # 限制处理的头文件数量以控制性能
+        
+        for header_name, header_path in header_file_map.items():
+            if processed_headers >= max_headers_to_process:
+                break
+                
+            try:
+                includes = set()
+                with open(header_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    # 头文件通常include语句在前面，读取前150行足够
+                    for line_num, line in enumerate(f, 1):
+                        if line_num > 150:
+                            break
+                        
+                        line = line.strip()
+                        if line.startswith('#include') and not line.startswith('#include_next'):
+                            import re
+                            match = re.search(r'#include\s*[<"]([^>"]+)[>"]', line)
+                            if match:
+                                included_file = match.group(1)
+                                includes.add(included_file)
+                
+                include_graph[header_path] = includes
+                processed_headers += 1
+                
+            except Exception as e:
+                self.logger.debug(f"处理头文件 {header_path} 时出错: {e}")
+        
+        self.logger.debug(f"扩展包含图：处理了 {processed_headers} 个头文件")
+    
+    def _has_indirect_include(self, source_file: str, target_header: str, include_graph: Dict[str, Set[str]]) -> bool:
+        """检查源文件是否间接包含目标头文件（支持递归检查和循环依赖检测）"""
+        target_path = Path(target_header)
+        target_name = target_path.name
+        
+        # 使用深度优先搜索检查间接包含关系
+        visited = set()  # 防止循环依赖
+        return self._dfs_include_search(source_file, target_header, target_name, include_graph, visited, max_depth=5)
+    
+    def _dfs_include_search(self, current_file: str, target_header: str, target_name: str, 
+                           include_graph: Dict[str, Set[str]], visited: Set[str], max_depth: int) -> bool:
+        """深度优先搜索包含关系"""
+        if max_depth <= 0 or current_file in visited:
+            return False
+        
+        visited.add(current_file)
+        
+        # 获取当前文件直接包含的文件
+        direct_includes = include_graph.get(current_file, set())
+        
+        # 检查直接包含的文件中是否有目标头文件
+        for included_file in direct_includes:
+            if self._is_target_header_match(included_file, target_header, target_name):
+                return True
+        
+        # 递归检查间接包含
+        for included_file in direct_includes:
+            # 尝试将included_file解析为完整路径，以便在include_graph中查找
+            resolved_included_file = self._resolve_include_path(included_file, current_file, include_graph)
+            if resolved_included_file and self._dfs_include_search(
+                resolved_included_file, target_header, target_name, include_graph, visited.copy(), max_depth - 1
+            ):
+                return True
+        
+        return False
+    
+    def _is_target_header_match(self, included_file: str, target_header: str, target_name: str) -> bool:
+        """检查包含的文件是否匹配目标头文件（精确匹配版本）"""
+        # 1. 精确文件名匹配 - 但要确保是完全匹配
+        if included_file == target_name:
+            return True
+        
+        # 2. 精确路径匹配
+        if included_file == target_header:
+            return True
+        
+        # 3. 规范化路径匹配
+        try:
+            target_path = Path(target_header)
+            
+            # 如果included_file是相对路径，尝试不同的匹配方式
+            if not Path(included_file).is_absolute():
+                # 精确文件名匹配
+                if target_path.name == included_file:
+                    return True
+                
+                # 检查是否是目标文件的相对路径表示
+                if target_header.endswith(included_file):
+                    # 确保是路径分隔符边界，而不是部分匹配
+                    prefix = target_header[:-len(included_file)]
+                    if prefix.endswith('/') or prefix.endswith('\\') or prefix == '':
+                        return True
+            else:
+                # 绝对路径的精确匹配
+                try:
+                    included_path = Path(included_file).resolve()
+                    target_path_resolved = target_path.resolve()
+                    if included_path == target_path_resolved:
+                        return True
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        
+        return False
+    
+    def _resolve_include_path(self, included_file: str, current_file: str, include_graph: Dict[str, Set[str]]) -> Optional[str]:
+        """尝试将相对包含路径解析为include_graph中的完整路径"""
+        # 1. 直接在include_graph中查找
+        if included_file in include_graph:
+            return included_file
+        
+        # 2. 查找以included_file结尾的路径
+        for file_path in include_graph.keys():
+            if file_path.endswith(included_file) or included_file in file_path:
+                return file_path
+        
+        # 3. 基于当前文件目录解析相对路径
+        try:
+            current_dir = Path(current_file).parent
+            potential_path = (current_dir / included_file).resolve()
+            potential_path_str = str(potential_path)
+            
+            # 查找匹配的路径
+            for file_path in include_graph.keys():
+                if potential_path_str == file_path or file_path.endswith(str(potential_path.name)):
+                    return file_path
+        except Exception:
+            pass
+        
+        return None
+    
+    def _calculate_path_similarity(self, path1: str, path2: str) -> float:
+        """计算两个路径的相似度"""
+        parts1 = Path(path1).parts
+        parts2 = Path(path2).parts
+        
+        # 计算公共路径段的数量
+        common_parts = 0
+        min_len = min(len(parts1), len(parts2))
+        
+        for i in range(min_len):
+            if parts1[-(i+1)] == parts2[-(i+1)]:  # 从末尾开始比较
+                common_parts += 1
+            else:
+                break
+        
+        # 相似度 = 公共部分 / 最大长度
+        max_len = max(len(parts1), len(parts2))
+        return common_parts / max_len if max_len > 0 else 0
     
     def _create_header_compile_args(self, template_args: List[str], all_include_dirs: Set[str], 
                                   all_macro_definitions: Set[str], header_file: str) -> List[str]:
