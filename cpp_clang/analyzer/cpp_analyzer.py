@@ -4,6 +4,7 @@ C++ Analyzer Main Module (v2.3) - 修复版本
 修复了头文件编译命令创建的问题，正确处理command字段而不是args字段
 """
 
+import os
 import time
 import traceback
 import multiprocessing
@@ -446,20 +447,87 @@ class CppAnalyzer:
 
         self.logger.info(f"收集到 {len(all_include_dirs)} 个include目录，{len(all_macro_definitions)} 个宏定义")
 
-        # 2. 扫描头文件
+        # 2. 快速头文件扫描 - 极速版本
         scan_path = Path(scan_directory)
+        max_header_files = 50    # 大幅减少到50个文件
+        max_scan_time = 10       # 最大扫描时间10秒
+        
         if scan_path.exists():
             try:
-                for p in scan_path.rglob('*'):
-                    if p.is_file() and p.suffix in ['.h', '.hpp']:
-                        header_path = str(p.resolve())
-                        header_files.append(header_path)
+                import time
+                start_time = time.time()
+                self.logger.info(f"开始快速头文件扫描，限制: {max_header_files} 个文件，最大时间: {max_scan_time}s")
+                self.logger.info(f"扫描目录: {scan_directory}")
+                
+                # 优先扫描特定目录，避免全目录递归
+                priority_dirs = ['Source', 'Public', 'Private', 'Classes', 'include', 'Inc']
+                
+                # 先快速检查优先目录
+                for priority_dir in priority_dirs:
+                    if len(header_files) >= max_header_files:
+                        break
+                    if time.time() - start_time > max_scan_time:
+                        self.logger.warning(f"头文件扫描达到时间限制 ({max_scan_time}s)")
+                        break
+                        
+                    priority_path = scan_path / priority_dir
+                    if priority_path.exists():
+                        self.logger.info(f"扫描优先目录: {priority_path}")
+                        try:
+                            # 只扫描前两层，避免深度递归
+                            for header_file in priority_path.glob('*.h'):
+                                if len(header_files) >= max_header_files:
+                                    break
+                                header_files.append(str(header_file.resolve()))
+                                self.logger.debug(f"找到头文件: {header_file.name}")
+                            
+                            # 扫描一层子目录
+                            for subdir in priority_path.iterdir():
+                                if len(header_files) >= max_header_files:
+                                    break
+                                if time.time() - start_time > max_scan_time:
+                                    break
+                                if subdir.is_dir():
+                                    for header_file in subdir.glob('*.h'):
+                                        if len(header_files) >= max_header_files:
+                                            break
+                                        header_files.append(str(header_file.resolve()))
+                                        self.logger.debug(f"找到头文件: {subdir.name}/{header_file.name}")
+                        except Exception as e:
+                            self.logger.debug(f"扫描优先目录 {priority_path} 时出错: {e}")
+                
+                # 如果还没达到限制且时间允许，快速扫描根目录
+                if len(header_files) < max_header_files and time.time() - start_time < max_scan_time:
+                    self.logger.info("快速扫描根目录...")
+                    try:
+                        # 只扫描根目录的直接头文件
+                        for header_file in scan_path.glob('*.h'):
+                            if len(header_files) >= max_header_files:
+                                break
+                            header_files.append(str(header_file.resolve()))
+                            self.logger.debug(f"找到根目录头文件: {header_file.name}")
+                    except Exception as e:
+                        self.logger.debug(f"扫描根目录时出错: {e}")
+                
+                elapsed_time = time.time() - start_time
+                self.logger.info(f"头文件扫描完成，找到 {len(header_files)} 个头文件，耗时 {elapsed_time:.2f}s")
+                
+                if elapsed_time >= max_scan_time:
+                    self.logger.warning(f"头文件扫描达到时间限制，可能未扫描完所有文件")
+                    
             except Exception as e:
                 self.logger.warning(f"扫描目标目录 '{scan_directory}' 时出错: {e}")
+        else:
+            self.logger.warning(f"扫描目录不存在: {scan_directory}")
+            
+        self.logger.info(f"头文件扫描完成，找到 {len(header_files)} 个头文件")
 
         # 3. 为每个头文件智能选择最佳的编译参数模板
-        self.logger.info("为头文件创建智能编译命令...")
+        import time
+        compile_start_time = time.time()
+        self.logger.info(f"为 {len(header_files)} 个头文件创建编译命令...")
         
+        processed_count = 0
         for header_file in header_files:
             normalized_header_path = str(Path(header_file).resolve()).replace('\\', '/')
             
@@ -490,6 +558,14 @@ class CppAnalyzer:
                 "args": header_args,
                 "directory": template_cmd_info['directory']
             }
+            
+            processed_count += 1
+            if processed_count % 10 == 0:
+                elapsed = time.time() - compile_start_time
+                self.logger.info(f"已处理 {processed_count}/{len(header_files)} 个头文件，耗时 {elapsed:.2f}s")
+        
+        compile_elapsed = time.time() - compile_start_time
+        self.logger.info(f"头文件编译命令创建完成，耗时 {compile_elapsed:.2f}s")
 
         self.console.print(f"-> 发现头文件: {len(header_files)} 个")
         self.console.print(f"-> 创建头文件编译命令: {len(header_compile_commands)} 个")
@@ -497,27 +573,42 @@ class CppAnalyzer:
         return header_files, header_compile_commands
     
     def _find_first_including_source(self, header_file: str, source_files: List[str]) -> Optional[str]:
-        """找到第一个包含该头文件的源文件（支持间接包含检测）"""
+        """找到第一个包含该头文件的源文件（快速版本）"""
         header_path = Path(header_file)
         header_name = header_path.name
         
-        # 首先尝试直接包含检测
-        direct_source = self._find_direct_including_source(header_file, source_files)
-        if direct_source:
-            return direct_source
+        # 快速策略1: 查找同名的源文件（如 MyClass.h -> MyClass.cpp）
+        header_stem = header_path.stem
+        for src_file in source_files:
+            src_path = Path(src_file)
+            if src_path.stem == header_stem:
+                self.logger.debug(f"找到同名源文件 {src_path.name} 作为头文件 {header_name} 的模板")
+                return src_file
         
-        # 如果没有找到直接包含，尝试间接包含检测
-        self.logger.debug(f"未找到直接包含头文件 {header_name} 的源文件，尝试间接包含检测...")
-        indirect_source = self._find_indirect_including_source(header_file, source_files)
-        if indirect_source:
-            return indirect_source
+        # 快速策略2: 查找同目录下的源文件
+        header_dir = header_path.parent
+        for src_file in source_files:
+            src_path = Path(src_file)
+            if src_path.parent == header_dir:
+                self.logger.debug(f"找到同目录源文件 {src_path.name} 作为头文件 {header_name} 的模板")
+                return src_file
         
-        # 如果都没有找到，使用智能匹配策略
-        smart_source = self._find_smart_matching_source(header_file, source_files)
-        if smart_source:
-            return smart_source
+        # 快速策略3: 简单的直接包含检测（只检查前几个源文件的前50行）
+        max_sources_to_check = min(5, len(source_files))  # 只检查前5个源文件
+        for src_file in source_files[:max_sources_to_check]:
+            try:
+                with open(src_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    for line_num, line in enumerate(f, 1):
+                        if line_num > 50:  # 只检查前50行
+                            break
+                        line = line.strip()
+                        if line.startswith('#include') and (f'"{header_name}"' in line or f'<{header_name}>' in line):
+                            self.logger.debug(f"头文件 {header_name} 被源文件 {Path(src_file).name} 直接包含")
+                            return src_file
+            except Exception:
+                continue
         
-        # 最后的回退策略：返回第一个源文件作为默认模板
+        # 回退策略：返回第一个源文件作为默认模板
         if source_files:
             self.logger.debug(f"使用第一个源文件作为头文件 {header_name} 的模板")
             return source_files[0]
@@ -900,6 +991,22 @@ class CppAnalyzer:
                 i += 1
                 continue
             
+            # 特别处理强制包含参数 - 移除有问题的强制包含文件
+            if arg == '-include' and i + 1 < len(template_args):
+                include_file = template_args[i + 1]
+                if self._is_problematic_include_file(include_file):
+                    self.logger.info(f"为头文件 {Path(header_file).name} 移除有问题的强制包含文件: {include_file}")
+                    # 跳过 -include 和文件名
+                    i += 2
+                    continue
+                else:
+                    # 保留这个强制包含
+                    header_args.append(arg)
+                    if i + 1 < len(template_args):
+                        header_args.append(template_args[i + 1])
+                    i += 2
+                    continue
+            
             # 跳过复杂的clang参数序列
             if (arg == '-Xclang' and i + 3 < len(template_args) and 
                 template_args[i+1:i+4] in [['-x', '-Xclang', 'c++'], ['-x', '-Xclang', '"c++"']]):
@@ -924,7 +1031,45 @@ class CppAnalyzer:
             if macro_arg not in header_args:
                 header_args.append(macro_arg)
         
-        # 4. 添加头文件特定的参数
+        # 4. 添加UE引擎核心包含路径
+        ue_engine_includes = [
+            # 核心运行时模块
+            'N:/c7_enginedev/Engine/Source/Runtime/CoreUObject/Public',
+            'N:/c7_enginedev/Engine/Source/Runtime/Core/Public',
+            'N:/c7_enginedev/Engine/Source/Runtime/Engine/Public',
+            'N:/c7_enginedev/Engine/Source/Runtime/Engine/Classes',
+            'N:/c7_enginedev/Engine/Source/Runtime/CoreUObject/Classes',
+            'N:/c7_enginedev/Engine/Source/Runtime/Core/Classes',
+            
+            # 编辑器相关模块
+            'N:/c7_enginedev/Engine/Source/Editor/UnrealEd/Public',
+            'N:/c7_enginedev/Engine/Source/Editor/UnrealEd/Classes',
+            'N:/c7_enginedev/Engine/Source/Editor/ComponentVisualizers/Public',
+            'N:/c7_enginedev/Engine/Source/Editor/ToolMenus/Public',
+            'N:/c7_enginedev/Engine/Source/Editor/EditorStyle/Public',
+            'N:/c7_enginedev/Engine/Source/Editor/EditorWidgets/Public',
+            
+            # 开发者设置和工具
+            'N:/c7_enginedev/Engine/Source/Developer/Settings/Public',
+            'N:/c7_enginedev/Engine/Source/Developer/DeveloperSettings/Public',
+            'N:/c7_enginedev/Engine/Source/Developer/TargetPlatform/Public',
+            'N:/c7_enginedev/Engine/Source/Programs/UnrealHeaderTool/Public',
+            
+            # 其他重要模块
+            'N:/c7_enginedev/Engine/Source/Runtime/TraceLog/Public',
+            'N:/c7_enginedev/Engine/Source/Runtime/Slate/Public',
+            'N:/c7_enginedev/Engine/Source/Runtime/SlateCore/Public',
+            'N:/c7_enginedev/Engine/Source/Runtime/ApplicationCore/Public'
+        ]
+        
+        for ue_include in ue_engine_includes:
+            if os.path.exists(ue_include):
+                include_arg = f'-I{ue_include}'
+                if include_arg not in header_args:
+                    header_args.append(include_arg)
+                    self.logger.debug(f"添加UE引擎包含路径: {ue_include}")
+        
+        # 5. 添加头文件特定的参数
         header_specific_args = [
             '-x', 'c++-header',  # 指定为C++头文件
             '-Wno-pragma-once-outside-header',
@@ -939,6 +1084,56 @@ class CppAnalyzer:
         
         self.logger.debug(f"为头文件 {Path(header_file).name} 创建了 {len(header_args)} 个编译参数")
         return header_args
+    
+    def _is_problematic_include_file(self, include_file: str) -> bool:
+        """
+        检查是否是已知有问题的强制包含文件 - 修复版本
+        """
+        import re
+        
+        # 只检查明确已知有问题的文件模式，避免过于激进的判断
+        problematic_patterns = [
+            'PCH.GMESDK.h',  # 特定的有问题的PCH文件
+        ]
+        
+        filename = os.path.basename(include_file)
+        
+        # 精确匹配有问题的文件名，而不是模糊匹配
+        for pattern in problematic_patterns:
+            if filename == pattern:
+                self.logger.debug(f"发现已知有问题的强制包含文件: {filename}")
+                return True
+        
+        # 检查文件是否存在
+        try:
+            if os.path.isabs(include_file):
+                include_path = Path(include_file)
+            else:
+                include_path = Path(os.getcwd()) / include_file
+            
+            if not include_path.exists():
+                # 文件不存在才认为是有问题的
+                self.logger.debug(f"强制包含文件不存在: {include_file}")
+                return True
+            
+            # 对于存在的文件，只有在包含了无法解析的相对路径时才认为有问题
+            # 但是要更加谨慎，避免将正常的UE文件标记为问题文件
+            with open(include_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read(2048)  # 只读取前2KB内容
+                
+                # 检查是否包含已知会导致解析失败的特定模式
+                if 'PCH.GMESDK.h' in content and '../' in content:
+                    # 只有当文件同时包含PCH.GMESDK.h引用和相对路径时才认为有问题
+                    self.logger.debug(f"发现包含PCH.GMESDK.h和相对路径的强制包含文件: {include_file}")
+                    return True
+                
+        except Exception as e:
+            self.logger.debug(f"检查强制包含文件 {include_file} 时出错: {e}")
+            # 出错时不再保守地认为有问题，而是允许继续处理
+            return False
+        
+        # 默认认为文件是正常的，不是问题文件
+        return False
 
     def _print_performance_report(self, stats: Dict[str, Any], total_time: float):
         """打印详细的性能报告"""

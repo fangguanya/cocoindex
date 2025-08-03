@@ -1,5 +1,5 @@
 """
-Clang Parser Module - 性能优化版 - 修复版
+Clang Parser Module - 性能优化版 - 修复版 - 应用增强版修复 - 清理版
 """
 
 import os
@@ -151,7 +151,7 @@ class TranslationUnitCache:
             self._access_times.clear()
 
 class ClangParser:
-    """Clang解析器 - 支持compile_commands.json和动态编译参数 - 性能优化版 - 修复版"""
+    """Clang解析器 - 支持compile_commands.json和动态编译参数 - 性能优化版 - 修复版 - 增强版"""
     
     def __init__(self, console: Optional[Console] = None, verbose: bool = True, enable_cache: bool = True):
         self.console = console or Console()
@@ -428,7 +428,7 @@ class ClangParser:
         return processed_args
 
     def _convert_clang_cl_to_libclang(self, raw_args: List[str], working_directory: str = None) -> List[str]:
-        """将clang-cl参数转换为libclang兼容的参数"""
+        """将clang-cl参数转换为libclang兼容的参数 - 增强版"""
         self.logger.info("开始clang-cl到libclang参数转换")
         
         # 递归解析响应文件并收集所有参数
@@ -437,6 +437,9 @@ class ClangParser:
         
         # 转换参数
         converted_args = self._convert_args_to_libclang_format(all_args, working_directory)
+        
+        # 增强：添加强制包含文件目录到包含路径
+        converted_args = self._enhance_include_paths_for_forced_includes(converted_args)
         
         # 提取并添加宏定义
         macro_definitions = self._extract_macros_from_forced_includes(all_args, working_directory)
@@ -449,6 +452,57 @@ class ClangParser:
         self.logger.info(f"提取宏定义: {len(macro_definitions)} 个")
         
         return converted_args
+    
+    def _enhance_include_paths_for_forced_includes(self, args: List[str]) -> List[str]:
+        """增强：为强制包含文件添加其目录到包含路径，解决相对路径问题"""
+        enhanced_args = args.copy()
+        forced_include_dirs = set()
+        
+        # 查找所有 -include 参数
+        i = 0
+        while i < len(args):
+            if args[i] == '-include' and i + 1 < len(args):
+                include_file = args[i + 1]
+                if os.path.isabs(include_file) and os.path.exists(include_file):
+                    include_dir = os.path.dirname(include_file)
+                    forced_include_dirs.add(include_dir)
+                    
+                    # 分析强制包含文件内容，查找相对路径包含
+                    try:
+                        with open(include_file, 'r', encoding='utf-8', errors='ignore') as f:
+                            content = f.read()
+                        
+                        import re
+                        # 查找所有 #include "相对路径" 语句
+                        relative_includes = re.findall(r'#include\s+"([^"]+)"', content)
+                        for rel_include in relative_includes:
+                            if not os.path.isabs(rel_include):
+                                # 计算相对路径可能的基础目录
+                                potential_base = include_dir
+                                for _ in range(rel_include.count('../')):
+                                    potential_base = os.path.dirname(potential_base)
+                                
+                                # 检查这个基础目录是否存在相对包含的文件
+                                full_rel_path = os.path.join(potential_base, rel_include)
+                                if os.path.exists(full_rel_path):
+                                    rel_dir = os.path.dirname(full_rel_path)
+                                    forced_include_dirs.add(rel_dir)
+                                    self.logger.debug(f"发现相对包含文件: {rel_include} -> 添加目录: {rel_dir}")
+                    except Exception as e:
+                        self.logger.debug(f"分析强制包含文件 {include_file} 时出错: {e}")
+                
+                i += 2
+            else:
+                i += 1
+        
+        # 将发现的目录添加为包含路径
+        for include_dir in forced_include_dirs:
+            include_arg = f'-I{include_dir}'
+            if include_arg not in enhanced_args:
+                enhanced_args.append(include_arg)
+                self.logger.debug(f"添加强制包含文件目录到包含路径: {include_dir}")
+        
+        return enhanced_args
     
     def _expand_response_files(self, args: List[str], working_directory: str = None) -> List[str]:
         """递归展开响应文件"""
@@ -466,7 +520,7 @@ class ClangParser:
         return expanded_args
     
     def _convert_args_to_libclang_format(self, args: List[str], working_directory: str = None) -> List[str]:
-        """将clang-cl参数转换为libclang格式 - 修复版"""
+        """将clang-cl参数转换为libclang格式 - 增强版 - 移除硬编码UE宏定义"""
         converted = []
         skip_next = False
         
@@ -475,7 +529,7 @@ class ClangParser:
                 skip_next = False
                 continue
             
-            # 跳过编译器可执行文件、源文件路径和输出文件 - 修复版
+            # 跳过编译器可执行文件、源文件路径和输出文件
             if (arg.endswith(('.exe', '.c', '.cpp', '.cc', '.cxx', '.o', '.obj')) or 
                 ('clang-cl.exe' in arg) or
                 (arg.startswith('N:') and (arg.endswith('.cpp') or arg.endswith('.h'))) or
@@ -513,7 +567,7 @@ class ClangParser:
                         skip_next = True
                 continue
             
-            # 转换强制包含文件 - 修复版：检查文件是否存在
+            # 转换强制包含文件 - 增强版：使用绝对路径
             if arg.startswith('/FI'):
                 include_file = arg[3:].strip('"\'') if len(arg) > 3 else (args[i+1].strip('"\'') if i+1 < len(args) else '')
                 if include_file:
@@ -524,9 +578,12 @@ class ClangParser:
                         full_include_path = include_file
                     
                     if os.path.exists(full_include_path):
-                        converted.extend(['-include', include_file])
+                        # 使用绝对路径来避免相对路径解析问题
+                        abs_include_path = os.path.abspath(full_include_path)
+                        converted.extend(['-include', abs_include_path])
+                        self.logger.debug(f"添加强制包含文件 (绝对路径): {abs_include_path}")
                     else:
-                        self.logger.warning(f"跳过不存在的强制包含文件: {include_file}")
+                        self.logger.warning(f"跳过不存在的强制包含文件: {include_file} (完整路径: {full_include_path})")
                     
                     if len(arg) == 3:
                         skip_next = True
@@ -704,9 +761,42 @@ class ClangParser:
         # 直接使用原始目录，构建系统的配置是正确的
         return directory
 
+    def _fix_include_args(self, args: List[str], working_directory: str) -> List[str]:
+        """修复有问题的 -include 参数"""
+        fixed_args = []
+        i = 0
+        
+        while i < len(args):
+            arg = args[i]
+            
+            if arg == '-include' and i + 1 < len(args):
+                include_file = args[i + 1]
+                
+                # 检查强制包含文件是否存在
+                if not os.path.isabs(include_file) and working_directory:
+                    full_include_path = os.path.join(working_directory, include_file)
+                else:
+                    full_include_path = include_file
+                
+                if os.path.exists(full_include_path):
+                    # 文件存在，使用绝对路径
+                    abs_include_path = os.path.abspath(full_include_path)
+                    fixed_args.extend(['-include', abs_include_path])
+                    self.logger.debug(f"修复强制包含文件路径: {include_file} -> {abs_include_path}")
+                else:
+                    # 文件不存在，跳过这个 -include 参数
+                    self.logger.warning(f"跳过不存在的强制包含文件: {include_file} (完整路径: {full_include_path})")
+                
+                i += 2  # 跳过 -include 和文件路径
+            else:
+                fixed_args.append(arg)
+                i += 1
+        
+        return fixed_args
+
     @profile_function("ClangParser.parse_file")
     def parse_file(self, file_path: str) -> Optional[ParsedFile]:
-        """解析单个文件 - 深度性能分析版"""
+        """解析单个文件 - 深度性能分析版 - 增强错误处理"""
         logger = DetailedLogger(f"解析文件: {Path(file_path).name}")
         
         with profiler.timer("parse_file_validation", {'file': file_path}):
@@ -828,27 +918,49 @@ class ClangParser:
             return ParsedFile(file_path=file_path, success=success, translation_unit=tu, diagnostics=[], parse_time=parse_time)
 
         except clang.TranslationUnitLoadError as e:
-            # 专门处理TranslationUnitLoadError
-            self.logger.error(f"解析文件 '{file_path}' 时发生翻译单元加载错误: {e}")
-            if "Module.GMESDK.cpp" in file_path:
-                self.logger.info(f"跳过已知问题文件: {file_path}")
-                # 返回一个失败的解析结果，但不中断整个流程
-                return ParsedFile(
-                    file_path=file_path,
-                    translation_unit=None,
-                    success=False,
-                    diagnostics=[],
-                    parse_time=0.0
-                )
-            else:
-                # 对于其他文件，也返回失败结果而不是None
-                return ParsedFile(
-                    file_path=file_path,
-                    translation_unit=None,
-                    success=False,
-                    diagnostics=[],
-                    parse_time=0.0
-                )
+            # 专门处理TranslationUnitLoadError - 增强错误处理
+            error_msg = str(e)
+            self.logger.error(f"解析文件 '{file_path}' 时发生翻译单元加载错误: {error_msg}")
+            
+            # 检查是否是强制包含文件相关的错误
+            if "'-include' file not found" in error_msg or "Fatal: '-include' file not found" in error_msg:
+                self.logger.warning(f"检测到强制包含文件未找到错误，尝试修复编译参数...")
+                
+                # 尝试移除有问题的 -include 参数并重新解析
+                try:
+                    fixed_args = self._fix_include_args(args, working_directory)
+                    if fixed_args != args:
+                        self.logger.info(f"修复了编译参数，重新尝试解析文件: {file_path}")
+                        
+                        # 使用修复后的参数重新解析
+                        parse_options = (
+                            clang.TranslationUnit.PARSE_INCOMPLETE |
+                            clang.TranslationUnit.PARSE_PRECOMPILED_PREAMBLE |
+                            clang.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD
+                        )
+                        
+                        tu = self.index.parse(
+                            file_path, 
+                            args=fixed_args, 
+                            options=parse_options
+                        )
+                        
+                        if tu:
+                            parse_time = time.perf_counter() - start_time
+                            self.logger.info(f"使用修复后的参数成功解析文件: {file_path}")
+                            
+                            return ParsedFile(file_path=file_path, success=True, translation_unit=tu, diagnostics=[], parse_time=parse_time)
+                except Exception as retry_e:
+                    self.logger.warning(f"使用修复后的参数重新解析失败: {retry_e}")
+            
+            # 返回失败结果但不中断整个流程
+            return ParsedFile(
+                file_path=file_path,
+                translation_unit=None,
+                success=False,
+                diagnostics=[],
+                parse_time=0.0
+            )
         except Exception as e:
             self.logger.error(f"解析文件 '{file_path}' 时发生未知异常: {e}\n{traceback.format_exc()}")
             # 工作目录恢复逻辑已移除（不再需要切换工作目录）
