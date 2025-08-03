@@ -582,6 +582,31 @@ class CppAnalyzer:
                 elapsed_time = time.time() - start_time
                 self.logger.info(f"头文件扫描完成，找到 {len(header_files)} 个头文件，耗时 {elapsed_time:.2f}s")
                 
+                # 如果找到大量头文件，进行内存优化处理
+                if len(header_files) > 10000:
+                    self.logger.info(f"检测到大量头文件({len(header_files)}个)，启用内存优化模式...")
+                    # 分批去重以避免内存峰值
+                    batch_size = 5000
+                    unique_headers = []
+                    seen = set()
+                    
+                    for i in range(0, len(header_files), batch_size):
+                        batch = header_files[i:i + batch_size]
+                        for header in batch:
+                            if header not in seen:
+                                seen.add(header)
+                                unique_headers.append(header)
+                        
+                        if i % (batch_size * 2) == 0:  # 每处理2批输出一次进度
+                            self.logger.info(f"去重进度: {min(i + batch_size, len(header_files))}/{len(header_files)}")
+                    
+                    header_files = unique_headers
+                    self.logger.info(f"分批去重完成，最终头文件数: {len(header_files)}")
+                else:
+                    # 少量文件直接去重
+                    header_files = list(set(header_files))
+                    self.logger.info(f"直接去重完成，最终头文件数: {len(header_files)}")
+                
             except Exception as e:
                 self.logger.warning(f"扫描目标目录 '{scan_directory}' 时出错: {e}")
         else:
@@ -594,42 +619,71 @@ class CppAnalyzer:
         compile_start_time = time.time()
         self.logger.info(f"为 {len(header_files)} 个头文件创建编译命令...")
         
-        processed_count = 0
-        for header_file in header_files:
-            normalized_header_path = str(Path(header_file).resolve()).replace('\\', '/')
+        # 如果头文件数量过多，启用优化策略
+        if len(header_files) > 10000:
+            self.logger.info(f"检测到大量头文件({len(header_files)}个)，启用批量处理优化...")
             
-            # 找到第一个包含该头文件的源文件作为模板
-            best_source_file = self._find_first_including_source(header_file, source_files)
-            
-            if best_source_file and best_source_file in source_file_args_map:
-                template_args = source_file_args_map[best_source_file]
-                template_cmd_info = compile_commands[best_source_file]
+            # 预选择一个通用的编译参数模板
+            if source_files and source_files[0] in source_file_args_map:
+                default_template_args = source_file_args_map[source_files[0]]
+                default_template_cmd_info = compile_commands[source_files[0]]
+                self.logger.info("使用第一个源文件作为通用模板以提高性能")
             else:
-                # 回退到第一个可用的源文件
-                if source_files and source_files[0] in source_file_args_map:
-                    template_args = source_file_args_map[source_files[0]]
-                    template_cmd_info = compile_commands[source_files[0]]
+                self.logger.error("无法找到合适的编译参数模板")
+                return header_files, {}
+        
+        processed_count = 0
+        batch_size = 1000  # 每1000个文件输出一次进度
+        
+        for header_file in header_files:
+            try:
+                normalized_header_path = str(Path(header_file).resolve()).replace('\\', '/')
+                
+                # 对于大量头文件，使用通用模板以提高性能
+                if len(header_files) > 10000:
+                    template_args = default_template_args
+                    template_cmd_info = default_template_cmd_info
                 else:
-                    self.logger.warning(f"无法为头文件 {header_file} 找到合适的编译参数模板")
-                    continue
-            
-            # 创建头文件专用的编译参数
-            header_args = self._create_header_compile_args(
-                template_args, 
-                all_include_dirs, 
-                all_macro_definitions,
-                header_file
-            )
-            
-            header_compile_commands[normalized_header_path] = {
-                "args": header_args,
-                "directory": template_cmd_info['directory']
-            }
-            
-            processed_count += 1
-            if processed_count % 10 == 0:
-                elapsed = time.time() - compile_start_time
-                self.logger.info(f"已处理 {processed_count}/{len(header_files)} 个头文件，耗时 {elapsed:.2f}s")
+                    # 找到第一个包含该头文件的源文件作为模板
+                    best_source_file = self._find_first_including_source(header_file, source_files)
+                    
+                    if best_source_file and best_source_file in source_file_args_map:
+                        template_args = source_file_args_map[best_source_file]
+                        template_cmd_info = compile_commands[best_source_file]
+                    else:
+                        # 回退到第一个可用的源文件
+                        if source_files and source_files[0] in source_file_args_map:
+                            template_args = source_file_args_map[source_files[0]]
+                            template_cmd_info = compile_commands[source_files[0]]
+                        else:
+                            self.logger.warning(f"无法为头文件 {header_file} 找到合适的编译参数模板")
+                            continue
+                
+                # 创建头文件专用的编译参数
+                header_args = self._create_header_compile_args(
+                    template_args, 
+                    all_include_dirs, 
+                    all_macro_definitions,
+                    header_file
+                )
+                
+                header_compile_commands[normalized_header_path] = {
+                    "args": header_args,
+                    "directory": template_cmd_info['directory']
+                }
+                
+                processed_count += 1
+                
+                # 调整进度输出频率
+                progress_interval = batch_size if len(header_files) > 10000 else 10
+                if processed_count % progress_interval == 0:
+                    elapsed = time.time() - compile_start_time
+                    percentage = (processed_count / len(header_files)) * 100
+                    self.logger.info(f"已处理 {processed_count}/{len(header_files)} 个头文件 ({percentage:.1f}%)，耗时 {elapsed:.2f}s")
+                    
+            except Exception as e:
+                self.logger.warning(f"处理头文件 {header_file} 时出错: {e}")
+                continue
         
         compile_elapsed = time.time() - compile_start_time
         self.logger.info(f"头文件编译命令创建完成，耗时 {compile_elapsed:.2f}s")
@@ -1291,11 +1345,33 @@ class CppAnalyzer:
             else:
                 self.logger.info("优先目录中已找到足够的头文件，跳过全项目扫描")
             
-            # 去重
+            # 去重 - 针对大量文件优化
             dedup_start_time = time.time()
-            unique_headers = list(set(header_files))
-            dedup_duration = time.time() - dedup_start_time
             
+            if len(header_files) > 10000:
+                self.logger.info(f"检测到大量头文件({len(header_files)}个)，使用优化去重算法...")
+                # 分批去重以避免内存峰值
+                batch_size = 5000
+                unique_headers = []
+                seen = set()
+                
+                for i in range(0, len(header_files), batch_size):
+                    batch = header_files[i:i + batch_size]
+                    for header in batch:
+                        if header not in seen:
+                            seen.add(header)
+                            unique_headers.append(header)
+                    
+                    if i % (batch_size * 2) == 0:  # 每处理2批输出一次进度
+                        self.logger.info(f"去重进度: {min(i + batch_size, len(header_files))}/{len(header_files)}")
+                
+                self.logger.info(f"分批去重完成，最终头文件数: {len(unique_headers)}")
+            else:
+                # 少量文件直接去重
+                unique_headers = list(set(header_files))
+                self.logger.info(f"直接去重完成，最终头文件数: {len(unique_headers)}")
+            
+            dedup_duration = time.time() - dedup_start_time
             total_duration = time.time() - start_time
             self.logger.info(f"扫描完成，去重前: {len(header_files)} 个，去重后: {len(unique_headers)} 个头文件")
             self.logger.info(f"去重耗时: {dedup_duration:.2f} 秒，总耗时: {total_duration:.2f} 秒")
