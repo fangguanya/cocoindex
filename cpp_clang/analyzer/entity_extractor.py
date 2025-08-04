@@ -137,6 +137,9 @@ class EntityExtractor:
         self._build_reverse_call_relationships()
         self._build_namespace_function_relationships()
         
+        # Pass 4: 后处理 - 建立类和方法的关联（修复孤儿函数问题）
+        self._build_class_method_relationships()
+        
         # 构建结果
         result = {
             "functions": self.functions,
@@ -290,9 +293,6 @@ class EntityExtractor:
         usr = cursor.get_usr()
         if not usr:
             return
-
-        if usr in self._processed_usrs:
-            return
             
         file_path = cursor.location.file.name
         file_id = self.file_id_manager.get_file_id(file_path)
@@ -304,6 +304,7 @@ class EntityExtractor:
             if usr in self.classes:
                 existing_class = self.classes[usr]
                 if cursor.is_definition() and not existing_class.is_definition:
+                    # 关键修复：即使USR已处理过，也要更新类定义
                     self._update_class_with_definition(existing_class, cursor)
                 elif not cursor.is_definition():
                     location = Location(file_id=file_id, line=cursor.location.line, column=cursor.location.column)
@@ -313,7 +314,9 @@ class EntityExtractor:
                 cls = self._create_class_from_cursor(cursor)
                 self.classes[usr] = cls
                 self.global_nodes[usr] = EntityNode(usr, "class", cls)
-                self._processed_usrs.add(usr)
+            
+            # 标记USR为已处理，但在检查定义更新之后
+            self._processed_usrs.add(usr)
 
     def _process_namespace_cursor(self, cursor: clang.Cursor):
         """处理命名空间游标"""
@@ -456,20 +459,25 @@ class EntityExtractor:
         cls.definition_location = Location(file_id=file_id, line=cursor.location.line, column=cursor.location.column)
         cls.is_definition = True
         
-        cls.methods = []
+        # 修复：不要重置methods列表，而是合并新发现的方法
+        existing_methods = set(cls.methods) if cls.methods else set()
+        
         for child in cursor.get_children():
             if child.kind in [
                 clang.CursorKind.CXX_METHOD, clang.CursorKind.CONSTRUCTOR, 
                 clang.CursorKind.DESTRUCTOR, clang.CursorKind.FUNCTION_TEMPLATE
             ]:
                 child_usr = child.get_usr()
-                if child_usr:
-                    cls.methods.append(child_usr)
+                if child_usr and child_usr not in existing_methods:
+                    existing_methods.add(child_usr)
                     # 确保成员函数也被添加到functions字典中
                     if child_usr not in self.functions:
                         member_func = self._create_function_from_cursor(child)
                         self.functions[child_usr] = member_func
                         self.global_nodes[child_usr] = EntityNode(child_usr, "function", member_func)
+        
+        # 更新方法列表
+        cls.methods = list(existing_methods)
 
     def _extract_calls_for_function(self, cursor: clang.Cursor):
         """提取函数调用关系 - 完整版，基于clang CursorKind系统性分析"""
@@ -688,6 +696,69 @@ class EntityExtractor:
                 global_function_count += 1
         
         self.logger.info(f"函数关联完成: 命名空间函数={namespace_function_count}, 类方法={class_method_count}, 全局函数={global_function_count}")
+    
+    def _build_class_method_relationships(self):
+        """建立类与方法的关联关系 - 修复孤儿函数问题"""
+        self.logger.info("开始建立类与方法的关联关系（后处理阶段）...")
+        
+        fixed_classes = set()
+        total_methods_added = 0
+        
+        # 遍历所有函数，找出类方法
+        for func_usr, func in self.functions.items():
+            # 检查是否为类方法（基于USR结构）
+            class_usr = self._extract_class_usr_from_function_usr(func_usr)
+            if class_usr and class_usr in self.classes:
+                cls = self.classes[class_usr]
+                
+                # 确保该方法在类的methods列表中
+                if func_usr not in cls.methods:
+                    cls.methods.append(func_usr)
+                    total_methods_added += 1
+                    fixed_classes.add(class_usr)
+        
+        self.logger.info(f"类方法关联修复完成: 修复了 {len(fixed_classes)} 个类，添加了 {total_methods_added} 个方法关联")
+    
+    def _extract_class_usr_from_function_usr(self, func_usr: str) -> str:
+        """从函数USR中提取类USR - 增强版，支持复杂嵌套结构"""
+        if not func_usr.startswith('c:@'):
+            return ""
+        
+        # 查找最后一个类/结构体/联合体标记和函数标记
+        # 支持的标记：@S@ (struct/class), @ST (template struct/class), @U@ (union)
+        class_markers = ['@S@', '@ST>', '@ST@', '@U@']
+        function_marker = '@F@'
+        
+        # 找到最后一个函数标记
+        f_pos = func_usr.rfind(function_marker)
+        if f_pos == -1:
+            return ""
+        
+        # 在函数标记之前查找最后一个类标记
+        last_class_pos = -1
+        last_marker = None
+        
+        for marker in class_markers:
+            pos = func_usr.rfind(marker, 0, f_pos)
+            if pos > last_class_pos:
+                last_class_pos = pos
+                last_marker = marker
+        
+        if last_class_pos == -1:
+            return ""
+        
+        # 根据不同的标记类型处理
+        if last_marker == '@S@' or last_marker == '@U@':
+            # 普通类/结构体/联合体: c:@...@S@ClassName@F@methodName
+            class_part = func_usr[:f_pos]
+            return class_part
+        
+        elif last_marker.startswith('@ST'):
+            # 模板类: c:@...@ST>...@ClassName@F@methodName 或 c:@...@ST@ClassName@F@methodName
+            class_part = func_usr[:f_pos]
+            return class_part
+        
+        return ""
     
     def _extract_namespace_from_usr(self, usr: str) -> str:
         """从USR中提取命名空间信息"""

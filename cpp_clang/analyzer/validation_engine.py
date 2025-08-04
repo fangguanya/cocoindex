@@ -538,16 +538,77 @@ class ValidationEngine:
     
     def _check_class_method(self, func_usr: str, classes: Dict[str, Any]) -> bool:
         """检查是否为类方法"""
-        found_in_class = False
+        # 从USR中提取期望的类USR
+        expected_class_usr = self._extract_class_usr_from_method_usr(func_usr)
+        
+        if expected_class_usr:
+            # 首先检查期望的类是否存在
+            if expected_class_usr in classes:
+                class_obj = classes[expected_class_usr]
+                if hasattr(class_obj, 'methods'):
+                    if isinstance(class_obj.methods, list) and func_usr in class_obj.methods:
+                        return True
+                    elif isinstance(class_obj.methods, dict) and func_usr in class_obj.methods:
+                        return True
+                # 如果在期望类中未找到，记录调试信息
+                class_name = getattr(class_obj, 'name', 'Unknown')
+                methods_count = len(getattr(class_obj, 'methods', []))
+                self.logger.debug(f"类方法检查: {func_usr} 在期望类 {class_name} 中未找到，该类有 {methods_count} 个方法")
+            else:
+                self.logger.debug(f"类方法检查: 期望的类 {expected_class_usr} 不存在")
+        
+        # 如果期望类中未找到，再在所有类中搜索（兼容性检查）
         for class_usr, class_obj in classes.items():
             if hasattr(class_obj, 'methods'):
                 if isinstance(class_obj.methods, list) and func_usr in class_obj.methods:
-                    found_in_class = True
-                    break
+                    self.logger.debug(f"类方法检查: {func_usr} 在意外的类 {class_usr} 中找到")
+                    return True
                 elif isinstance(class_obj.methods, dict) and func_usr in class_obj.methods:
-                    found_in_class = True
-                    break
-        return found_in_class
+                    self.logger.debug(f"类方法检查: {func_usr} 在意外的类 {class_usr} 中找到")
+                    return True
+        
+        return False
+    
+    def _extract_class_usr_from_method_usr(self, func_usr: str) -> str:
+        """从方法USR中提取类USR - 增强版，支持复杂嵌套结构"""
+        if not func_usr.startswith('c:@'):
+            return ""
+        
+        # 查找最后一个类/结构体/联合体标记和函数标记
+        # 支持的标记：@S@ (struct/class), @ST (template struct/class), @U@ (union)
+        class_markers = ['@S@', '@ST>', '@ST@', '@U@']
+        function_marker = '@F@'
+        
+        # 找到最后一个函数标记
+        f_pos = func_usr.rfind(function_marker)
+        if f_pos == -1:
+            return ""
+        
+        # 在函数标记之前查找最后一个类标记
+        last_class_pos = -1
+        last_marker = None
+        
+        for marker in class_markers:
+            pos = func_usr.rfind(marker, 0, f_pos)
+            if pos > last_class_pos:
+                last_class_pos = pos
+                last_marker = marker
+        
+        if last_class_pos == -1:
+            return ""
+        
+        # 根据不同的标记类型处理
+        if last_marker == '@S@' or last_marker == '@U@':
+            # 普通类/结构体/联合体: c:@...@S@ClassName@F@methodName
+            class_part = func_usr[:f_pos]
+            return class_part
+        
+        elif last_marker.startswith('@ST'):
+            # 模板类: c:@...@ST>...@ClassName@F@methodName 或 c:@...@ST@ClassName@F@methodName
+            class_part = func_usr[:f_pos]
+            return class_part
+        
+        return ""
     
     def _validate_function_completeness(self, functions: Dict[str, Any]):
         """验证函数完整性"""
