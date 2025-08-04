@@ -133,8 +133,9 @@ class EntityExtractor:
             if parsed_file.translation_unit:
                 self._second_pass_visitor_optimized(parsed_file.translation_unit.cursor)
 
-        # Pass 3: 建立反向调用关系
+        # Pass 3: 建立反向调用关系和namespace-function关联
         self._build_reverse_call_relationships()
+        self._build_namespace_function_relationships()
         
         # 构建结果
         result = {
@@ -651,6 +652,80 @@ class EntityExtractor:
                 callee_func = self.functions.get(callee_usr)
                 if callee_func and caller_usr not in callee_func.called_by:
                     callee_func.called_by.append(caller_usr)
+    
+    def _build_namespace_function_relationships(self):
+        """建立命名空间与函数的关联关系 - 基于AST父子关系的正确实现"""
+        self.logger.info("开始建立命名空间与函数的关联关系（基于AST结构）...")
+        
+        # 第一步：为每个命名空间初始化函数列表
+        for ns_usr, ns_obj in self.namespaces.items():
+            if not hasattr(ns_obj, 'functions') or ns_obj.functions is None:
+                ns_obj.functions = []
+        
+        # 第二步：遍历所有函数，基于USR结构建立正确的关联
+        namespace_function_count = 0
+        global_function_count = 0
+        class_method_count = 0
+        
+        for func_usr, func in self.functions.items():
+            # 使用USR来确定函数的归属，这比字符串解析更可靠
+            func_namespace = self._extract_namespace_from_usr(func_usr)
+            func_class = self._extract_class_from_usr(func_usr)
+            
+            if func_class:
+                # 这是一个类方法，应该归属于类而不是命名空间
+                class_method_count += 1
+                continue
+            elif func_namespace:
+                # 这是一个命名空间函数，找到对应的命名空间
+                for ns_usr, ns_obj in self.namespaces.items():
+                    if hasattr(ns_obj, 'qualified_name') and ns_obj.qualified_name == func_namespace:
+                        ns_obj.functions.append(func_usr)
+                        namespace_function_count += 1
+                        break
+            else:
+                # 全局函数
+                global_function_count += 1
+        
+        self.logger.info(f"函数关联完成: 命名空间函数={namespace_function_count}, 类方法={class_method_count}, 全局函数={global_function_count}")
+    
+    def _extract_namespace_from_usr(self, usr: str) -> str:
+        """从USR中提取命名空间信息"""
+        # USR格式分析：c:@N@std@F@function_name 表示 std命名空间中的函数
+        if not usr.startswith('c:@'):
+            return ""
+        
+        parts = usr.split('@')
+        namespace_parts = []
+        
+        i = 1  # 跳过 'c:'
+        while i < len(parts):
+            if parts[i] == 'N' and i + 1 < len(parts):
+                # 找到命名空间标记
+                namespace_parts.append(parts[i + 1])
+                i += 2
+            elif parts[i] in ['F', 'S', 'ST']:
+                # 到达函数或结构体/模板定义，停止
+                break
+            else:
+                i += 1
+        
+        return '::'.join(namespace_parts) if namespace_parts else ""
+    
+    def _extract_class_from_usr(self, usr: str) -> str:
+        """从USR中提取类信息"""
+        # USR格式分析：c:@S@ClassName@F@method_name 表示类中的方法
+        if not usr.startswith('c:@'):
+            return ""
+        
+        parts = usr.split('@')
+        
+        for i, part in enumerate(parts):
+            if part == 'S' and i + 1 < len(parts):
+                # 找到结构体/类标记
+                return parts[i + 1]
+        
+        return ""
 
     def _get_qualified_name(self, cursor: clang.Cursor) -> str:
         """获取限定名称"""

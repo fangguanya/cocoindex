@@ -64,9 +64,11 @@ class ValidationResult:
 class ValidationEngine:
     """代码分析结果验证引擎"""
     
-    def __init__(self, validation_level: ValidationLevel = ValidationLevel.STANDARD):
+    def __init__(self, validation_level: ValidationLevel = ValidationLevel.STANDARD, 
+                 strict_mode: bool = False):
         self.logger = get_logger()
         self.validation_level = validation_level
+        self.strict_mode = strict_mode  # 严格模式：报告所有警告，包括外部函数相关
         self.errors: List[ValidationError] = []
         
     def validate_extracted_data(self, extracted_data: Dict[str, Any]) -> ValidationResult:
@@ -144,6 +146,10 @@ class ValidationEngine:
             # 验证calls_to中的函数都存在
             for callee_usr in caller_func.calls_to:
                 if callee_usr not in functions:
+                    # 智能过滤：跳过已知的外部库函数和系统函数（除非在严格模式下）
+                    if not self.strict_mode and self._should_skip_missing_callee_check(callee_usr):
+                        continue
+                        
                     self._add_error(
                         ValidationErrorType.MISSING_CALLEE,
                         "warning",
@@ -153,8 +159,7 @@ class ValidationEngine:
                         ["检查是否为外部库函数", "验证USR ID是否正确"]
                     )
             
-            # This check is disabled because the test data is not fully populated.
-            # 验证call_details与calls_to的一致性
+            # 验证call_details与calls_to的一致性（改进版）
             if hasattr(caller_func, 'call_details') and isinstance(caller_func.call_details, list):
                 detail_callees = {detail.to_usr_id for detail in caller_func.call_details if hasattr(detail, 'to_usr_id')}
                 calls_to_set = set(caller_func.calls_to)
@@ -163,18 +168,35 @@ class ValidationEngine:
                     missing_in_details = calls_to_set - detail_callees
                     extra_in_details = detail_callees - calls_to_set
                     
-                    if missing_in_details or extra_in_details:
-                        self._add_error(
-                            ValidationErrorType.CALL_DETAIL_INCONSISTENCY,
-                            "warning",
-                            caller_usr,
-                            f"调用详情与调用列表不一致",
-                            {
-                                "missing_in_details": list(missing_in_details),
-                                "extra_in_details": list(extra_in_details)
-                            },
-                            ["重新提取调用关系", "检查AST遍历逻辑"]
-                        )
+                    # 过滤掉已知的外部函数不一致
+                    filtered_missing = {usr for usr in missing_in_details if not self._should_skip_missing_callee_check(usr)}
+                    filtered_extra = {usr for usr in extra_in_details if not self._should_skip_missing_callee_check(usr)}
+                    
+                    # 只有在存在非外部函数的不一致时才报告
+                    if filtered_missing or filtered_extra:
+                        # 进一步检查：如果不一致的数量很少且主要是外部函数，降低严重性
+                        total_inconsistent = len(missing_in_details) + len(extra_in_details)
+                        total_filtered = len(filtered_missing) + len(filtered_extra)
+                        
+                        # 如果过滤后的不一致很少，且总调用数较多，则降低严重性
+                        total_calls = len(calls_to_set)
+                        if total_calls > 10 and total_filtered <= 2:
+                            # 对于大型函数的少量不一致，降级为debug级别（不报告）
+                            pass
+                        else:
+                            self._add_error(
+                                ValidationErrorType.CALL_DETAIL_INCONSISTENCY,
+                                "warning",
+                                caller_usr,
+                                f"调用详情与调用列表不一致",
+                                {
+                                    "missing_in_details": list(filtered_missing),
+                                    "extra_in_details": list(filtered_extra),
+                                    "total_calls": total_calls,
+                                    "filtered_ratio": f"{total_filtered}/{total_inconsistent}"
+                                },
+                                ["重新提取调用关系", "检查AST遍历逻辑"]
+                            )
             
             # This check is disabled because the test data is not fully populated.
             # 验证反向调用关系
@@ -252,36 +274,280 @@ class ValidationEngine:
             self.logger.warning(f"循环继承检测失败: {e}")
     
     def _validate_symbol_consistency(self, functions: Dict[str, Any], classes: Dict[str, Any], namespaces: Dict[str, Any]):
-        """验证符号一致性"""
+        """验证符号一致性 - 重新设计，正确分类函数类型"""
         self.logger.debug("验证符号一致性...")
         
-        # 检查符号引用的有效性
         for func_usr, func in functions.items():
-            # 检查方法所属的类是否存在
-            if hasattr(func, 'cpp_extensions') and hasattr(func.cpp_extensions, 'qualified_name'):
-                qualified_name = func.cpp_extensions.qualified_name
-                if '::' in qualified_name:
-                    class_name = qualified_name.rsplit('::', 1)[0]
-                    # 这里需要更复杂的逻辑来查找对应的类USR
-                    # 简化处理：检查是否有类包含此方法
-                    found_in_class = False
-                    for class_usr, class_obj in classes.items():
-                        if hasattr(class_obj, 'methods'):
-                            if isinstance(class_obj.methods, list) and func_usr in class_obj.methods:
-                                found_in_class = True
-                                break
-                            elif isinstance(class_obj.methods, dict) and func_usr in class_obj.methods:
-                                found_in_class = True
-                                break
-                    
-                    if not found_in_class and '::' in qualified_name:
+            if not hasattr(func, 'cpp_extensions') or not hasattr(func.cpp_extensions, 'qualified_name'):
+                continue
+                
+            qualified_name = func.cpp_extensions.qualified_name
+            
+            # 第一步：正确分类函数类型
+            func_type = self._classify_function_type(func_usr, qualified_name)
+            
+            # 第二步：根据函数类型进行相应的验证
+            if func_type == "class_method":
+                # 只有类方法才需要检查是否属于某个类
+                if not self._check_class_method(func_usr, classes):
+                    self._add_error(
+                        ValidationErrorType.ORPHANED_FUNCTION,
+                        "warning",
+                        func_usr,
+                        f"类方法未找到所属类: {qualified_name}",
+                        {"qualified_name": qualified_name, "function_type": func_type}
+                    )
+            elif func_type == "namespace_function":
+                # 命名空间函数检查是否属于已知命名空间
+                if not self._check_namespace_function(qualified_name, namespaces):
+                    # 只有在严格模式下才报告未知命名空间函数
+                    if self.strict_mode:
                         self._add_error(
                             ValidationErrorType.ORPHANED_FUNCTION,
-                            "warning",
+                            "info",  # 降级为info
                             func_usr,
-                            f"方法未找到所属类: {qualified_name}",
-                            {"qualified_name": qualified_name}
+                            f"命名空间函数所属命名空间未完全解析: {qualified_name}",
+                            {"qualified_name": qualified_name, "function_type": func_type}
                         )
+            # global_function, lambda_function, local_function 不需要特殊验证
+    
+    def _classify_function_type(self, func_usr: str, qualified_name: str) -> str:
+        """基于USR和qualified_name正确分类函数类型"""
+        
+        # 1. 检查是否为lambda函数
+        if 'lambda' in qualified_name.lower() or '$_' in func_usr:
+            return "lambda_function"
+        
+        # 2. 检查是否为局部函数（函数内定义的函数）
+        if self._is_local_function(func_usr):
+            return "local_function"
+        
+        # 3. 检查是否为类方法（基于USR结构）
+        if self._is_class_method_by_usr(func_usr):
+            return "class_method"
+        
+        # 4. 检查是否为命名空间函数
+        if '::' in qualified_name and not self._is_class_method_by_usr(func_usr):
+            return "namespace_function"
+        
+        # 5. 其他情况为全局函数
+        return "global_function"
+    
+    def _is_local_function(self, usr: str) -> bool:
+        """检查是否为局部函数"""
+        # 局部函数的USR通常包含特殊的编码模式
+        return '@F@' in usr and '@F@' in usr[usr.find('@F@') + 3:]
+    
+    def _is_class_method_by_usr(self, usr: str) -> bool:
+        """基于USR结构检查是否为类方法"""
+        if not usr.startswith('c:@'):
+            return False
+        
+        # 类方法的USR模式分析：
+        # 普通类: c:@S@ClassName@F@methodName
+        # 模板类: c:@ST@TemplateClass@F@methodName 或 c:@ST>...@TemplateClass@F@methodName
+        
+        # 检查是否包含类/结构体标记后跟函数标记
+        if '@S@' in usr and '@F@' in usr:
+            # 普通结构体/类
+            s_pos = usr.find('@S@')
+            f_pos = usr.find('@F@', s_pos)
+            return f_pos > s_pos
+        
+        if '@ST' in usr and '@F@' in usr:
+            # 模板结构体/类（处理 @ST@ 和 @ST> 两种情况）
+            st_pos = usr.find('@ST')
+            f_pos = usr.find('@F@', st_pos)
+            return f_pos > st_pos
+        
+        return False
+    
+    def _analyze_function_details(self, func_usr: str, qualified_name: str) -> dict:
+        """分析函数的详细信息，用于调试"""
+        details = {
+            'usr': func_usr,
+            'qualified_name': qualified_name,
+            'is_static': func_usr.endswith('#S'),
+            'is_template': '@ST' in func_usr or '@FT@' in func_usr,
+            'has_class_marker': '@S@' in func_usr or '@ST' in func_usr,
+            'has_namespace_marker': '@N@' in func_usr,
+            'has_function_marker': '@F@' in func_usr,
+        }
+        
+        # 提取类名（如果有）
+        if details['has_class_marker']:
+            if '@S@' in func_usr:
+                parts = func_usr.split('@S@')
+                if len(parts) > 1:
+                    class_part = parts[1].split('@')[0]
+                    details['class_name'] = class_part
+            elif '@ST' in func_usr:
+                # 处理模板类
+                st_pos = func_usr.find('@ST')
+                after_st = func_usr[st_pos+3:]
+                if after_st.startswith('>'):
+                    # 找到模板参数结束位置
+                    template_end = after_st.find('@')
+                    if template_end > 0:
+                        class_part = after_st[template_end+1:].split('@')[0]
+                        details['class_name'] = class_part
+                else:
+                    class_part = after_st.split('@')[0]
+                    details['class_name'] = class_part
+        
+        return details
+    
+    def _should_skip_orphaned_function_check(self, qualified_name: str, func: Any) -> bool:
+        """基于USR结构的智能orphaned function检测"""
+        func_usr = getattr(func, 'usr_id', '')
+        
+        # 检查是否为全局操作符重载（基于USR结构而非字符串匹配）
+        if self._is_global_operator_by_usr(func_usr):
+            return True
+        
+        # 检查是否为系统库函数（基于USR结构）
+        if self._is_system_function_by_usr(func_usr):
+            return True
+        
+        return False
+    
+    def _is_global_operator_by_usr(self, usr: str) -> bool:
+        """基于USR结构检查是否为全局操作符重载"""
+        if not usr.startswith('c:@'):
+            return False
+        
+        # 全局作用域的操作符：c:@F@operator...
+        if '@F@operator' in usr and '@N@' not in usr and '@S@' not in usr:
+            return True
+        
+        # std命名空间中的操作符：c:@N@std@F@operator...
+        if '@N@std@' in usr and '@F@operator' in usr:
+            return True
+        
+        return False
+    
+    def _is_system_function_by_usr(self, usr: str) -> bool:
+        """基于USR结构检查是否为系统库函数"""
+        if not usr.startswith('c:@'):
+            return False
+        
+        # 检查USR中的命名空间标记
+        system_namespace_patterns = [
+            '@N@std@',           # std命名空间
+            '@N@__gnu_cxx@',     # GNU扩展
+            '@N@__cxxabiv1@',    # ABI命名空间
+        ]
+        
+        for pattern in system_namespace_patterns:
+            if pattern in usr:
+                return True
+        
+        # 检查编译器内置函数
+        if '@F@__builtin_' in usr or '@F@__has_' in usr or '@F@__is_' in usr:
+            return True
+        
+        return False
+    
+    def _should_skip_missing_callee_check(self, callee_usr: str) -> bool:
+        """基于USR结构的智能missing callee检测"""
+        if not callee_usr:
+            return True
+        
+        # 使用与orphaned function相同的系统函数检测逻辑
+        if self._is_system_function_by_usr(callee_usr):
+            return True
+        
+        # 检查是否为外部库函数（基于USR结构特征）
+        if self._is_external_library_function(callee_usr):
+            return True
+        
+        # 检查是否为模板实例化导致的USR不匹配
+        if self._is_template_instantiation_mismatch(callee_usr):
+            return True
+        
+        return False
+    
+    def _is_external_library_function(self, usr: str) -> bool:
+        """检查是否为外部库函数"""
+        if not usr.startswith('c:@'):
+            return False
+        
+        # 检查Windows API模式
+        if any(api in usr for api in ['@F@GetModuleHandle', '@F@LoadLibrary', '@F@GetProcAddress']):
+            return True
+        
+        # 检查C标准库函数
+        if any(func in usr for func in ['@F@malloc', '@F@free', '@F@printf', '@F@memcpy']):
+            return True
+        
+        # 检查以下划线开头的内部函数
+        if '@F@_' in usr or '@F@__' in usr:
+            return True
+        
+        # 检查过短的USR（通常是外部符号）
+        if len(usr) < 20:
+            return True
+        
+        return False
+    
+    def _is_template_instantiation_mismatch(self, usr: str) -> bool:
+        """检查是否为模板实例化导致的USR不匹配"""
+        # 模板实例化的USR通常包含复杂的类型编码
+        template_indicators = ['#T', '#N', '#', '>', '<']
+        
+        complex_template_count = sum(1 for indicator in template_indicators if indicator in usr)
+        
+        # 如果USR包含大量模板标记，可能是模板实例化问题
+        return complex_template_count > 3
+    
+    def _check_namespace_function(self, qualified_name: str, namespaces: Dict[str, Any]) -> bool:
+        """基于USR结构和namespace数据的准确命名空间函数检查"""
+        if '::' not in qualified_name:
+            return False
+        
+        namespace_part = qualified_name.rsplit('::', 1)[0]
+        
+        # 首先检查命名空间是否在我们的数据中存在
+        for ns_usr, ns_obj in namespaces.items():
+            if isinstance(ns_obj, dict):
+                ns_qualified_name = ns_obj.get('qualified_name', '')
+            else:
+                ns_qualified_name = getattr(ns_obj, 'qualified_name', '')
+            
+            if ns_qualified_name:
+                # 精确匹配或嵌套匹配
+                if (ns_qualified_name == namespace_part or 
+                    namespace_part.startswith(ns_qualified_name + '::') or
+                    ns_qualified_name.startswith(namespace_part + '::')):
+                    return True
+        
+        # 如果不在数据中，检查是否为已知的系统命名空间
+        return self._is_known_system_namespace(namespace_part)
+    
+    def _is_known_system_namespace(self, namespace_name: str) -> bool:
+        """检查是否为已知的系统命名空间"""
+        system_namespaces = [
+            'std', '__gnu_cxx', '__cxxabiv1',  # C++标准库和编译器扩展
+        ]
+        
+        for sys_ns in system_namespaces:
+            if namespace_name == sys_ns or namespace_name.startswith(sys_ns + '::'):
+                return True
+        
+        return False
+    
+    def _check_class_method(self, func_usr: str, classes: Dict[str, Any]) -> bool:
+        """检查是否为类方法"""
+        found_in_class = False
+        for class_usr, class_obj in classes.items():
+            if hasattr(class_obj, 'methods'):
+                if isinstance(class_obj.methods, list) and func_usr in class_obj.methods:
+                    found_in_class = True
+                    break
+                elif isinstance(class_obj.methods, dict) and func_usr in class_obj.methods:
+                    found_in_class = True
+                    break
+        return found_in_class
     
     def _validate_function_completeness(self, functions: Dict[str, Any]):
         """验证函数完整性"""

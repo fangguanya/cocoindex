@@ -58,7 +58,8 @@ class AnalysisConfig:
                  exclude_patterns: Optional[set] = None,
                  enable_dynamic_includes: bool = True,
                  enable_multiprocess_safety: bool = True,
-                 enable_legacy_header_scan: bool = False):
+                 enable_legacy_header_scan: bool = False,
+                 strict_validation: bool = False):
         self.project_root = project_root
         self.scan_directory = scan_directory
         self.output_path = output_path
@@ -71,6 +72,7 @@ class AnalysisConfig:
         self.enable_dynamic_includes = enable_dynamic_includes
         self.enable_multiprocess_safety = enable_multiprocess_safety
         self.enable_legacy_header_scan = enable_legacy_header_scan
+        self.strict_validation = strict_validation
 
 
 class AnalysisResult:
@@ -590,7 +592,11 @@ class CppAnalyzer:
             self.logger.info("9. 验证提取的数据...")
             
             with profiler.timer("validate_data"):
-                validation_engine = ValidationEngine(ValidationLevel.STANDARD)
+                # 使用改进的验证引擎，默认使用非严格模式以减少false positive警告
+                validation_engine = ValidationEngine(
+                    validation_level=ValidationLevel.STANDARD,
+                    strict_mode=getattr(config, 'strict_validation', False)
+                )
                 validation_result = validation_engine.validate_extracted_data(extracted_data)
             
             if not validation_result.validation_passed:
