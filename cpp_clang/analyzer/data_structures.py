@@ -94,6 +94,21 @@ class TemplateParameter:
         self.name = name
         self.type = type  # e.g., "typename", "int"
 
+class MemberVariable:
+    """类成员变量 - 性能优化版"""
+    def __init__(self, name: str, type: str, usr_id: str, access_specifier: str = "private",
+                 is_static: bool = False, is_const: bool = False, is_mutable: bool = False,
+                 location: Optional[Location] = None, default_value: Optional[str] = None):
+        self.name = name
+        self.type = type
+        self.usr_id = usr_id
+        self.access_specifier = access_specifier  # public, private, protected
+        self.is_static = is_static
+        self.is_const = is_const
+        self.is_mutable = is_mutable
+        self.location = location
+        self.default_value = default_value
+
 class ResolvedDefinitionLocation:
     """解析的定义位置 - 性能优化版"""
     def __init__(self, file_id: str, line: int, column: int):
@@ -264,7 +279,8 @@ class Class:
         self.is_mixin = is_mixin
         self.documentation = documentation
         self.methods = methods or []  # 方法的USR ID
-        self.fields = fields or {}
+        self.member_variables = []  # 成员变量的USR ID列表
+        self.fields = fields or {}  # 保留原有字段以兼容性
         self.cpp_oop_extensions = cpp_oop_extensions or CppOopExtensions(qualified_name=qualified_name)
 
 class Namespace:

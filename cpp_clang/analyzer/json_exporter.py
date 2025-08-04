@@ -90,6 +90,7 @@ class JsonExporter:
                 "functions": extracted_data.get('functions', {}),
                 "classes": enhanced_classes,
                 "namespaces": extracted_data.get('namespaces', {}),
+                "member_variables": extracted_data.get('member_variables', {}),
                 
                 # 保留原有的分组结构作为补充信息
                 "project_call_graph": {
@@ -159,8 +160,10 @@ class JsonExporter:
 
     def _enhance_class_methods(self, classes: Dict[str, Any], functions: Dict[str, Any]) -> Dict[str, Any]:
         """
-        增强类对象，使其包含完整的方法内容。
+        增强类对象，使其包含完整的方法和成员变量内容。
+
         将methods从USR ID列表转换为完整的函数对象列表。
+        将member_variables从USR ID列表转换为完整的成员变量对象列表。
         """
         enhanced_classes = {}
         

@@ -87,7 +87,8 @@ class SerializableExtractedData:
     """可序列化的实体提取结果，用于多进程传输 - 性能优化版"""
     def __init__(self, file_path: str, success: bool, parse_time: float, extraction_time: float,
                  functions: Dict[str, Any], classes: Dict[str, Any], namespaces: Dict[str, Any],
-                 global_nodes: Dict[str, Any], file_mappings: Dict[str, Any], stats: Dict[str, Any]):
+                 global_nodes: Dict[str, Any], file_mappings: Dict[str, Any], stats: Dict[str, Any],
+                 member_variables: Optional[Dict[str, Any]] = None):
         self.file_path = file_path
         self.success = success
         self.parse_time = parse_time
@@ -95,6 +96,7 @@ class SerializableExtractedData:
         self.functions = functions
         self.classes = classes
         self.namespaces = namespaces
+        self.member_variables = member_variables or {}
         self.global_nodes = global_nodes
         self.file_mappings = file_mappings
         self.stats = stats
@@ -104,7 +106,7 @@ class SerializableExtractedData:
         return SerializableExtractedData(
             file_path=file_path, success=False, parse_time=0.0, extraction_time=0.0,
             functions={}, classes={}, namespaces={}, global_nodes={}, file_mappings={},
-            stats={"error": error_msg}
+            stats={"error": error_msg}, member_variables={}
         )
 
 class ParsedFile:

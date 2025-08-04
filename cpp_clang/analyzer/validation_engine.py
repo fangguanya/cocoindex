@@ -453,6 +453,14 @@ class ValidationEngine:
         if not callee_usr:
             return True
         
+        # 检查是否为成员变量访问（@FI@标记）
+        if self._is_member_variable_access(callee_usr):
+            return True
+        
+        # 检查是否为特殊构造函数（默认构造函数、移动构造函数等）
+        if self._is_special_constructor(callee_usr):
+            return True
+        
         # 使用与orphaned function相同的系统函数检测逻辑
         if self._is_system_function_by_usr(callee_usr):
             return True
@@ -463,6 +471,45 @@ class ValidationEngine:
         
         # 检查是否为模板实例化导致的USR不匹配
         if self._is_template_instantiation_mismatch(callee_usr):
+            return True
+        
+        return False
+    
+    def _is_member_variable_access(self, usr: str) -> bool:
+        """检查USR是否表示成员变量访问"""
+        if not usr:
+            return False
+        
+        # 成员变量的USR模式：c:@S@ClassName@FI@varName
+        # @FI@ 表示Field Identifier（成员变量）
+        return '@FI@' in usr
+    
+    def _is_special_constructor(self, usr: str) -> bool:
+        """检查是否为特殊构造函数（编译器生成的）"""
+        if not usr or not usr.startswith('c:@'):
+            return False
+        
+        # 检查默认构造函数模式：c:@S@ClassName@F@ClassName#
+        if '@F@' in usr and usr.endswith('#'):
+            # 提取类名和构造函数名
+            parts = usr.split('@F@')
+            if len(parts) == 2:
+                class_part = parts[0]
+                func_part = parts[1]
+                
+                # 从类部分提取类名
+                if '@S@' in class_part:
+                    class_name = class_part.split('@S@')[-1]
+                    # 检查函数名是否与类名匹配且是默认构造函数
+                    if func_part == f"{class_name}#":
+                        return True
+        
+        # 检查移动构造函数模式：c:@S@ClassName@F@ClassName#&&$@S@ClassName#
+        if '@F@' in usr and '#&&$@S@' in usr:
+            return True
+        
+        # 检查拷贝构造函数模式：c:@S@ClassName@F@ClassName#&1$@S@ClassName#
+        if '@F@' in usr and '#&1$@S@' in usr:
             return True
         
         return False

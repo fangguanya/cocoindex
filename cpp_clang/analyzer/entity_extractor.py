@@ -16,7 +16,8 @@ from .performance_profiler import profiler, profile_function, DetailedLogger
 from .data_structures import (
     Function, Class, Namespace, CppExtensions, CppOopExtensions,
     CallInfo, CppCallInfo, Parameter, Location, ResolvedDefinitionLocation, InheritanceInfo,
-    FunctionStatusFlags, ClassStatusFlags, CallStatusFlags, EntityNode, TemplateParameter
+    FunctionStatusFlags, ClassStatusFlags, CallStatusFlags, EntityNode, TemplateParameter,
+    MemberVariable
 )
 
 
@@ -73,6 +74,7 @@ class EntityExtractor:
         self.functions: Dict[str, Function] = {}
         self.classes: Dict[str, Class] = {}
         self.namespaces: Dict[str, Namespace] = {}
+        self.member_variables: Dict[str, MemberVariable] = {}  # 成员变量字典
         self.global_nodes: Dict[str, EntityNode] = {}
         self._processed_usrs: Set[str] = set()
         self._functions_with_calls_extracted: Set[str] = set()
@@ -83,7 +85,7 @@ class EntityExtractor:
             # 基本声明
             clang.CursorKind.NAMESPACE, clang.CursorKind.CLASS_DECL, clang.CursorKind.STRUCT_DECL,
             clang.CursorKind.FUNCTION_DECL, clang.CursorKind.CXX_METHOD, clang.CursorKind.CONSTRUCTOR,
-            clang.CursorKind.DESTRUCTOR,
+            clang.CursorKind.DESTRUCTOR, clang.CursorKind.FIELD_DECL,
             # 基本表达式和引用
             clang.CursorKind.CALL_EXPR, clang.CursorKind.MEMBER_REF_EXPR, clang.CursorKind.DECL_REF_EXPR,
             # 模板
@@ -145,11 +147,12 @@ class EntityExtractor:
             "functions": self.functions,
             "classes": self.classes,
             "namespaces": self.namespaces,
+            "member_variables": self.member_variables,
             "global_nodes": {usr_id: node.to_dict() for usr_id, node in self.global_nodes.items()},
             "file_mappings": self.file_id_manager.get_file_mappings()
         }
         
-        self.logger.info(f"实体提取完成。函数: {len(self.functions)}, 类: {len(self.classes)}, 命名空间: {len(self.namespaces)}")
+        self.logger.info(f"实体提取完成。函数: {len(self.functions)}, 类: {len(self.classes)}, 命名空间: {len(self.namespaces)}, 成员变量: {len(self.member_variables)}")
         
         return result
 
@@ -386,6 +389,7 @@ class EntityExtractor:
         location = Location(file_id=file_id, line=cursor.location.line, column=cursor.location.column)
 
         member_methods = []
+        member_vars = []
         for child in cursor.get_children():
             if child.kind in [
                 clang.CursorKind.CXX_METHOD, clang.CursorKind.CONSTRUCTOR, 
@@ -399,6 +403,15 @@ class EntityExtractor:
                         member_func = self._create_function_from_cursor(child)
                         self.functions[child_usr] = member_func
                         self.global_nodes[child_usr] = EntityNode(child_usr, "function", member_func)
+            elif child.kind == clang.CursorKind.FIELD_DECL:
+                child_usr = child.get_usr()
+                if child_usr:
+                    member_vars.append(child_usr)
+                    # 创建成员变量对象
+                    if child_usr not in self.member_variables:
+                        member_var = self._create_member_variable_from_cursor(child)
+                        self.member_variables[child_usr] = member_var
+                        self.global_nodes[child_usr] = EntityNode(child_usr, "member_variable", member_var)
 
         cpp_oop_ext = CppOopExtensions(
             qualified_name=qualified_name, namespace=self._get_namespace_str(cursor),
@@ -409,7 +422,7 @@ class EntityExtractor:
             usr=usr,
         )
 
-        return Class(
+        cls = Class(
             name=cursor.spelling, qualified_name=qualified_name, usr_id=usr,
             definition_file_id=file_id if cursor.is_definition() else None,
             declaration_file_id=file_id if not cursor.is_definition() else None,
@@ -420,6 +433,8 @@ class EntityExtractor:
             methods=member_methods, is_abstract=cursor.is_abstract_record(),
             cpp_oop_extensions=cpp_oop_ext
         )
+        cls.member_variables = member_vars  # 设置成员变量列表
+        return cls
 
     def _create_namespace_from_cursor(self, cursor: clang.Cursor) -> Namespace:
         """从游标创建命名空间对象"""
@@ -459,8 +474,9 @@ class EntityExtractor:
         cls.definition_location = Location(file_id=file_id, line=cursor.location.line, column=cursor.location.column)
         cls.is_definition = True
         
-        # 修复：不要重置methods列表，而是合并新发现的方法
+        # 修复：不要重置methods列表，而是合并新发现的方法和成员变量
         existing_methods = set(cls.methods) if cls.methods else set()
+        existing_member_vars = set(cls.member_variables) if cls.member_variables else set()
         
         for child in cursor.get_children():
             if child.kind in [
@@ -475,9 +491,19 @@ class EntityExtractor:
                         member_func = self._create_function_from_cursor(child)
                         self.functions[child_usr] = member_func
                         self.global_nodes[child_usr] = EntityNode(child_usr, "function", member_func)
+            elif child.kind == clang.CursorKind.FIELD_DECL:
+                child_usr = child.get_usr()
+                if child_usr and child_usr not in existing_member_vars:
+                    existing_member_vars.add(child_usr)
+                    # 确保成员变量也被添加到member_variables字典中
+                    if child_usr not in self.member_variables:
+                        member_var = self._create_member_variable_from_cursor(child)
+                        self.member_variables[child_usr] = member_var
+                        self.global_nodes[child_usr] = EntityNode(child_usr, "member_variable", member_var)
         
-        # 更新方法列表
+        # 更新方法和成员变量列表
         cls.methods = list(existing_methods)
+        cls.member_variables = list(existing_member_vars)
 
     def _extract_calls_for_function(self, cursor: clang.Cursor):
         """提取函数调用关系 - 完整版，基于clang CursorKind系统性分析"""
@@ -759,6 +785,74 @@ class EntityExtractor:
             return class_part
         
         return ""
+    
+    def _create_member_variable_from_cursor(self, cursor: clang.Cursor) -> 'MemberVariable':
+        """从cursor创建成员变量对象"""
+        from .data_structures import MemberVariable, Location
+        
+        usr = cursor.get_usr()
+        file_path = cursor.location.file.name
+        file_id = self.file_id_manager.get_file_id(file_path)
+        
+        if not file_id:
+            raise ValueError(f"无法获取文件ID for {file_path}")
+        
+        location = Location(
+            file_id=file_id,
+            line=cursor.location.line,
+            column=cursor.location.column
+        )
+        
+        # 提取访问说明符（public, private, protected）
+        access_specifier = self._get_access_specifier(cursor)
+        
+        # 检查是否为静态成员
+        is_static = cursor.is_static_method()  # 对于字段也适用
+        
+        # 检查是否为const
+        is_const = cursor.type.is_const_qualified()
+        
+        # 检查是否为mutable（需要从源码中解析）
+        is_mutable = self._is_mutable_field(cursor)
+        
+        # 获取类型信息
+        type_name = cursor.type.spelling
+        
+        return MemberVariable(
+            name=cursor.spelling,
+            type=type_name,
+            usr_id=usr,
+            access_specifier=access_specifier,
+            is_static=is_static,
+            is_const=is_const,
+            is_mutable=is_mutable,
+            location=location
+        )
+    
+    def _get_access_specifier(self, cursor: clang.Cursor) -> str:
+        """获取成员的访问说明符"""
+        access = cursor.access_specifier
+        if access == clang.AccessSpecifier.PUBLIC:
+            return "public"
+        elif access == clang.AccessSpecifier.PROTECTED:
+            return "protected"
+        elif access == clang.AccessSpecifier.PRIVATE:
+            return "private"
+        else:
+            return "private"  # 默认为private
+    
+    def _is_mutable_field(self, cursor: clang.Cursor) -> bool:
+        """检查字段是否为mutable（简化实现）"""
+        # 这是一个简化的实现，实际中可能需要更复杂的源码解析
+        try:
+            # 通过检查cursor的tokens来判断是否有mutable关键字
+            tokens = list(cursor.get_tokens())
+            for token in tokens:
+                if token.spelling == "mutable":
+                    return True
+        except:
+            pass
+        return False
     
     def _extract_namespace_from_usr(self, usr: str) -> str:
         """从USR中提取命名空间信息"""

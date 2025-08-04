@@ -301,7 +301,8 @@ def _parse_and_extract_worker(file_path: str) -> Optional[SerializableExtractedD
             namespaces={usr: ns.__dict__ for usr, ns in extracted_data.get('namespaces', {}).items()},
             global_nodes=extracted_data.get('global_nodes', {}),
             file_mappings=extracted_data.get('file_mappings', {}),
-            stats=stats
+            stats=stats,
+            member_variables={usr: var.__dict__ for usr, var in extracted_data.get('member_variables', {}).items()}
         )
         return serializable_result
 
@@ -961,6 +962,7 @@ class CppAnalyzer:
         merged_functions: Dict[str, Function] = {}
         merged_classes: Dict[str, Class] = {}
         merged_namespaces: Dict[str, Namespace] = {}
+        merged_member_variables: Dict[str, Any] = {}  # 添加成员变量合并
         merged_global_nodes: Dict[str, EntityNode] = {}
         merged_file_mappings: Dict[str, str] = {}
 
@@ -1022,6 +1024,12 @@ class CppAnalyzer:
                     existing_ns.declaration_locations.extend(new_ns.declaration_locations)
                     existing_ns.classes.extend(new_ns.classes)
                     existing_ns.functions.extend(new_ns.functions)
+            
+            # 合并成员变量
+            if hasattr(result, 'member_variables') and result.member_variables:
+                for usr, member_var_dict in result.member_variables.items():
+                    if usr not in merged_member_variables:
+                        merged_member_variables[usr] = member_var_dict
 
         # 去重和最终化
         for func in merged_functions.values():
@@ -1052,6 +1060,7 @@ class CppAnalyzer:
             "functions": merged_functions,
             "classes": merged_classes,
             "namespaces": merged_namespaces,
+            "member_variables": merged_member_variables,
             "global_nodes": {usr_id: node.to_dict() for usr_id, node in merged_global_nodes.items()},
             "file_mappings": merged_file_mappings
         }
