@@ -25,7 +25,7 @@ from .file_scanner import FileScanner, ScanResult
 from .clang_parser import ClangParser, ParsedFile, SerializableExtractedData
 from .entity_extractor import EntityExtractor
 from .json_exporter import JsonExporter
-from .distributed_file_manager import DistributedFileIdManager
+from .distributed_file_manager import create_multiprocess_file_manager
 from .validation_engine import ValidationEngine, ValidationLevel
 from .data_structures import Function, Class, Namespace, EntityNode, Location
 from .performance_profiler import profiler, profile_function, DetailedLogger
@@ -92,14 +92,14 @@ class AnalysisResult:
 g_parser: Optional[ClangParser] = None
 g_extractor: Optional[EntityExtractor] = None
 g_project_root: Optional[str] = None
-g_file_manager: Optional[DistributedFileIdManager] = None
+g_file_manager: Optional[Any] = None
 g_compile_commands: Optional[Dict[str, Any]] = None
 g_include_parser: Optional[IncludeDirectiveParser] = None
 g_enable_dynamic_includes: bool = True
 g_enable_multiprocess_safety: bool = True
 
 def _init_worker(compile_commands: Dict[str, Any], project_root: str, 
-                file_id_manager,  # 直接传递文件管理器对象
+                file_id_manager,  # 直接传递文件管理器实例
                 enable_dynamic_includes: bool = True,
                 enable_multiprocess_safety: bool = True):
     """初始化工作进程 - 支持动态include和多进程安全，修复序列化问题"""
@@ -114,7 +114,7 @@ def _init_worker(compile_commands: Dict[str, Any], project_root: str,
         g_compile_commands = compile_commands
         g_parser.compile_commands = compile_commands
         
-        # 直接使用传递进来的共享文件管理器
+        # 直接使用传递过来的文件管理器实例（共享对象自动处理序列化）
         g_project_root = project_root
         g_file_manager = file_id_manager
         g_extractor = EntityExtractor(g_file_manager)
@@ -483,11 +483,12 @@ class CppAnalyzer:
 
             # 5. 在主进程中创建并初始化文件管理器
             with profiler.timer("init_file_manager"):
-                # 创建共享的文件管理器
-                shared_counter = multiprocessing.Value('i', 0)
-                shared_lock = multiprocessing.Lock()
-                file_id_manager = DistributedFileIdManager(config.project_root, filtered_files, shared_counter, shared_lock)
-                self.logger.info("创建共享文件管理器")
+                # 创建共享的文件管理器（可直接传递给子进程）
+                file_id_manager = create_multiprocess_file_manager(
+                    config.project_root, 
+                    filtered_files
+                )
+                self.logger.info("创建多进程共享文件管理器")
 
             # 6. 并行解析和提取
             self.console.print("\n[bold]6. 开始并行解析和提取实体...[/bold]")
@@ -503,11 +504,11 @@ class CppAnalyzer:
                     with Progress(console=self.console) as progress:
                         task = progress.add_task("[cyan]解析和提取中...", total=len(filtered_files))
                         
-                        # 将编译命令和共享文件管理器传递给工作进程
+                        # 将编译命令和文件管理器传递给工作进程
                         init_args = (
                             temp_parser.compile_commands, 
                             config.project_root, 
-                            file_id_manager,  # 直接传递文件管理器对象
+                            file_id_manager,  # 直接传递文件管理器实例
                             config.enable_dynamic_includes,
                             config.enable_multiprocess_safety
                         )
