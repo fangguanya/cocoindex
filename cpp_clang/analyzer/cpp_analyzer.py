@@ -99,7 +99,7 @@ g_enable_dynamic_includes: bool = True
 g_enable_multiprocess_safety: bool = True
 
 def _init_worker(compile_commands: Dict[str, Any], project_root: str, 
-                all_files: List[str],  # 用文件列表替代file_id_manager
+                file_id_manager,  # 直接传递文件管理器对象
                 enable_dynamic_includes: bool = True,
                 enable_multiprocess_safety: bool = True):
     """初始化工作进程 - 支持动态include和多进程安全，修复序列化问题"""
@@ -114,9 +114,9 @@ def _init_worker(compile_commands: Dict[str, Any], project_root: str,
         g_compile_commands = compile_commands
         g_parser.compile_commands = compile_commands
         
-        # 在worker进程中重新创建文件管理器和实体提取器，避免序列化问题
+        # 直接使用传递进来的共享文件管理器
         g_project_root = project_root
-        g_file_manager = DistributedFileIdManager(project_root, all_files)
+        g_file_manager = file_id_manager
         g_extractor = EntityExtractor(g_file_manager)
         
         # 设置功能开关
@@ -483,7 +483,11 @@ class CppAnalyzer:
 
             # 5. 在主进程中创建并初始化文件管理器
             with profiler.timer("init_file_manager"):
-                file_id_manager = DistributedFileIdManager(config.project_root, filtered_files)
+                # 创建共享的文件管理器
+                shared_counter = multiprocessing.Value('i', 0)
+                shared_lock = multiprocessing.Lock()
+                file_id_manager = DistributedFileIdManager(config.project_root, filtered_files, shared_counter, shared_lock)
+                self.logger.info("创建共享文件管理器")
 
             # 6. 并行解析和提取
             self.console.print("\n[bold]6. 开始并行解析和提取实体...[/bold]")
@@ -499,11 +503,11 @@ class CppAnalyzer:
                     with Progress(console=self.console) as progress:
                         task = progress.add_task("[cyan]解析和提取中...", total=len(filtered_files))
                         
-                        # 将完整的编译命令和文件列表传递给工作进程，避免序列化问题
+                        # 将编译命令和共享文件管理器传递给工作进程
                         init_args = (
                             temp_parser.compile_commands, 
                             config.project_root, 
-                            filtered_files,  # 传递文件列表而不是manager对象
+                            file_id_manager,  # 直接传递文件管理器对象
                             config.enable_dynamic_includes,
                             config.enable_multiprocess_safety
                         )
@@ -572,6 +576,13 @@ class CppAnalyzer:
             with profiler.timer("merge_results"):
                 extracted_data = self._merge_parallel_results(all_results)
             logger.checkpoint("结果合并完成")
+            
+            # 输出文件管理器统计信息
+            if hasattr(file_id_manager, 'get_stats'):
+                stats = file_id_manager.get_stats()
+                self.logger.info(f"文件管理器统计: 总文件数={stats.get('total_files', 0)}, "
+                               f"预定义文件={stats.get('predefined_files', 0)}, "
+                               f"动态文件={stats.get('temp_files', 0)}")
 
             # 9. 验证提取的数据
             self.console.print("\n[bold]9. 验证提取的数据...[/bold]")
