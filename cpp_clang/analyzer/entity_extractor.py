@@ -58,7 +58,17 @@ class EntityExtractor:
         self.file_id_manager = file_id_manager
         self.code_extractor = CodeExtractor()
         
-        # 线程安全的数据结构
+        # 确保线程锁在多进程环境中能正确创建
+        self._initialize_thread_safe_data()
+        
+        # 性能优化：缓存常用查询结果
+        self._cursor_cache: Dict[str, Any] = {}
+        self._qualified_name_cache: Dict[str, str] = {}
+        self._relevant_kinds = self._get_relevant_cursor_kinds()
+    
+    def _initialize_thread_safe_data(self):
+        """初始化线程安全的数据结构 - 修复多进程序列化问题"""
+        # 每次都重新创建线程锁，避免序列化问题
         self._lock = threading.RLock()
         self.functions: Dict[str, Function] = {}
         self.classes: Dict[str, Class] = {}
@@ -66,11 +76,6 @@ class EntityExtractor:
         self.global_nodes: Dict[str, EntityNode] = {}
         self._processed_usrs: Set[str] = set()
         self._functions_with_calls_extracted: Set[str] = set()
-        
-        # 性能优化：缓存常用查询结果
-        self._cursor_cache: Dict[str, Any] = {}
-        self._qualified_name_cache: Dict[str, str] = {}
-        self._relevant_kinds = self._get_relevant_cursor_kinds()
         
     def _get_relevant_cursor_kinds(self) -> Set[clang.CursorKind]:
         """动态构建相关的CursorKind集合，基于clang CursorKind系统性分析"""
@@ -145,16 +150,11 @@ class EntityExtractor:
         return result
 
     def _reset_state(self):
-        """重置状态"""
-        with self._lock:
-            self.functions.clear()
-            self.classes.clear()
-            self.namespaces.clear()
-            self.global_nodes.clear()
-            self._functions_with_calls_extracted.clear()
-            self._processed_usrs.clear()
-            self._cursor_cache.clear()
-            self._qualified_name_cache.clear()
+        """重置状态 - 修复多进程安全问题"""
+        # 重新初始化线程安全的数据结构
+        self._initialize_thread_safe_data()
+        self._cursor_cache.clear()
+        self._qualified_name_cache.clear()
 
     def _first_pass_visitor_optimized(self, cursor):
         """第一遍遍历 - 只提取声明和定义"""

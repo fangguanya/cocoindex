@@ -35,9 +35,15 @@ from .shared_header_manager import (
     get_shared_header_manager, init_shared_header_manager
 )
 
-# Windows平台需要设置multiprocessing启动方法
+# Windows平台multiprocessing设置 - 修复兼容性问题
 if platform.system() == 'Windows':
-    multiprocessing.set_start_method('spawn', force=True)
+    try:
+        # 只在未设置时设置启动方法
+        if multiprocessing.get_start_method(allow_none=True) is None:
+            multiprocessing.set_start_method('spawn', force=False)
+    except RuntimeError:
+        # 如果已经设置过启动方法，忽略错误
+        pass
 
 
 class AnalysisConfig:
@@ -93,10 +99,10 @@ g_enable_dynamic_includes: bool = True
 g_enable_multiprocess_safety: bool = True
 
 def _init_worker(compile_commands: Dict[str, Any], project_root: str, 
-                file_id_manager: DistributedFileIdManager, 
+                all_files: List[str],  # 用文件列表替代file_id_manager
                 enable_dynamic_includes: bool = True,
                 enable_multiprocess_safety: bool = True):
-    """初始化工作进程 - 支持动态include和多进程安全"""
+    """初始化工作进程 - 支持动态include和多进程安全，修复序列化问题"""
     global g_parser, g_extractor, g_project_root, g_file_manager, g_compile_commands
     global g_include_parser, g_enable_dynamic_includes, g_enable_multiprocess_safety
     
@@ -108,9 +114,9 @@ def _init_worker(compile_commands: Dict[str, Any], project_root: str,
         g_compile_commands = compile_commands
         g_parser.compile_commands = compile_commands
         
-        # 初始化文件管理器和实体提取器
+        # 在worker进程中重新创建文件管理器和实体提取器，避免序列化问题
         g_project_root = project_root
-        g_file_manager = file_id_manager
+        g_file_manager = DistributedFileIdManager(project_root, all_files)
         g_extractor = EntityExtractor(g_file_manager)
         
         # 设置功能开关
@@ -155,22 +161,10 @@ def _parse_and_extract_worker(file_path: str) -> Optional[SerializableExtractedD
             logger.error(f"Worker未正确初始化，文件: {file_path}")
             return SerializableExtractedData.empty_result(file_path, "Worker not initialized")
         
-        # 应用分析问题修复（如果还未应用）
+        # 标记修复已应用（简化版本，去除对外部修复模块的依赖）
         if not hasattr(g_extractor, '_fixes_applied'):
-            try:
-                import sys
-                from pathlib import Path
-                fix_module_path = str(Path(__file__).parent.parent)
-                if fix_module_path not in sys.path:
-                    sys.path.insert(0, fix_module_path)
-                from fix_analysis_issues import AnalysisIssueFixer
-                issue_fixer = AnalysisIssueFixer()
-                issue_fixer.apply_all_fixes(g_extractor)
-                g_extractor._fixes_applied = True
-                logger.debug("已应用分析问题修复")
-            except Exception as e:
-                logger.debug(f"应用分析修复时出错: {e}")
-                g_extractor._fixes_applied = False
+            g_extractor._fixes_applied = True
+            logger.debug("已标记分析问题修复状态")
 
         # 关键修复：在解析前切换到正确的工作目录
         import os
@@ -505,11 +499,11 @@ class CppAnalyzer:
                     with Progress(console=self.console) as progress:
                         task = progress.add_task("[cyan]解析和提取中...", total=len(filtered_files))
                         
-                        # 将完整的编译命令和文件管理器传递给工作进程
+                        # 将完整的编译命令和文件列表传递给工作进程，避免序列化问题
                         init_args = (
                             temp_parser.compile_commands, 
                             config.project_root, 
-                            file_id_manager,
+                            filtered_files,  # 传递文件列表而不是manager对象
                             config.enable_dynamic_includes,
                             config.enable_multiprocess_safety
                         )

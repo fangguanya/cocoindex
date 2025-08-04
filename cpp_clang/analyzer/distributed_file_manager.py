@@ -36,10 +36,15 @@ class DistributedFileIdManager:
         
         # 临时文件ID管理（用于动态发现的头文件）- 线程安全
         self._temp_file_counter = 0
-        self._temp_file_lock = threading.Lock()
-        self._mapping_lock = threading.Lock()
+        # 确保锁对象在多进程环境中能正确创建
+        self._init_locks()
         
         self._initialize_mappings(all_files)
+    
+    def _init_locks(self):
+        """初始化锁对象 - 修复多进程序列化问题"""
+        self._temp_file_lock = threading.Lock()
+        self._mapping_lock = threading.Lock()
 
     def _initialize_mappings(self, all_files: List[str]):
         """根据完整文件列表预先生成所有映射"""
@@ -63,18 +68,15 @@ class DistributedFileIdManager:
         
         # 首先在不加锁的情况下检查
         with self._mapping_lock:
-            file_id = self._path_to_id.get(normalized_path)
-        
-	        if not file_id:
-	            # 动态分配临时ID（双重检查锁定模式）
-	            with self._temp_file_lock:
-	                # 再次检查，防止并发分配
-	                file_id = self._path_to_id.get(normalized_path)
-                
-	                if not file_id:
-	                    file_id = self._create_temp_file_id_unsafe(normalized_path)
-	                    self.logger.debug(f"动态分配临时文件ID: {normalized_path} -> {file_id}")
-        
+            with self._temp_file_lock:
+                file_id = self._path_to_id.get(normalized_path)
+                if not file_id:
+                    # 动态分配临时ID（双重检查锁定模式）
+                    # 再次检查，防止并发分配
+                    file_id = self._path_to_id.get(normalized_path)
+                    if not file_id:
+                        file_id = self._create_temp_file_id_unsafe(normalized_path)
+                        self.logger.debug(f"动态分配临时文件ID: {normalized_path} -> {file_id}")
         return file_id
     
     def _create_temp_file_id_unsafe(self, normalized_path: str) -> str:

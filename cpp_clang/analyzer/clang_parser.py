@@ -850,10 +850,21 @@ class ClangParser:
         return directory
 
     def _fix_include_args(self, args: List[str], working_directory: str) -> List[str]:
-        """修复 -include 参数：信任原始的绝对路径转换，只做基本验证"""
+        """修复 -include 参数：
+        A: 如果文件是普通C++文件，直接强制包含绝对路径
+        B: 如果文件内部全是相对路径引用，则解析内部引用并替换为绝对路径的直接包含
+        """
         fixed_args = []
         i = 0
         fixed_includes = []
+        
+        # 导入路径解析器
+        try:
+            from .path_resolver import PathResolver
+            path_resolver = PathResolver(working_directory, self.logger)
+        except ImportError:
+            self.logger.warning("无法导入路径解析器，使用基本路径处理")
+            path_resolver = None
         
         while i < len(args):
             arg = args[i]
@@ -861,45 +872,36 @@ class ClangParser:
             if arg == '-include' and i + 1 < len(args):
                 include_file = args[i + 1]
                 
-                # 检查文件是否存在
-                if os.path.exists(include_file):
-                    # 处理PCH文件 - 确保clang能正确加载PCH内容
-                    if 'PCH.' in os.path.basename(include_file):
-                        try:
-                            abs_pch_path = os.path.abspath(include_file)
-                            pch_dir = os.path.dirname(abs_pch_path)
+                # 获取文件的绝对路径
+                abs_include_path = self._get_absolute_path(include_file, working_directory)
+                
+                if abs_include_path and os.path.exists(abs_include_path):
+                    # 分析文件内容，判断是否需要特殊处理
+                    if self._file_contains_only_relative_includes(abs_include_path):
+                        # 情况B: 文件内部全是相对路径引用，解析内部引用
+                        internal_includes = self._extract_and_resolve_internal_includes(
+                            abs_include_path, working_directory, path_resolver
+                        )
+                        
+                        if internal_includes:
+                            # 添加解析后的内部包含文件
+                            for internal_file in internal_includes:
+                                fixed_args.extend(['-include', internal_file])
                             
-                            if os.path.isfile(abs_pch_path) and os.access(abs_pch_path, os.R_OK):
-                                # 使用绝对路径包含PCH文件
-                                fixed_args.extend(['-include', abs_pch_path])
-                                
-                                # 添加PCH特定的编译选项以确保正确加载
-                                pch_options = [
-                                    f'-I{pch_dir}',  # PCH文件所在目录
-                                    '-Wno-pragma-once-outside-header',  # 忽略PCH中的pragma once警告
-                                    '-fno-pch-timestamp',  # 禁用PCH时间戳检查
-                                ]
-                                
-                                for option in pch_options:
-                                    if option not in fixed_args:
-                                        fixed_args.append(option)
-                                
-                                fixed_includes.append(f"PCH文件已包含 (优化选项): {abs_pch_path}")
-                                self.logger.info(f"PCH文件处理完成: {abs_pch_path}")
-                                self.logger.debug(f"PCH目录: {pch_dir}")
-                            else:
-                                fixed_includes.append(f"PCH文件不可读，跳过: {include_file}")
-                                self.logger.warning(f"PCH文件不可读，跳过: {include_file}")
-                        except Exception as e:
-                            fixed_includes.append(f"PCH文件处理异常，跳过: {include_file}")
-                            self.logger.error(f"PCH文件处理异常: {e}, 跳过: {include_file}")
+                            fixed_includes.append(f"解析内部引用文件: {include_file} -> {len(internal_includes)} 个内部文件")
+                            self.logger.info(f"解析内部引用: {include_file} -> {internal_includes}")
+                        else:
+                            # 如果解析失败，还是包含原文件
+                            fixed_args.extend(['-include', abs_include_path])
+                            fixed_includes.append(f"内部引用解析失败，保留原文件: {abs_include_path}")
                     else:
-                        fixed_args.extend(['-include', include_file])
-                        fixed_includes.append(f"保留包含文件: {include_file}")
-                        self.logger.debug(f"保留强制包含文件: {include_file}")
+                        # 情况A: 普通C++文件，直接强制包含绝对路径
+                        fixed_args.extend(['-include', abs_include_path])
+                        fixed_includes.append(f"强制包含文件 (绝对路径): {abs_include_path}")
+                        self.logger.debug(f"处理强制包含文件: {include_file} -> {abs_include_path}")
                 else:
                     # 文件不存在，跳过
-                    fixed_includes.append(f"跳过不存在文件: {include_file}")
+                    fixed_includes.append(f"跳过不存在的文件: {include_file}")
                     self.logger.warning(f"跳过不存在的强制包含文件: {include_file}")
                 
                 i += 2  # 跳过 -include 和文件路径
@@ -924,6 +926,145 @@ class ClangParser:
             self.logger.info(f"处理了 {len(fixed_includes)} 个强制包含文件:")
             for fixed in fixed_includes:
                 self.logger.info(f"  - {fixed}")
+        
+        return fixed_args
+    
+    def _get_absolute_path(self, file_path: str, working_directory: str) -> Optional[str]:
+        """获取文件的绝对路径"""
+        if os.path.isabs(file_path):
+            return file_path if os.path.exists(file_path) else None
+        
+        # 尝试相对于工作目录解析
+        candidate_path = os.path.join(working_directory, file_path)
+        if os.path.exists(candidate_path):
+            return os.path.abspath(candidate_path)
+        
+        return None
+    
+    def _file_contains_only_relative_includes(self, file_path: str) -> bool:
+        """检查文件是否主要包含相对路径的include语句"""
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            import re
+            # 查找所有 #include 语句
+            include_statements = re.findall(r'#include\s+[<"]([^>"]+)[>"]', content)
+            
+            if not include_statements:
+                return False  # 没有include语句，视为普通文件
+            
+            # 检查是否大部分都是相对路径
+            relative_count = 0
+            for include in include_statements:
+                if '../' in include or not os.path.isabs(include):
+                    relative_count += 1
+            
+            # 如果80%以上都是相对路径，则认为是需要特殊处理的文件
+            return (relative_count / len(include_statements)) >= 0.8
+            
+        except Exception as e:
+            self.logger.debug(f"分析文件内容失败: {file_path}, 错误: {e}")
+            return False  # 分析失败时视为普通文件
+    
+    def _extract_and_resolve_internal_includes(self, file_path: str, working_directory: str, path_resolver) -> List[str]:
+        """提取并解析文件内部的包含文件"""
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            import re
+            # 查找所有 #include 语句
+            include_statements = re.findall(r'#include\s+[<"]([^>"]+)[>"]', content)
+            
+            resolved_files = []
+            file_dir = os.path.dirname(file_path)
+            
+            for include in include_statements:
+                # 跳过系统头文件
+                if include.startswith('<') or not ('../' in include or include.endswith('.h')):
+                    continue
+                
+                # 解析相对路径
+                resolved_path = None
+                
+                if path_resolver:
+                    # 使用路径解析器
+                    resolved_path = path_resolver._resolve_single_path(include, file_dir)
+                else:
+                    # 基本路径解析
+                    if '../' in include:
+                        # 处理相对路径
+                        base_dir = file_dir
+                        parts = include.split('/')
+                        for part in parts:
+                            if part == '..':
+                                base_dir = os.path.dirname(base_dir)
+                            elif part and part != '.':
+                                base_dir = os.path.join(base_dir, part)
+                        
+                        if os.path.exists(base_dir):
+                            resolved_path = os.path.abspath(base_dir)
+                    else:
+                        # 相对于当前文件目录
+                        candidate = os.path.join(file_dir, include)
+                        if os.path.exists(candidate):
+                            resolved_path = os.path.abspath(candidate)
+                
+                if resolved_path and os.path.exists(resolved_path):
+                    resolved_files.append(resolved_path)
+                    self.logger.debug(f"解析内部包含: {include} -> {resolved_path}")
+            
+            return resolved_files
+            
+        except Exception as e:
+            self.logger.error(f"提取内部包含文件失败: {file_path}, 错误: {e}")
+            return []
+    
+    def _fix_xclang_args(self, args: List[str]) -> List[str]:
+        """修复 -Xclang 参数格式问题，特别是 -Xclang -x -Xclang "c++" 的错误格式"""
+        fixed_args = []
+        i = 0
+        fixed_count = 0
+        
+        while i < len(args):
+            arg = args[i]
+            
+            # 检查是否是有问题的 -Xclang -x -Xclang "c++" 序列
+            if (arg == '-Xclang' and 
+                i + 3 < len(args) and 
+                args[i + 1] == '-x' and 
+                args[i + 2] == '-Xclang' and 
+                args[i + 3] in ['"c++"', "'c++'"]):
+                
+                # 修复格式：替换为正确的参数
+                fixed_args.extend(['-x', 'c++'])
+                self.logger.info(f"修复了有问题的 -Xclang 序列: {args[i:i+4]} -> ['-x', 'c++']")
+                fixed_count += 1
+                i += 4  # 跳过整个序列
+                continue
+            
+            # 检查其他可能的 -Xclang 问题
+            elif arg == '-Xclang' and i + 1 < len(args):
+                next_arg = args[i + 1]
+                
+                # 如果下一个参数被引号包围，去掉引号
+                if ((next_arg.startswith('"') and next_arg.endswith('"')) or 
+                    (next_arg.startswith("'") and next_arg.endswith("'"))):
+                    
+                    fixed_next_arg = next_arg[1:-1]
+                    fixed_args.extend(['-Xclang', fixed_next_arg])
+                    self.logger.info(f"修复了引号问题: -Xclang {next_arg} -> -Xclang {fixed_next_arg}")
+                    fixed_count += 1
+                    i += 2
+                    continue
+            
+            # 保留原始参数
+            fixed_args.append(arg)
+            i += 1
+        
+        if fixed_count > 0:
+            self.logger.info(f"成功修复了 {fixed_count} 个 -Xclang 参数问题")
         
         return fixed_args
     
@@ -1107,6 +1248,10 @@ class ClangParser:
                 if len(fixed_args) != len(args):
                     self.logger.info(f"预处理修复了编译参数: {len(args)} -> {len(fixed_args)}")
                 
+                # 修复 -Xclang 参数格式问题
+                fixed_args = self._fix_xclang_args(fixed_args)
+                self.logger.debug(f"Xclang参数修复完成，参数数量: {len(fixed_args)}")
+                
             logger.checkpoint("编译参数修复完成", fixed_args_count=len(fixed_args))
             
             # 增强版头文件路径验证
@@ -1148,7 +1293,7 @@ class ClangParser:
                         options=parse_options
                     )
                 except clang.TranslationUnitLoadError as e:
-                    self.logger.error(f"libclang解析失败，异常详情: {e}")
+                    self.logger.error(f"libclang标准解析失败，异常详情: {e}")
                     self.logger.error(f"失败时的工作目录: {os.getcwd()}")
                     self.logger.error(f"失败时的参数: {fixed_args}")
                     raise
