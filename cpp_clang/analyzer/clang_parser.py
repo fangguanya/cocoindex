@@ -10,6 +10,7 @@ import platform
 import shlex
 import traceback
 import threading
+import tempfile
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set
 from concurrent.futures import ThreadPoolExecutor
@@ -543,6 +544,12 @@ class ClangParser:
                 skip_next = True
                 continue
             
+            # 跳过依赖文件生成参数
+            if arg in ['-MD', '-MMD', '-MF', '/Fd'] or arg.startswith('/clang:-M'):
+                if arg in ['-MF'] and i + 1 < len(args):
+                    skip_next = True  # -MF需要跳过下一个参数（依赖文件路径）
+                continue
+            
             # 跳过PCH相关参数
             if arg.startswith(('/Yc', '/Yu', '/Fp')):
                 if '=' not in arg and i + 1 < len(args):
@@ -717,44 +724,125 @@ class ClangParser:
         """规范化路径"""
         return str(Path(path).resolve()).replace('\\', '/')
     
-    def _validate_include_paths(self, file_path: str, working_directory: str):
-        """验证关键的include文件是否能够找到"""
+    def _validate_include_paths(self, file_path: str, working_directory: str, compile_args: List[str] = None):
+        """增强版验证关键的include文件是否能够找到"""
+        if compile_args is None:
+            compile_args = []
+            
+        # 提取所有-I参数作为搜索路径
+        include_search_paths = [working_directory]
+        i = 0
+        while i < len(compile_args):
+            arg = compile_args[i]
+            if arg.startswith('-I'):
+                if len(arg) > 2:
+                    include_search_paths.append(arg[2:].strip('"\''))
+                elif i + 1 < len(compile_args):
+                    include_search_paths.append(compile_args[i + 1].strip('"\''))
+                    i += 1
+            i += 1
+        
         try:
-            # 读取文件内容，检查前几个include语句
-            with open(file_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()[:10]  # 只检查前10行
+            # 读取文件内容，检查更多include语句
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                lines = f.readlines()[:50]  # 检查前50行以获得更全面的验证
+            
+            include_stats = {
+                'found': 0,
+                'missing': 0,
+                'total': 0,
+                'missing_files': []
+            }
             
             for i, line in enumerate(lines, 1):
                 line = line.strip()
-                if line.startswith('#include "'):
-                    # 提取include路径
-                    start_quote = line.find('"') + 1
-                    end_quote = line.rfind('"')
-                    if start_quote > 0 and end_quote > start_quote:
-                        include_path = line[start_quote:end_quote]
-                        
-                        # 检查相对路径文件是否存在
-                        if not os.path.isabs(include_path):
-                            full_include_path = os.path.join(working_directory, include_path)
-                            if os.path.exists(full_include_path):
+                if line.startswith('#include'):
+                    include_stats['total'] += 1
+                    
+                    # 处理 #include "..." 格式
+                    if '"' in line:
+                        start_quote = line.find('"') + 1
+                        end_quote = line.rfind('"')
+                        if start_quote > 0 and end_quote > start_quote:
+                            include_path = line[start_quote:end_quote]
+                            if self._find_include_file(include_path, include_search_paths):
+                                include_stats['found'] += 1
                                 self.logger.debug(f"✓ Include文件存在: {include_path}")
                             else:
-                                self.logger.warning(f"✗ Include文件不存在: {include_path} (完整路径: {full_include_path})")
+                                include_stats['missing'] += 1
+                                include_stats['missing_files'].append(include_path)
+                                self.logger.warning(f"✗ Include文件不存在: {include_path}")
                                 # 尝试查找文件是否在其他位置
-                                self._suggest_include_path(include_path, working_directory)
+                                self._suggest_include_path(include_path, working_directory, include_search_paths)
+                    
+                    # 处理 #include <...> 格式 (系统头文件，通常不需要验证)
+                    elif '<' in line and '>' in line:
+                        start_bracket = line.find('<') + 1
+                        end_bracket = line.rfind('>')
+                        if start_bracket > 0 and end_bracket > start_bracket:
+                            include_path = line[start_bracket:end_bracket]
+                            self.logger.debug(f"系统头文件 (跳过验证): {include_path}")
+            
+            # 输出验证统计信息
+            if include_stats['total'] > 0:
+                success_rate = (include_stats['found'] / include_stats['total']) * 100
+                self.logger.info(f"Include路径验证结果: {include_stats['found']}/{include_stats['total']} 找到 ({success_rate:.1f}%)")
+                
+                if include_stats['missing'] > 0:
+                    self.logger.warning(f"缺失的头文件: {include_stats['missing_files']}")
+                    return False
+            
+            return True
+            
         except Exception as e:
             self.logger.debug(f"验证include路径时出错: {e}")
+            return False
     
-    def _suggest_include_path(self, include_path: str, working_directory: str):
+    def _find_include_file(self, include_path: str, search_paths: List[str]) -> bool:
+        """在搜索路径中查找include文件"""
+        for search_path in search_paths:
+            if not search_path:
+                continue
+            full_path = os.path.join(search_path, include_path)
+            if os.path.exists(full_path):
+                return True
+        return False
+    
+    def _suggest_include_path(self, include_path: str, working_directory: str, search_paths: List[str] = None):
         """建议可能的include路径"""
         filename = os.path.basename(include_path)
-        # 在工作目录及其子目录中搜索文件
-        for root, dirs, files in os.walk(working_directory):
-            if filename in files:
-                found_path = os.path.join(root, filename)
-                rel_path = os.path.relpath(found_path, working_directory)
-                self.logger.info(f"  建议路径: {rel_path}")
-                break
+        
+        # 在所有搜索路径中查找文件
+        search_dirs = search_paths if search_paths else [working_directory]
+        
+        found_suggestions = []
+        for search_dir in search_dirs:
+            if not search_dir or not os.path.exists(search_dir):
+                continue
+                
+            try:
+                for root, dirs, files in os.walk(search_dir):
+                    if filename in files:
+                        found_path = os.path.join(root, filename)
+                        rel_path = os.path.relpath(found_path, search_dir)
+                        found_suggestions.append((search_dir, rel_path, found_path))
+                        
+                        # 限制搜索结果数量
+                        if len(found_suggestions) >= 3:
+                            break
+            except Exception as e:
+                self.logger.debug(f"搜索目录 {search_dir} 时出错: {e}")
+        
+        if found_suggestions:
+            self.logger.info(f"  可能的位置:")
+            for search_dir, rel_path, full_path in found_suggestions:
+                self.logger.info(f"    在 {search_dir}: {rel_path}")
+        else:
+            self.logger.info(f"  未找到文件 {filename}")
+            
+        return found_suggestions
+    
+
     
     def _get_optimal_working_directory(self, directory: str, file_path: str) -> str:
         """获取最优的工作目录"""
@@ -762,9 +850,10 @@ class ClangParser:
         return directory
 
     def _fix_include_args(self, args: List[str], working_directory: str) -> List[str]:
-        """修复有问题的 -include 参数"""
+        """修复 -include 参数：信任原始的绝对路径转换，只做基本验证"""
         fixed_args = []
         i = 0
+        fixed_includes = []
         
         while i < len(args):
             arg = args[i]
@@ -772,25 +861,69 @@ class ClangParser:
             if arg == '-include' and i + 1 < len(args):
                 include_file = args[i + 1]
                 
-                # 检查强制包含文件是否存在
-                if not os.path.isabs(include_file) and working_directory:
-                    full_include_path = os.path.join(working_directory, include_file)
+                # 检查文件是否存在
+                if os.path.exists(include_file):
+                    # 处理PCH文件 - 确保clang能正确加载PCH内容
+                    if 'PCH.' in os.path.basename(include_file):
+                        try:
+                            abs_pch_path = os.path.abspath(include_file)
+                            pch_dir = os.path.dirname(abs_pch_path)
+                            
+                            if os.path.isfile(abs_pch_path) and os.access(abs_pch_path, os.R_OK):
+                                # 使用绝对路径包含PCH文件
+                                fixed_args.extend(['-include', abs_pch_path])
+                                
+                                # 添加PCH特定的编译选项以确保正确加载
+                                pch_options = [
+                                    f'-I{pch_dir}',  # PCH文件所在目录
+                                    '-Wno-pragma-once-outside-header',  # 忽略PCH中的pragma once警告
+                                    '-fno-pch-timestamp',  # 禁用PCH时间戳检查
+                                ]
+                                
+                                for option in pch_options:
+                                    if option not in fixed_args:
+                                        fixed_args.append(option)
+                                
+                                fixed_includes.append(f"PCH文件已包含 (优化选项): {abs_pch_path}")
+                                self.logger.info(f"PCH文件处理完成: {abs_pch_path}")
+                                self.logger.debug(f"PCH目录: {pch_dir}")
+                            else:
+                                fixed_includes.append(f"PCH文件不可读，跳过: {include_file}")
+                                self.logger.warning(f"PCH文件不可读，跳过: {include_file}")
+                        except Exception as e:
+                            fixed_includes.append(f"PCH文件处理异常，跳过: {include_file}")
+                            self.logger.error(f"PCH文件处理异常: {e}, 跳过: {include_file}")
+                    else:
+                        fixed_args.extend(['-include', include_file])
+                        fixed_includes.append(f"保留包含文件: {include_file}")
+                        self.logger.debug(f"保留强制包含文件: {include_file}")
                 else:
-                    full_include_path = include_file
-                
-                if os.path.exists(full_include_path):
-                    # 文件存在，使用绝对路径
-                    abs_include_path = os.path.abspath(full_include_path)
-                    fixed_args.extend(['-include', abs_include_path])
-                    self.logger.debug(f"修复强制包含文件路径: {include_file} -> {abs_include_path}")
-                else:
-                    # 文件不存在，跳过这个 -include 参数
-                    self.logger.warning(f"跳过不存在的强制包含文件: {include_file} (完整路径: {full_include_path})")
+                    # 文件不存在，跳过
+                    fixed_includes.append(f"跳过不存在文件: {include_file}")
+                    self.logger.warning(f"跳过不存在的强制包含文件: {include_file}")
                 
                 i += 2  # 跳过 -include 和文件路径
+            elif arg == '-include-pch' and i + 1 < len(args):
+                # -include-pch 参数，保持原样
+                include_file = args[i + 1]
+                
+                if os.path.exists(include_file):
+                    fixed_args.extend(['-include-pch', include_file])
+                    fixed_includes.append(f"保留PCH文件: {include_file}")
+                    self.logger.debug(f"保留PCH文件: {include_file}")
+                else:
+                    fixed_includes.append(f"跳过不存在PCH文件: {include_file}")
+                    self.logger.warning(f"跳过不存在的PCH文件: {include_file}")
+                
+                i += 2  # 跳过 -include-pch 和文件路径
             else:
                 fixed_args.append(arg)
                 i += 1
+        
+        if fixed_includes:
+            self.logger.info(f"处理了 {len(fixed_includes)} 个强制包含文件:")
+            for fixed in fixed_includes:
+                self.logger.info(f"  - {fixed}")
         
         return fixed_args
     
@@ -961,8 +1094,34 @@ class ClangParser:
             
             logger.checkpoint("环境设置完成", working_dir=working_directory)
             
+            # 预防性修复编译参数 - 在解析之前就修复include问题
+            with profiler.timer("fix_include_args", {'file': file_path}):
+                # 添加详细的工作目录日志
+                current_cwd = os.getcwd()
+                self.logger.info(f"=== 工作目录调试信息 ===")
+                self.logger.info(f"当前进程工作目录: {current_cwd}")
+                self.logger.info(f"编译命令指定目录: {working_directory}")
+                self.logger.info(f"目录是否存在: 当前={os.path.exists(current_cwd)}, 编译={os.path.exists(working_directory)}")
+                
+                fixed_args = self._fix_include_args(args, working_directory)
+                if len(fixed_args) != len(args):
+                    self.logger.info(f"预处理修复了编译参数: {len(args)} -> {len(fixed_args)}")
+                
+            logger.checkpoint("编译参数修复完成", fixed_args_count=len(fixed_args))
+            
+            # 增强版头文件路径验证
+            with profiler.timer("validate_include_paths", {'file': file_path}):
+                self.logger.info(f"=== 头文件路径验证 ===")
+                validation_result = self._validate_include_paths(file_path, working_directory, fixed_args)
+                if not validation_result:
+                    self.logger.warning(f"头文件路径验证发现缺失文件，但继续解析: {file_path}")
+                else:
+                    self.logger.info(f"头文件路径验证通过: {file_path}")
+                    
+            logger.checkpoint("头文件路径验证完成", validation_passed=validation_result)
+            
             # 优化clang解析选项 - 移除PARSE_SKIP_FUNCTION_BODIES以保持函数调用关系提取
-            with profiler.timer("clang_translation_unit_parse", {'file': file_path, 'args_count': len(args)}):
+            with profiler.timer("clang_translation_unit_parse", {'file': file_path, 'args_count': len(fixed_args)}):
                 # 平衡性能与功能完整性的解析选项
                 parse_options = (
                     clang.TranslationUnit.PARSE_INCOMPLETE |
@@ -970,13 +1129,28 @@ class ClangParser:
                     clang.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD
                 )
                 
+                # 调用libclang之前的最终调试信息
+                self.logger.info(f"=== libclang调用调试信息 ===")
+                self.logger.info(f"解析文件: {file_path}")
+                self.logger.info(f"当前工作目录: {os.getcwd()}")
+                self.logger.info(f"使用参数数量: {len(fixed_args)}")
+                self.logger.info(f"关键include参数:")
+                for i, arg in enumerate(fixed_args):
+                    if arg in ['-include', '-include-pch'] and i + 1 < len(fixed_args):
+                        include_file = fixed_args[i + 1]
+                        exists = os.path.exists(include_file)
+                        self.logger.info(f"  {arg} {include_file} (存在: {'✅' if exists else '❌'})")
+                
                 try:
                     tu = self.index.parse(
                         file_path, 
-                        args=args, 
+                        args=fixed_args,  # 使用修复后的参数
                         options=parse_options
                     )
                 except clang.TranslationUnitLoadError as e:
+                    self.logger.error(f"libclang解析失败，异常详情: {e}")
+                    self.logger.error(f"失败时的工作目录: {os.getcwd()}")
+                    self.logger.error(f"失败时的参数: {fixed_args}")
                     raise
             
             with profiler.timer("clang_parse_cleanup"):
@@ -1007,55 +1181,11 @@ class ClangParser:
 
             total_time = logger.finish("解析成功")
             
-            if total_time > 1.0:  # 如果单个文件解析超过1秒，记录警告
-                self.logger.warning(f"⚠️  文件 {Path(file_path).name} 解析耗时过长: {total_time:.2f}s")
+            #if total_time > 1.0:  # 如果单个文件解析超过1秒，记录警告
+            #    self.logger.warning(f"⚠️  文件 {Path(file_path).name} 解析耗时过长: {total_time:.2f}s")
 
             return ParsedFile(file_path=file_path, success=success, translation_unit=tu, diagnostics=[], parse_time=parse_time)
 
-        except clang.TranslationUnitLoadError as e:
-            # 专门处理TranslationUnitLoadError - 增强错误处理
-            error_msg = str(e)
-            self.logger.error(f"解析文件 '{file_path}' 时发生翻译单元加载错误: {error_msg}")
-            
-            # 检查是否是强制包含文件相关的错误
-            if "'-include' file not found" in error_msg or "Fatal: '-include' file not found" in error_msg:
-                self.logger.warning(f"检测到强制包含文件未找到错误，尝试修复编译参数...")
-                
-                # 尝试移除有问题的 -include 参数并重新解析
-                try:
-                    fixed_args = self._fix_include_args(args, working_directory)
-                    if fixed_args != args:
-                        self.logger.info(f"修复了编译参数，重新尝试解析文件: {file_path}")
-                        
-                        # 使用修复后的参数重新解析
-                        parse_options = (
-                            clang.TranslationUnit.PARSE_INCOMPLETE |
-                            clang.TranslationUnit.PARSE_PRECOMPILED_PREAMBLE |
-                            clang.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD
-                        )
-                        
-                        tu = self.index.parse(
-                            file_path, 
-                            args=fixed_args, 
-                            options=parse_options
-                        )
-                        
-                        if tu:
-                            parse_time = time.perf_counter() - start_time
-                            self.logger.info(f"使用修复后的参数成功解析文件: {file_path}")
-                            
-                            return ParsedFile(file_path=file_path, success=True, translation_unit=tu, diagnostics=[], parse_time=parse_time)
-                except Exception as retry_e:
-                    self.logger.warning(f"使用修复后的参数重新解析失败: {retry_e}")
-            
-            # 返回失败结果但不中断整个流程
-            return ParsedFile(
-                file_path=file_path,
-                translation_unit=None,
-                success=False,
-                diagnostics=[],
-                parse_time=0.0
-            )
         except Exception as e:
             self.logger.error(f"解析文件 '{file_path}' 时发生未知异常: {e}\n{traceback.format_exc()}")
             # 工作目录恢复逻辑已移除（不再需要切换工作目录）

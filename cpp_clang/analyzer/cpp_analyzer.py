@@ -140,7 +140,7 @@ def _init_worker(compile_commands: Dict[str, Any], project_root: str,
         g_file_manager = None
 
 def _parse_and_extract_worker(file_path: str) -> Optional[SerializableExtractedData]:
-    """并行解析和提取单个文件实体的工作函数 - 支持动态include和多进程安全"""
+    """并行解析和提取单个文件实体的工作函数 - 支持动态include和多进程安全 - 增强版"""
     global g_parser, g_extractor, g_compile_commands, g_include_parser
     global g_enable_dynamic_includes, g_enable_multiprocess_safety
     
@@ -154,6 +154,23 @@ def _parse_and_extract_worker(file_path: str) -> Optional[SerializableExtractedD
         if not g_parser or not g_extractor or not g_compile_commands:
             logger.error(f"Worker未正确初始化，文件: {file_path}")
             return SerializableExtractedData.empty_result(file_path, "Worker not initialized")
+        
+        # 应用分析问题修复（如果还未应用）
+        if not hasattr(g_extractor, '_fixes_applied'):
+            try:
+                import sys
+                from pathlib import Path
+                fix_module_path = str(Path(__file__).parent.parent)
+                if fix_module_path not in sys.path:
+                    sys.path.insert(0, fix_module_path)
+                from fix_analysis_issues import AnalysisIssueFixer
+                issue_fixer = AnalysisIssueFixer()
+                issue_fixer.apply_all_fixes(g_extractor)
+                g_extractor._fixes_applied = True
+                logger.debug("已应用分析问题修复")
+            except Exception as e:
+                logger.debug(f"应用分析修复时出错: {e}")
+                g_extractor._fixes_applied = False
 
         # 关键修复：在解析前切换到正确的工作目录
         import os

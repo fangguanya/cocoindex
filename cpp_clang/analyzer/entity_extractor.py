@@ -71,7 +71,7 @@ class EntityExtractor:
         self._cursor_cache: Dict[str, Any] = {}
         self._qualified_name_cache: Dict[str, str] = {}
         self._relevant_kinds = self._get_relevant_cursor_kinds()
-
+        
     def _get_relevant_cursor_kinds(self) -> Set[clang.CursorKind]:
         """动态构建相关的CursorKind集合，基于clang CursorKind系统性分析"""
         relevant_kinds = {
@@ -296,7 +296,8 @@ class EntityExtractor:
         file_path = cursor.location.file.name
         file_id = self.file_id_manager.get_file_id(file_path)
         if not file_id: 
-            return
+            self.logger.error(f"_process_class_cursor:无法获取文件ID for {file_path}")
+            return 
 
         with self._lock:
             if usr in self.classes:
@@ -321,6 +322,7 @@ class EntityExtractor:
             
         file_id = self.file_id_manager.get_file_id(cursor.location.file.name)
         if not file_id: 
+            self.logger.error(f"_process_namespace_cursor:无法获取文件ID for {cursor.location.file.name}")
             return
 
         with self._lock:
@@ -723,11 +725,25 @@ class EntityExtractor:
                     elif arg_kind == clang.TemplateArgumentKind.INTEGRAL:
                         args.append(str(type_or_cursor.get_template_argument_value(i)))
             elif isinstance(type_or_cursor, clang.Type):
-                num_args = type_or_cursor.get_num_template_arguments()
-                for i in range(num_args):
-                    arg = type_or_cursor.get_template_argument_as_type(i)
-                    if arg.spelling:
-                        args.append(arg.spelling)
+                # Type对象的模板参数提取需要特殊处理
+                try:
+                    num_args = type_or_cursor.get_num_template_arguments()
+                    for i in range(num_args):
+                        # Type对象使用get_template_argument_type方法
+                        arg_type = type_or_cursor.get_template_argument_type(i)
+                        if arg_type and arg_type.spelling:
+                            args.append(arg_type.spelling)
+                except AttributeError:
+                    # 如果Type对象不支持模板参数提取，尝试从spelling中解析
+                    type_spelling = type_or_cursor.spelling
+                    if '<' in type_spelling and '>' in type_spelling:
+                        # 简单的模板参数解析：提取<>内的内容
+                        start = type_spelling.find('<')
+                        end = type_spelling.rfind('>')
+                        if start != -1 and end != -1 and end > start:
+                            template_args = type_spelling[start+1:end]
+                            # 简单分割（不处理嵌套模板）
+                            args.extend([arg.strip() for arg in template_args.split(',') if arg.strip()])
         except Exception as e:
             self.logger.debug(f"提取模板实参时出错: {e}")
         return args

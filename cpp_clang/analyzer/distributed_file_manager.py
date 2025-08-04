@@ -7,6 +7,7 @@
 from pathlib import Path
 from typing import Dict, Optional, List
 import os
+import threading
 from dataclasses import dataclass
 
 from .logger import get_logger
@@ -33,6 +34,11 @@ class DistributedFileIdManager:
         self._path_to_id: Dict[str, str] = {}
         self._id_to_path: Dict[str, str] = {}
         
+        # 临时文件ID管理（用于动态发现的头文件）- 线程安全
+        self._temp_file_counter = 0
+        self._temp_file_lock = threading.Lock()
+        self._mapping_lock = threading.Lock()
+        
         self._initialize_mappings(all_files)
 
     def _initialize_mappings(self, all_files: List[str]):
@@ -49,15 +55,49 @@ class DistributedFileIdManager:
         self.logger.debug(f"确定性文件管理器初始化完成，共 {len(self._path_to_id)} 个文件。")
 
     def get_file_id(self, file_path: Optional[str]) -> Optional[str]:
-        """获取文件ID"""
+        """获取文件ID，如果不存在则动态分配临时ID（线程安全）"""
         if not file_path:
             return None
         
         normalized_path = self._normalize_path(file_path)
-        file_id = self._path_to_id.get(normalized_path)
-        # if not file_id:
-        #     self.logger.warning(f"未找到文件 '{normalized_path}' 的预分配ID。该文件可能未包含在初始文件列表中。")
+        
+        # 首先在不加锁的情况下检查
+        with self._mapping_lock:
+            file_id = self._path_to_id.get(normalized_path)
+        
+	        if not file_id:
+	            # 动态分配临时ID（双重检查锁定模式）
+	            with self._temp_file_lock:
+	                # 再次检查，防止并发分配
+	                file_id = self._path_to_id.get(normalized_path)
+                
+	                if not file_id:
+	                    file_id = self._create_temp_file_id_unsafe(normalized_path)
+	                    self.logger.debug(f"动态分配临时文件ID: {normalized_path} -> {file_id}")
+        
         return file_id
+    
+    def _create_temp_file_id_unsafe(self, normalized_path: str) -> str:
+        """为动态发现的文件创建临时ID（内部使用，假设已加锁）"""
+        self._temp_file_counter += 1
+        temp_id = f"t{self._temp_file_counter:04d}"  # t0001, t0002, ...
+        
+        # 添加到映射表
+        self._path_to_id[normalized_path] = temp_id
+        self._id_to_path[temp_id] = normalized_path
+        
+        return temp_id
+    
+    def _create_temp_file_id(self, normalized_path: str) -> str:
+        """为动态发现的文件创建临时ID（线程安全版本）"""
+        with self._temp_file_lock:
+            with self._mapping_lock:
+                # 再次检查是否已存在
+                existing_id = self._path_to_id.get(normalized_path)
+                if existing_id:
+                    return existing_id
+                
+                return self._create_temp_file_id_unsafe(normalized_path)
 
     def _normalize_path(self, file_path: str) -> str:
         """将路径标准化为相对于项目根目录的相对路径"""

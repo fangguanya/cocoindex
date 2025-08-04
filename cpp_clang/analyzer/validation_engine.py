@@ -381,6 +381,33 @@ class ValidationEngine:
         
         self.logger.info(f"验证完成: {total_entities} 个实体, {error_count} 个错误, {warning_count} 个警告")
         
+        # 详细输出错误和警告信息
+        if error_count > 0:
+            self.logger.error(f"发现 {error_count} 个错误:")
+            error_types = {}
+            for error in self.errors:
+                if error.severity == "error":
+                    error_type = error.error_type.value if hasattr(error.error_type, 'value') else str(error.error_type)
+                    error_types[error_type] = error_types.get(error_type, 0) + 1
+                    self.logger.error(f"  - {error_type}: {error.message} (实体: {error.entity_id})")
+            
+            self.logger.error("错误统计:")
+            for error_type, count in error_types.items():
+                self.logger.error(f"  - {error_type}: {count} 个")
+        
+        if warning_count > 0:
+            self.logger.warning(f"发现 {warning_count} 个警告:")
+            warning_types = {}
+            for error in self.errors:
+                if error.severity == "warning":
+                    error_type = error.error_type.value if hasattr(error.error_type, 'value') else str(error.error_type)
+                    warning_types[error_type] = warning_types.get(error_type, 0) + 1
+                    self.logger.warning(f"  - {error_type}: {error.message} (实体: {error.entity_id})")
+            
+            self.logger.warning("警告统计:")
+            for warning_type, count in warning_types.items():
+                self.logger.warning(f"  - {warning_type}: {count} 个")
+        
         return ValidationResult(
             validation_level=self.validation_level,
             total_entities=total_entities,
