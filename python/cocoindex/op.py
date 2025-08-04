@@ -6,11 +6,31 @@ import asyncio
 import dataclasses
 import inspect
 from enum import Enum
-from typing import Any, Awaitable, Callable, Protocol, dataclass_transform, Annotated
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Protocol,
+    dataclass_transform,
+    Annotated,
+    get_args,
+)
 
 from . import _engine  # type: ignore
-from .convert import encode_engine_value, make_engine_value_decoder
-from .typing import TypeAttr, encode_enriched_type, resolve_forward_ref
+from .convert import (
+    encode_engine_value,
+    make_engine_value_decoder,
+    make_engine_struct_decoder,
+)
+from .typing import (
+    TypeAttr,
+    encode_enriched_type,
+    resolve_forward_ref,
+    analyze_type_info,
+    AnalyzedAnyType,
+    AnalyzedBasicType,
+    AnalyzedDictType,
+)
 
 
 class OpCategory(Enum):
@@ -65,6 +85,22 @@ class Executor(Protocol):
     op_category: OpCategory
 
 
+def _load_spec_from_engine(spec_cls: type, spec: dict[str, Any]) -> Any:
+    """
+    Load a spec from the engine.
+    """
+    return spec_cls(**spec)
+
+
+def _get_required_method(cls: type, name: str) -> Callable[..., Any]:
+    method = getattr(cls, name, None)
+    if method is None:
+        raise ValueError(f"Method {name}() is required for {cls.__name__}")
+    if not inspect.isfunction(method):
+        raise ValueError(f"Method {cls.__name__}.{name}() is not a function")
+    return method
+
+
 class _FunctionExecutorFactory:
     _spec_cls: type
     _executor_cls: type
@@ -76,10 +112,10 @@ class _FunctionExecutorFactory:
     def __call__(
         self, spec: dict[str, Any], *args: Any, **kwargs: Any
     ) -> tuple[dict[str, Any], Executor]:
-        spec = self._spec_cls(**spec)
+        spec = _load_spec_from_engine(self._spec_cls, spec)
         executor = self._executor_cls(spec)
-        result_type = executor.analyze(*args, **kwargs)
-        return (encode_enriched_type(result_type), executor)
+        result_type = executor.analyze_schema(*args, **kwargs)
+        return (result_type, executor)
 
 
 _gpu_dispatch_lock = asyncio.Lock()
@@ -120,6 +156,12 @@ def _to_async_call(call: Callable[..., Any]) -> Callable[..., Awaitable[Any]]:
     return lambda *args, **kwargs: asyncio.to_thread(lambda: call(*args, **kwargs))
 
 
+@dataclasses.dataclass
+class _ArgInfo:
+    decoder: Callable[[Any], Any]
+    is_required: bool
+
+
 def _register_op_factory(
     category: OpCategory,
     expected_args: list[tuple[str, inspect.Parameter]],
@@ -140,8 +182,8 @@ def _register_op_factory(
             return op_args.behavior_version
 
     class _WrappedClass(executor_cls, _Fallback):  # type: ignore[misc]
-        _args_decoders: list[Callable[[Any], Any]]
-        _kwargs_decoders: dict[str, Callable[[Any], Any]]
+        _args_info: list[_ArgInfo]
+        _kwargs_info: dict[str, _ArgInfo]
         _acall: Callable[..., Awaitable[Any]]
 
         def __init__(self, spec: Any) -> None:
@@ -149,28 +191,45 @@ def _register_op_factory(
             self.spec = spec
             self._acall = _to_async_call(super().__call__)
 
-        def analyze(
+        def analyze_schema(
             self, *args: _engine.OpArgSchema, **kwargs: _engine.OpArgSchema
         ) -> Any:
             """
             Analyze the spec and arguments. In this phase, argument types should be validated.
             It should return the expected result type for the current op.
             """
-            self._args_decoders = []
-            self._kwargs_decoders = {}
+            self._args_info = []
+            self._kwargs_info = {}
             attributes = []
+            potentially_missing_required_arg = False
 
-            def process_attribute(arg_name: str, arg: _engine.OpArgSchema) -> None:
+            def process_arg(
+                arg_name: str,
+                arg_param: inspect.Parameter,
+                actual_arg: _engine.OpArgSchema,
+            ) -> _ArgInfo:
+                nonlocal potentially_missing_required_arg
                 if op_args.arg_relationship is not None:
                     related_attr, related_arg_name = op_args.arg_relationship
                     if related_arg_name == arg_name:
                         attributes.append(
-                            TypeAttr(related_attr.value, arg.analyzed_value)
+                            TypeAttr(related_attr.value, actual_arg.analyzed_value)
                         )
+                type_info = analyze_type_info(arg_param.annotation)
+                decoder = make_engine_value_decoder(
+                    [arg_name], actual_arg.value_type["type"], type_info
+                )
+                is_required = not type_info.nullable
+                if is_required and actual_arg.value_type.get("nullable", False):
+                    potentially_missing_required_arg = True
+                return _ArgInfo(
+                    decoder=decoder,
+                    is_required=is_required,
+                )
 
             # Match arguments with parameters.
             next_param_idx = 0
-            for arg in args:
+            for actual_arg in args:
                 if next_param_idx >= len(expected_args):
                     raise ValueError(
                         f"Too many arguments passed in: {len(args)} > {len(expected_args)}"
@@ -183,18 +242,13 @@ def _register_op_factory(
                     raise ValueError(
                         f"Too many positional arguments passed in: {len(args)} > {next_param_idx}"
                     )
-                self._args_decoders.append(
-                    make_engine_value_decoder(
-                        [arg_name], arg.value_type["type"], arg_param.annotation
-                    )
-                )
-                process_attribute(arg_name, arg)
+                self._args_info.append(process_arg(arg_name, arg_param, actual_arg))
                 if arg_param.kind != inspect.Parameter.VAR_POSITIONAL:
                     next_param_idx += 1
 
             expected_kwargs = expected_args[next_param_idx:]
 
-            for kwarg_name, kwarg in kwargs.items():
+            for kwarg_name, actual_arg in kwargs.items():
                 expected_arg = next(
                     (
                         arg
@@ -216,10 +270,9 @@ def _register_op_factory(
                         f"Unexpected keyword argument passed in: {kwarg_name}"
                     )
                 arg_param = expected_arg[1]
-                self._kwargs_decoders[kwarg_name] = make_engine_value_decoder(
-                    [kwarg_name], kwarg.value_type["type"], arg_param.annotation
+                self._kwargs_info[kwarg_name] = process_arg(
+                    kwarg_name, arg_param, actual_arg
                 )
-                process_attribute(kwarg_name, kwarg)
 
             missing_args = [
                 name
@@ -240,32 +293,45 @@ def _register_op_factory(
             if len(missing_args) > 0:
                 raise ValueError(f"Missing arguments: {', '.join(missing_args)}")
 
-            prepare_method = getattr(executor_cls, "analyze", None)
-            if prepare_method is not None:
-                result = prepare_method(self, *args, **kwargs)
+            base_analyze_method = getattr(self, "analyze", None)
+            if base_analyze_method is not None:
+                result = base_analyze_method(*args, **kwargs)
             else:
                 result = expected_return
             if len(attributes) > 0:
                 result = Annotated[result, *attributes]
-            return result
+
+            encoded_type = encode_enriched_type(result)
+            if potentially_missing_required_arg:
+                encoded_type["nullable"] = True
+            return encoded_type
 
         async def prepare(self) -> None:
             """
             Prepare for execution.
             It's executed after `analyze` and before any `__call__` execution.
             """
-            setup_method = getattr(super(), "prepare", None)
-            if setup_method is not None:
-                await _to_async_call(setup_method)()
+            prepare_method = getattr(super(), "prepare", None)
+            if prepare_method is not None:
+                await _to_async_call(prepare_method)()
 
         async def __call__(self, *args: Any, **kwargs: Any) -> Any:
-            decoded_args = (
-                decoder(arg) for decoder, arg in zip(self._args_decoders, args)
-            )
-            decoded_kwargs = {
-                arg_name: self._kwargs_decoders[arg_name](arg)
-                for arg_name, arg in kwargs.items()
-            }
+            decoded_args = []
+            for arg_info, arg in zip(self._args_info, args):
+                if arg_info.is_required and arg is None:
+                    return None
+                decoded_args.append(arg_info.decoder(arg))
+
+            decoded_kwargs = {}
+            for kwarg_name, arg in kwargs.items():
+                kwarg_info = self._kwargs_info.get(kwarg_name)
+                if kwarg_info is None:
+                    raise ValueError(
+                        f"Unexpected keyword argument passed in: {kwarg_name}"
+                    )
+                if kwarg_info.is_required and arg is None:
+                    return None
+                decoded_kwargs[kwarg_name] = kwarg_info.decoder(arg)
 
             if op_args.gpu:
                 # For GPU executions, data-level parallelism is applied, so we don't want to
@@ -357,5 +423,223 @@ def function(**args: Any) -> Callable[[Callable[..., Any]], FunctionSpec]:
         )
 
         return _Spec()
+
+    return _inner
+
+
+########################################################
+# Custom target connector
+########################################################
+
+
+@dataclasses.dataclass
+class _TargetConnectorContext:
+    target_name: str
+    spec: Any
+    prepared_spec: Any
+    key_decoder: Callable[[Any], Any]
+    value_decoder: Callable[[Any], Any]
+
+
+class _TargetConnector:
+    """
+    The connector class passed to the engine.
+    """
+
+    _spec_cls: type
+    _connector_cls: type
+
+    _get_persistent_key_fn: Callable[[_TargetConnectorContext, str], Any]
+    _apply_setup_change_async_fn: Callable[
+        [Any, dict[str, Any] | None, dict[str, Any] | None], Awaitable[None]
+    ]
+    _mutate_async_fn: Callable[..., Awaitable[None]]
+    _mutatation_type: AnalyzedDictType | None
+
+    def __init__(self, spec_cls: type, connector_cls: type):
+        self._spec_cls = spec_cls
+        self._connector_cls = connector_cls
+
+        self._get_persistent_key_fn = _get_required_method(
+            connector_cls, "get_persistent_key"
+        )
+        self._apply_setup_change_async_fn = _to_async_call(
+            _get_required_method(connector_cls, "apply_setup_change")
+        )
+
+        mutate_fn = _get_required_method(connector_cls, "mutate")
+        self._mutate_async_fn = _to_async_call(mutate_fn)
+
+        # Store the type annotation for later use
+        self._mutatation_type = self._analyze_mutate_mutation_type(
+            connector_cls, mutate_fn
+        )
+
+    @staticmethod
+    def _analyze_mutate_mutation_type(
+        connector_cls: type, mutate_fn: Callable[..., Any]
+    ) -> AnalyzedDictType | None:
+        # Validate mutate_fn signature and extract type annotation
+        mutate_sig = inspect.signature(mutate_fn)
+        params = list(mutate_sig.parameters.values())
+
+        if len(params) != 1:
+            raise ValueError(
+                f"Method {connector_cls.__name__}.mutate(*args) must have exactly one parameter, "
+                f"got {len(params)}"
+            )
+
+        param = params[0]
+        if param.kind != inspect.Parameter.VAR_POSITIONAL:
+            raise ValueError(
+                f"Method {connector_cls.__name__}.mutate(*args) parameter must be *args format, "
+                f"got {param.kind.name}"
+            )
+
+        # Extract type annotation
+        analyzed_args_type = analyze_type_info(param.annotation)
+        if isinstance(analyzed_args_type.variant, AnalyzedAnyType):
+            return None
+
+        if analyzed_args_type.base_type is tuple:
+            args = get_args(analyzed_args_type.core_type)
+            if not args:
+                return None
+            if len(args) == 2:
+                mutation_type = analyze_type_info(args[1])
+                if isinstance(mutation_type.variant, AnalyzedAnyType):
+                    return None
+                if isinstance(mutation_type.variant, AnalyzedDictType):
+                    return mutation_type.variant
+
+        raise ValueError(
+            f"Method {connector_cls.__name__}.mutate(*args) parameter must be a tuple with "
+            f"2 elements (tuple[SpecType, dict[str, ValueStruct]], spec and mutation in dict), "
+            "got {args_type}"
+        )
+
+    def create_export_context(
+        self,
+        name: str,
+        spec: dict[str, Any],
+        key_fields_schema: list[Any],
+        value_fields_schema: list[Any],
+    ) -> _TargetConnectorContext:
+        key_annotation, value_annotation = (
+            (
+                self._mutatation_type.key_type,
+                self._mutatation_type.value_type,
+            )
+            if self._mutatation_type is not None
+            else (Any, Any)
+        )
+
+        key_type_info = analyze_type_info(key_annotation)
+        if (
+            len(key_fields_schema) == 1
+            and key_fields_schema[0]["type"]["kind"] != "Struct"
+            and isinstance(key_type_info.variant, (AnalyzedAnyType, AnalyzedBasicType))
+        ):
+            # Special case for ease of use: single key column can be mapped to a basic type without the wrapper struct.
+            key_decoder = make_engine_value_decoder(
+                ["(key)"],
+                key_fields_schema[0]["type"],
+                key_type_info,
+                for_key=True,
+            )
+        else:
+            key_decoder = make_engine_struct_decoder(
+                ["(key)"], key_fields_schema, key_type_info, for_key=True
+            )
+
+        value_decoder = make_engine_struct_decoder(
+            ["(value)"], value_fields_schema, analyze_type_info(value_annotation)
+        )
+
+        loaded_spec = _load_spec_from_engine(self._spec_cls, spec)
+        prepare_method = getattr(self._connector_cls, "prepare", None)
+        if prepare_method is None:
+            prepared_spec = loaded_spec
+        else:
+            prepared_spec = prepare_method(loaded_spec)
+
+        return _TargetConnectorContext(
+            target_name=name,
+            spec=loaded_spec,
+            prepared_spec=prepared_spec,
+            key_decoder=key_decoder,
+            value_decoder=value_decoder,
+        )
+
+    def get_persistent_key(self, export_context: _TargetConnectorContext) -> Any:
+        return self._get_persistent_key_fn(
+            export_context.spec, export_context.target_name
+        )
+
+    def describe_resource(self, key: Any) -> str:
+        describe_fn = getattr(self._connector_cls, "describe", None)
+        if describe_fn is None:
+            return str(key)
+        return str(describe_fn(key))
+
+    async def apply_setup_changes_async(
+        self,
+        changes: list[tuple[Any, list[dict[str, Any] | None], dict[str, Any] | None]],
+    ) -> None:
+        for key, previous, current in changes:
+            prev_specs = [
+                _load_spec_from_engine(self._spec_cls, spec)
+                if spec is not None
+                else None
+                for spec in previous
+            ]
+            curr_spec = (
+                _load_spec_from_engine(self._spec_cls, current)
+                if current is not None
+                else None
+            )
+            for prev_spec in prev_specs:
+                await self._apply_setup_change_async_fn(key, prev_spec, curr_spec)
+
+    @staticmethod
+    def _decode_mutation(
+        context: _TargetConnectorContext, mutation: list[tuple[Any, Any | None]]
+    ) -> tuple[Any, dict[Any, Any | None]]:
+        return (
+            context.prepared_spec,
+            {
+                context.key_decoder(key): (
+                    context.value_decoder(value) if value is not None else None
+                )
+                for key, value in mutation
+            },
+        )
+
+    async def mutate_async(
+        self,
+        mutations: list[tuple[_TargetConnectorContext, list[tuple[Any, Any | None]]]],
+    ) -> None:
+        await self._mutate_async_fn(
+            *(
+                self._decode_mutation(context, mutation)
+                for context, mutation in mutations
+            )
+        )
+
+
+def target_connector(spec_cls: type) -> Callable[[type], type]:
+    """
+    Decorate a class to provide a target connector for an op.
+    """
+
+    # Validate the spec_cls is a TargetSpec.
+    if not issubclass(spec_cls, TargetSpec):
+        raise ValueError(f"Expect a TargetSpec, got {spec_cls}")
+
+    # Register the target connector.
+    def _inner(connector_cls: type) -> type:
+        connector = _TargetConnector(spec_cls, connector_cls)
+        _engine.register_target_connector(spec_cls.__name__, connector)
+        return connector_cls
 
     return _inner

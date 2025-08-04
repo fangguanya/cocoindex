@@ -9,12 +9,12 @@ description: CocoIndex Built-in Functions
 
 `ParseJson` parses a given text to JSON.
 
-The spec takes the following fields:
+Input data:
 
-*   `text` (`str`): The source text to parse.
-*   `language` (`str`, optional): The language of the source text.  Only `json` is supported now.  Default to `json`.
+*   `text` (*Str*): The source text to parse.
+*   `language` (*Str?*, default: `"json"`): The language of the source text.  Only `json` is supported now.
 
-Return: *Json*
+Return: *Json*, the parsed JSON object.
 
 ## SplitRecursively
 
@@ -37,7 +37,7 @@ Input data:
 
 *   `text` (*Str*): The text to split.
 *   `chunk_size` (*Int64*): The maximum size of each chunk, in bytes.
-*   `min_chunk_size` (*Int64*, optional): The minimum size of each chunk, in bytes. If not provided, default to `chunk_size / 2`.
+*   `min_chunk_size` (*Int64*, default: `chunk_size / 2`): The minimum size of each chunk, in bytes.
 
     :::note
 
@@ -48,8 +48,8 @@ Input data:
 
     :::
 
-*   `chunk_overlap` (*Int64*, optional): The maximum overlap size between adjacent chunks, in bytes.
-*   `language` (*Str*, optional): The language of the document.
+*   `chunk_overlap` (*Int64?*, default: *Null*): The maximum overlap size between adjacent chunks, in bytes.
+*   `language` (*Str*, default: `""`): The language of the document.
     Can be a language name (e.g. `Python`, `Javascript`, `Markdown`) or a file extension (e.g. `.py`, `.js`, `.md`).
 
 
@@ -61,7 +61,7 @@ Input data:
         *   `custom_languages` in the spec, against the `language_name` or `aliases` field of each entry.
         *   Builtin languages (see [Supported Languages](#supported-languages) section below), against the language, aliases or file extensions of each entry.
 
-        All matches are in a case-insensitive manner. If the value of `language` is null, it'll be treated as empty string.
+        All matches are in a case-insensitive manner.
 
     *   If no match is found, the input will be treated as plain text.
 
@@ -185,6 +185,56 @@ Not all LLM APIs support text embedding. See the [LLM API Types table](/docs/ai/
 
 Input data:
 
-*   `text` (*Str*, required): The text to embed.
+*   `text` (*Str*): The text to embed.
 
 Return: *Vector[Float32, N]*, where *N* is the dimension of the embedding vector determined by the model.
+
+## ColPaliEmbedImage
+
+`ColPaliEmbedImage` embeds images using the ColPali multimodal model.
+
+ColPali (Contextual Late-interaction over Patches) uses late interaction between image patch embeddings and text token embeddings for retrieval.
+
+:::note Optional Dependency Required
+
+This function requires the `colpali-engine` library, which is an optional dependency. Install CocoIndex with:
+
+```bash
+pip install 'cocoindex[colpali]'
+```
+:::
+
+The spec takes the following fields:
+
+*   `model` (`str`): The ColPali model name to use (e.g., "vidore/colpali-v1.2")
+
+Input data:
+
+*   `img_bytes` (*Bytes*): The image data in bytes format.
+
+Return: *Vector[Vector[Float32, N]]*, where *N* is the hidden dimension determined by the model. This returns a multi-vector format with variable patches and fixed hidden dimension.
+
+## ColPaliEmbedQuery
+
+`ColPaliEmbedQuery` embeds text queries using the ColPali multimodal model.
+
+This produces query embeddings compatible with ColPali image embeddings for late interaction scoring (MaxSim).
+
+:::note Optional Dependency Required
+
+This function requires the `colpali-engine` library, which is an optional dependency. Install CocoIndex with:
+
+```bash
+pip install 'cocoindex[colpali]'
+```
+:::
+
+The spec takes the following fields:
+
+*   `model` (`str`): The ColPali model name to use (e.g., "vidore/colpali-v1.2")
+
+Input data:
+
+*   `query` (*Str*): The text query to embed.
+
+Return: *Vector[Vector[Float32, N]]*, where *N* is the hidden dimension determined by the model. This returns a multi-vector format with variable tokens and fixed hidden dimension.

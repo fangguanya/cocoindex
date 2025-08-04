@@ -19,7 +19,7 @@ You don't need to spell out any data type explicitly when you define the flow.
 All you need to do is to make sure the data passed to functions and targets are compatible with them.
 
 Each type in CocoIndex type system is mapped to one or multiple types in Python.
-When you define a [custom function](/docs/core/custom_function), you need to annotate the data types of arguments and return values.
+When you define a [custom function](/docs/custom_ops/custom_functions), you need to annotate the data types of arguments and return values.
 
 *   When you pass a Python value to the engine (e.g. return values of a custom function), a specific type annotation is required.
     The type annotation needs to be specific in describing the target data type, as it provides the ground truth of the data type in the flow.
@@ -199,3 +199,23 @@ Currently, the following types are key types
 - *Uuid*
 - *Date*
 - *Struct* with all fields being key types (using `@dataclass(frozen=True)` or `NamedTuple`)
+
+## *Null* Values
+
+CocoIndex supports *Null* values. A *Null* value represents the absence of data or an unknown value, distinct from empty strings, zero numbers, or false boolean values.
+
+### Nullable Type
+
+For any data (e.g. a field of a *Struct*, an argument or return value of a CocoIndex function), if it is nullable, it means its value can be *Null*.
+We use a `?` suffix to indicate a nullable type, e.g. *Str?*, *Person?*.
+
+In Python, *Null* is represented as `None`, so a nullable type can be represented by `T | None` or `typing.Optional[T]`.
+
+### *Null* propagating on CocoIndex functions
+
+A function may specify whether each input argument is nullable or not.
+Non-nullable argument means the function needs a known value for the argument to work.
+However, it doesn't forbid the argument to be *Null* at runtime.
+When a non-nullable argument receives a *Null* value, the function execution is skipped and the result is *Null*.
+
+For example, for [`SplitRecursively` function](/docs/ops/functions#splitrecursively), the `text` and `chunk_size` arguments are not nullable. If the input value of either of them is *Null*, the function will return *Null*.
