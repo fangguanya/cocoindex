@@ -724,67 +724,244 @@ class EntityExtractor:
         self.logger.info(f"函数关联完成: 命名空间函数={namespace_function_count}, 类方法={class_method_count}, 全局函数={global_function_count}")
     
     def _build_class_method_relationships(self):
-        """建立类与方法的关联关系 - 修复孤儿函数问题"""
+        """建立类与方法的关联关系 - 修复孤儿函数问题（支持模板特化智能匹配）"""
         self.logger.info("开始建立类与方法的关联关系（后处理阶段）...")
         
         fixed_classes = set()
         total_methods_added = 0
+        created_specializations = 0
         
         # 遍历所有函数，找出类方法
         for func_usr, func in self.functions.items():
             # 检查是否为类方法（基于USR结构）
-            class_usr = self._extract_class_usr_from_function_usr(func_usr)
-            if class_usr and class_usr in self.classes:
-                cls = self.classes[class_usr]
-                
-                # 确保该方法在类的methods列表中
-                if func_usr not in cls.methods:
-                    cls.methods.append(func_usr)
-                    total_methods_added += 1
-                    fixed_classes.add(class_usr)
+            expected_class_usr = self._extract_class_usr_from_function_usr(func_usr)
+            
+            if expected_class_usr:
+                # 首先尝试直接匹配
+                if expected_class_usr in self.classes:
+                    # 直接匹配成功
+                    cls = self.classes[expected_class_usr]
+                    if func_usr not in cls.methods:
+                        cls.methods.append(func_usr)
+                        total_methods_added += 1
+                        fixed_classes.add(expected_class_usr)
+                else:
+                    # 直接匹配失败，尝试模板特化智能匹配
+                    matched_class_usr = self._find_template_base_class(expected_class_usr)
+                    
+                    if matched_class_usr:
+                        # 找到基础模板类，为特化版本创建类
+                        specialized_class = self._create_specialized_class(expected_class_usr, matched_class_usr)
+                        if specialized_class:
+                            self.classes[expected_class_usr] = specialized_class
+                            specialized_class.methods.append(func_usr)
+                            total_methods_added += 1
+                            created_specializations += 1
+                            fixed_classes.add(expected_class_usr)
+                            
+                            self.logger.debug(f"为特化类创建了新的类定义: {expected_class_usr}")
+                    else:
+                        self.logger.debug(f"无法找到匹配的类或基础模板: {expected_class_usr} (函数: {getattr(func, 'qualified_name', 'unknown')})")
         
-        self.logger.info(f"类方法关联修复完成: 修复了 {len(fixed_classes)} 个类，添加了 {total_methods_added} 个方法关联")
+        self.logger.info(f"类方法关联修复完成: 修复了 {len(fixed_classes)} 个类，添加了 {total_methods_added} 个方法关联，创建了 {created_specializations} 个模板特化类")
+    
+    def _find_template_base_class(self, specialized_usr: str) -> str:
+        """查找模板特化类的基础模板类"""
+        # 移除特化参数，尝试找到基础模板类
+        # 例如：c:@N@UE@N@Math@S@TIntVector3>#i -> c:@N@UE@N@Math@S@TIntVector3
+        
+        if '>#' in specialized_usr:
+            base_usr = specialized_usr[:specialized_usr.find('>#')]
+            if base_usr in self.classes:
+                return base_usr
+        
+        # 尝试查找相似的类USR
+        for existing_class_usr in self.classes.keys():
+            if self._is_template_specialization_of(specialized_usr, existing_class_usr):
+                return existing_class_usr
+        
+        return ""
+    
+    def _is_template_specialization_of(self, specialized_usr: str, base_usr: str) -> bool:
+        """检查specialized_usr是否是base_usr的模板特化"""
+        # 移除特化参数部分进行比较
+        if '>#' in specialized_usr:
+            specialized_base = specialized_usr[:specialized_usr.find('>#')]
+            return specialized_base == base_usr
+        return False
+    
+    def _create_specialized_class(self, specialized_usr: str, base_class_usr: str) -> 'Class':
+        """基于基础模板类创建特化类"""
+        try:
+            from .data_structures import Class
+            
+            base_class = self.classes[base_class_usr]
+            
+            # 从特化USR中提取特化信息
+            specialization_part = ""
+            if '>#' in specialized_usr:
+                specialization_part = specialized_usr[specialized_usr.find('>#'):]
+            
+            # 创建特化类
+            specialized_class = Class(
+                name=base_class.name + specialization_part,  # 添加特化后缀
+                qualified_name=base_class.qualified_name,
+                usr_id=specialized_usr,
+                definition_file_id=base_class.definition_file_id,
+                declaration_file_id=base_class.declaration_file_id,
+                line=base_class.line,
+                declaration_locations=base_class.declaration_locations.copy(),
+                definition_location=base_class.definition_location,
+                is_declaration=base_class.is_declaration,
+                is_definition=base_class.is_definition,
+                methods=[],  # 开始时为空，稍后会添加
+                is_abstract=base_class.is_abstract,
+                cpp_oop_extensions=base_class.cpp_oop_extensions,
+                parent_classes=base_class.parent_classes.copy()
+            )
+            
+            # 复制成员变量
+            if hasattr(base_class, 'member_variables'):
+                specialized_class.member_variables = base_class.member_variables.copy()
+            
+            return specialized_class
+            
+        except Exception as e:
+            self.logger.error(f"创建特化类时出错: {e}")
+            return None
     
     def _extract_class_usr_from_function_usr(self, func_usr: str) -> str:
-        """从函数USR中提取类USR - 增强版，支持复杂嵌套结构"""
+        """从函数USR中提取类USR - 超级增强版，支持复杂模板特化"""
         if not func_usr.startswith('c:@'):
             return ""
         
-        # 查找最后一个类/结构体/联合体标记和函数标记
-        # 支持的标记：@S@ (struct/class), @ST (template struct/class), @U@ (union)
-        class_markers = ['@S@', '@ST>', '@ST@', '@U@']
-        function_marker = '@F@'
-        
         # 找到最后一个函数标记
-        f_pos = func_usr.rfind(function_marker)
+        f_pos = func_usr.rfind('@F@')
         if f_pos == -1:
             return ""
         
-        # 在函数标记之前查找最后一个类标记
-        last_class_pos = -1
+        # 使用更智能的方法来查找类边界
+        return self._find_class_boundary_in_usr(func_usr, f_pos)
+    
+    def _find_class_boundary_in_usr(self, usr: str, function_pos: int) -> str:
+        """在USR中智能查找类边界，支持复杂模板特化"""
+        # 支持的类/结构体标记：@S@, @ST@, @ST>, @SP>, @U@
+        class_markers = ['@S@', '@ST@', '@ST>', '@SP>', '@U@']
+        
+        # 从右到左查找最后一个类标记
+        last_class_start = -1
         last_marker = None
         
         for marker in class_markers:
-            pos = func_usr.rfind(marker, 0, f_pos)
-            if pos > last_class_pos:
-                last_class_pos = pos
+            pos = usr.rfind(marker, 0, function_pos)
+            if pos > last_class_start:
+                last_class_start = pos
                 last_marker = marker
         
-        if last_class_pos == -1:
+        if last_class_start == -1:
             return ""
         
-        # 根据不同的标记类型处理
-        if last_marker == '@S@' or last_marker == '@U@':
-            # 普通类/结构体/联合体: c:@...@S@ClassName@F@methodName
-            class_part = func_usr[:f_pos]
-            return class_part
+        # 找到类标记后，需要智能地确定类USR的结束位置
+        # 这需要处理模板参数、特化参数等复杂情况
+        class_end = self._find_class_usr_end(usr, last_class_start, last_marker, function_pos)
         
-        elif last_marker.startswith('@ST'):
-            # 模板类: c:@...@ST>...@ClassName@F@methodName 或 c:@...@ST@ClassName@F@methodName
-            class_part = func_usr[:f_pos]
-            return class_part
+        if class_end > last_class_start:
+            return usr[:class_end]
         
-        return ""
+        # 简单回退：直接取到函数标记前
+        return usr[:function_pos]
+    
+    def _find_class_usr_end(self, usr: str, class_start: int, marker: str, function_pos: int) -> int:
+        """找到类USR的准确结束位置，处理模板特化"""
+        
+        # 对于普通类/结构体/联合体
+        if marker in ['@S@', '@U@']:
+            # 简单情况：直接到下一个@标记或函数标记
+            return function_pos
+        
+        # 对于模板类 (@ST@, @ST>, @SP>)
+        if marker.startswith('@ST') or marker.startswith('@SP'):
+            return self._find_template_class_end(usr, class_start, marker, function_pos)
+        
+        return function_pos
+    
+    def _find_template_class_end(self, usr: str, class_start: int, marker: str, function_pos: int) -> int:
+        """查找模板类USR的结束位置"""
+        
+        # 从类标记开始向前查找
+        pos = class_start + len(marker)
+        
+        # 如果是 @ST> 或 @SP>，需要处理模板参数
+        if marker.endswith('>'):
+            # 查找模板参数的结束
+            template_end = self._find_template_args_end(usr, pos)
+            if template_end > pos:
+                pos = template_end
+        
+        # 查找类名结束位置
+        # 可能遇到的结束标记：@F@（函数）、@（下一个标记）、>#（模板特化参数）
+        while pos < function_pos:
+            if usr[pos:pos+2] == '@F':
+                # 到达函数标记
+                break
+            elif usr[pos:pos+2] == '>#':
+                # 遇到模板特化参数，需要包含它们
+                specialization_end = self._find_specialization_end(usr, pos)
+                if specialization_end > pos:
+                    pos = specialization_end
+                    continue
+            elif usr[pos] == '@' and pos + 1 < len(usr) and usr[pos+1] not in ['F']:
+                # 遇到其他标记（但不是@F@），可能是类名结束
+                # 但要小心不要截断重要的模板信息
+                if not self._is_template_continuation(usr, pos):
+                    break
+            pos += 1
+        
+        return pos
+    
+    def _find_template_args_end(self, usr: str, start_pos: int) -> int:
+        """查找模板参数列表的结束位置"""
+        pos = start_pos
+        depth = 0
+        
+        while pos < len(usr):
+            char = usr[pos]
+            if char == '<':
+                depth += 1
+            elif char == '>':
+                depth -= 1
+                if depth == 0:
+                    return pos + 1
+            elif char == '@' and depth == 0:
+                # 在顶层遇到@标记，可能是参数结束
+                return pos
+            pos += 1
+        
+        return start_pos
+    
+    def _find_specialization_end(self, usr: str, start_pos: int) -> int:
+        """查找模板特化参数的结束位置"""
+        # ># 开始的特化参数，查找到下一个@标记
+        pos = start_pos + 2  # 跳过 >#
+        
+        while pos < len(usr):
+            if usr[pos] == '@':
+                # 检查是否是 @F@（函数标记）
+                if pos + 1 < len(usr) and usr[pos+1] == 'F':
+                    return pos  # 特化参数在函数前结束
+                # 其他@标记可能是特化参数的一部分，继续查找
+            pos += 1
+        
+        return pos
+    
+    def _is_template_continuation(self, usr: str, pos: int) -> bool:
+        """检查@标记是否是模板的延续部分"""
+        # 检查是否是已知的模板相关标记
+        if pos + 2 < len(usr):
+            next_marker = usr[pos:pos+3]
+            if next_marker in ['@ST', '@SP']:
+                return True
+        return False
     
     def _create_member_variable_from_cursor(self, cursor: clang.Cursor) -> 'MemberVariable':
         """从cursor创建成员变量对象"""

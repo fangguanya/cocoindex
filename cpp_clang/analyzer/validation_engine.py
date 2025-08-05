@@ -169,8 +169,8 @@ class ValidationEngine:
                     extra_in_details = detail_callees - calls_to_set
                     
                     # 过滤掉已知的外部函数不一致
-                    filtered_missing = {usr for usr in missing_in_details if not self._should_skip_missing_callee_check(usr)}
-                    filtered_extra = {usr for usr in extra_in_details if not self._should_skip_missing_callee_check(usr)}
+                    filtered_missing = {usr for usr in missing_in_details if not self._should_skip_call_detail_inconsistency(usr)}
+                    filtered_extra = {usr for usr in extra_in_details if not self._should_skip_call_detail_inconsistency(usr)}
                     
                     # 只有在存在非外部函数的不一致时才报告
                     if filtered_missing or filtered_extra:
@@ -475,12 +475,25 @@ class ValidationEngine:
         
         return False
     
+    def _should_skip_call_detail_inconsistency(self, usr: str) -> bool:
+        """检查是否应该跳过call_detail_inconsistency检查"""
+        # 使用与missing_callee相同的逻辑，但可能有额外的考虑
+        if self._should_skip_missing_callee_check(usr):
+            return True
+        
+        # 额外的call_detail_inconsistency特定过滤
+        # 可能某些函数在调用提取时有特殊行为
+        return False
+    
     def _is_member_variable_access(self, usr: str) -> bool:
         """检查USR是否表示成员变量访问"""
         if not usr:
             return False
         
-        # 成员变量的USR模式：c:@S@ClassName@FI@varName
+        # 成员变量的USR模式：
+        # 1. c:@S@ClassName@FI@varName (普通类成员变量)
+        # 2. c:@S@OuterClass@S@InnerClass@FI@varName (嵌套类成员变量)
+        # 3. c:@N@Namespace@S@Class@FI@varName (命名空间中类的成员变量)
         # @FI@ 表示Field Identifier（成员变量）
         return '@FI@' in usr
     
@@ -520,21 +533,58 @@ class ValidationEngine:
             return False
         
         # 检查Windows API模式
-        if any(api in usr for api in ['@F@GetModuleHandle', '@F@LoadLibrary', '@F@GetProcAddress']):
+        windows_api_patterns = [
+            '@F@GetModuleHandle', '@F@LoadLibrary', '@F@GetProcAddress',
+            '@F@String', '@F@StringCb', '@F@StringCch',  # Windows字符串安全函数
+            '@F@UnalignedString', '@F@StringEx'
+        ]
+        if any(api in usr for api in windows_api_patterns):
             return True
         
         # 检查C标准库函数
-        if any(func in usr for func in ['@F@malloc', '@F@free', '@F@printf', '@F@memcpy']):
+        c_stdlib_patterns = [
+            '@F@malloc', '@F@free', '@F@printf', '@F@memcpy', '@F@strlen',
+            '@F@strcpy', '@F@strcat', '@F@strcmp', '@F@sprintf'
+        ]
+        if any(func in usr for func in c_stdlib_patterns):
             return True
         
         # 检查以下划线开头的内部函数
         if '@F@_' in usr or '@F@__' in usr:
             return True
         
+        # 检查Windows字符串安全函数（特殊模式）
+        if self._is_windows_string_safe_function(usr):
+            return True
+        
         # 检查过短的USR（通常是外部符号）
         if len(usr) < 20:
             return True
         
+        return False
+    
+    def _is_windows_string_safe_function(self, usr: str) -> bool:
+        """检查是否为Windows字符串安全函数"""
+        if not usr or '@F@' not in usr:
+            return False
+        
+        # Windows字符串安全函数模式
+        string_safe_patterns = [
+            'StringCb', 'StringCch',           # 基本字符串函数
+            'StringExValidate',                 # 字符串验证函数
+            'StringValidate',                   # 字符串验证函数
+            'UnalignedString'                   # 未对齐字符串函数
+        ]
+        
+        # 检查USR中是否包含这些模式
+        for pattern in string_safe_patterns:
+            if f'@F@{pattern}' in usr:
+                return True
+        
+        # 检查特定的Windows API后缀模式
+        if '@F@String' in usr and any(suffix in usr for suffix in ['W#', 'A#', 'ExW#', 'ExA#']):
+            return True
+            
         return False
     
     def _is_template_instantiation_mismatch(self, usr: str) -> bool:
@@ -617,45 +667,117 @@ class ValidationEngine:
         return False
     
     def _extract_class_usr_from_method_usr(self, func_usr: str) -> str:
-        """从方法USR中提取类USR - 增强版，支持复杂嵌套结构"""
+        """从方法USR中提取类USR - 超级增强版，支持复杂模板特化"""
         if not func_usr.startswith('c:@'):
             return ""
         
-        # 查找最后一个类/结构体/联合体标记和函数标记
-        # 支持的标记：@S@ (struct/class), @ST (template struct/class), @U@ (union)
-        class_markers = ['@S@', '@ST>', '@ST@', '@U@']
-        function_marker = '@F@'
-        
         # 找到最后一个函数标记
-        f_pos = func_usr.rfind(function_marker)
+        f_pos = func_usr.rfind('@F@')
         if f_pos == -1:
             return ""
         
-        # 在函数标记之前查找最后一个类标记
-        last_class_pos = -1
+        # 使用更智能的方法来查找类边界
+        return self._find_class_boundary_in_usr(func_usr, f_pos)
+    
+    def _find_class_boundary_in_usr(self, usr: str, function_pos: int) -> str:
+        """在USR中智能查找类边界，支持复杂模板特化"""
+        # 支持的类/结构体标记：@S@, @ST@, @ST>, @SP>, @U@
+        class_markers = ['@S@', '@ST@', '@ST>', '@SP>', '@U@']
+        
+        # 从右到左查找最后一个类标记
+        last_class_start = -1
         last_marker = None
         
         for marker in class_markers:
-            pos = func_usr.rfind(marker, 0, f_pos)
-            if pos > last_class_pos:
-                last_class_pos = pos
+            pos = usr.rfind(marker, 0, function_pos)
+            if pos > last_class_start:
+                last_class_start = pos
                 last_marker = marker
         
-        if last_class_pos == -1:
+        if last_class_start == -1:
             return ""
         
-        # 根据不同的标记类型处理
-        if last_marker == '@S@' or last_marker == '@U@':
-            # 普通类/结构体/联合体: c:@...@S@ClassName@F@methodName
-            class_part = func_usr[:f_pos]
-            return class_part
+        # 找到类标记后，需要智能地确定类USR的结束位置
+        # 这需要处理模板参数、特化参数等复杂情况
+        class_end = self._find_class_usr_end(usr, last_class_start, last_marker, function_pos)
         
-        elif last_marker.startswith('@ST'):
-            # 模板类: c:@...@ST>...@ClassName@F@methodName 或 c:@...@ST@ClassName@F@methodName
-            class_part = func_usr[:f_pos]
-            return class_part
+        if class_end > last_class_start:
+            return usr[:class_end]
         
-        return ""
+        # 简单回退：直接取到函数标记前
+        return usr[:function_pos]
+    
+    def _find_class_usr_end(self, usr: str, class_start: int, marker: str, function_pos: int) -> int:
+        """找到类USR的准确结束位置，处理模板特化"""
+        
+        # 对于普通类/结构体/联合体
+        if marker in ['@S@', '@U@']:
+            # 查找模板特化参数
+            pos = class_start + len(marker)
+            while pos < function_pos:
+                if usr[pos:pos+2] == '>#':
+                    # 找到特化参数，包含它们
+                    specialization_end = self._find_specialization_end(usr, pos)
+                    return specialization_end
+                elif usr[pos] == '@':
+                    # 遇到其他标记，结束
+                    return pos
+                pos += 1
+            return function_pos
+        
+        # 对于模板类 (@ST@, @ST>, @SP>)
+        if marker.startswith('@ST') or marker.startswith('@SP'):
+            return self._find_template_class_end(usr, class_start, marker, function_pos)
+        
+        return function_pos
+    
+    def _find_template_class_end(self, usr: str, class_start: int, marker: str, function_pos: int) -> int:
+        """查找模板类USR的结束位置"""
+        
+        # 从类标记开始向前查找
+        pos = class_start + len(marker)
+        
+        # 查找类名和特化参数的结束位置
+        while pos < function_pos:
+            if usr[pos:pos+2] == '@F':
+                # 到达函数标记
+                break
+            elif usr[pos:pos+2] == '>#':
+                # 遇到模板特化参数，需要包含它们
+                specialization_end = self._find_specialization_end(usr, pos)
+                if specialization_end > pos:
+                    pos = specialization_end
+                    continue
+            elif usr[pos] == '@' and not self._is_template_continuation(usr, pos):
+                # 遇到其他标记，可能是类名结束
+                break
+            pos += 1
+        
+        return pos
+    
+    def _find_specialization_end(self, usr: str, start_pos: int) -> int:
+        """查找模板特化参数的结束位置"""
+        # ># 开始的特化参数，查找到下一个@标记
+        pos = start_pos + 2  # 跳过 >#
+        
+        while pos < len(usr):
+            if usr[pos] == '@':
+                # 检查是否是 @F@（函数标记）
+                if pos + 1 < len(usr) and usr[pos+1] == 'F':
+                    return pos  # 特化参数在函数前结束
+                # 其他@标记可能是特化参数的一部分，继续查找
+            pos += 1
+        
+        return pos
+    
+    def _is_template_continuation(self, usr: str, pos: int) -> bool:
+        """检查@标记是否是模板的延续部分"""
+        # 检查是否是已知的模板相关标记
+        if pos + 2 < len(usr):
+            next_marker = usr[pos:pos+3]
+            if next_marker in ['@ST', '@SP']:
+                return True
+        return False
     
     def _validate_function_completeness(self, functions: Dict[str, Any]):
         """验证函数完整性"""

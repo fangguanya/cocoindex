@@ -992,7 +992,14 @@ class CppAnalyzer:
 
             # 合并类
             for usr, class_dict in result.classes.items():
-                new_class = Class(**class_dict)
+                # 分离member_variables，因为Class构造函数不接受这个参数
+                class_dict_copy = class_dict.copy()
+                member_variables = class_dict_copy.pop('member_variables', [])
+                
+                new_class = Class(**class_dict_copy)
+                # 手动设置member_variables
+                new_class.member_variables = member_variables
+                
                 if usr not in merged_classes:
                     merged_classes[usr] = new_class
                 else:
@@ -1003,6 +1010,10 @@ class CppAnalyzer:
                     else:
                         existing_class.declaration_locations.extend(new_class.declaration_locations)
                         existing_class.methods = list(set(existing_class.methods + new_class.methods))
+                        # 合并成员变量
+                        existing_member_vars = getattr(existing_class, 'member_variables', [])
+                        new_member_vars = getattr(new_class, 'member_variables', [])
+                        existing_class.member_variables = list(set(existing_member_vars + new_member_vars))
                         existing_class.parent_classes = list(set(existing_class.parent_classes + new_class.parent_classes))
                         if hasattr(existing_class, 'cpp_oop_extensions') and hasattr(new_class, 'cpp_oop_extensions'):
                             existing_inheritance = existing_class.cpp_oop_extensions.inheritance_list or []
