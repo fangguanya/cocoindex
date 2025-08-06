@@ -1,25 +1,18 @@
 """
-分布式文件ID管理器 (v3.0) - 多进程安全版本
+分布式文件ID管理器 (v4.0) - 文件锁版本
 
-提供完全多进程安全的文件ID分配和映射管理，解决序列化问题。
-基于 multiprocessing.Manager 实现真正的进程间共享状态。
+提供完全多进程安全的文件ID分配和映射管理，使用文件锁实现真正的跨进程状态共享。
 """
 
 from pathlib import Path
 from typing import Dict, Optional, List
 import os
-import multiprocessing
 import json
-import platform
+import time
+import threading
+import hashlib
 from dataclasses import dataclass
-
-# Windows平台multiprocessing设置
-if platform.system() == 'Windows':
-    try:
-        if multiprocessing.get_start_method(allow_none=True) is None:
-            multiprocessing.set_start_method('spawn', force=False)
-    except RuntimeError:
-        pass
+from .logger import get_logger
 
 
 @dataclass
@@ -33,47 +26,10 @@ class FileManagerStats:
 
 class DistributedFileIdManager:
     """
-    多进程共享对象的确定性文件ID管理器 (v5.0)
-    - 内部自动管理多进程共享状态
-    - 使用类级别的单例Manager确保所有实例共享同一个状态
+    多进程共享的确定性文件ID管理器（使用文件锁机制）
+    - 使用文件锁实现真正的跨进程状态共享
     - 简化API，无需外部传递共享对象
     """
-    
-    # 类级别的共享Manager和对象（所有实例共享）
-    _class_manager = None
-    _class_shared_objects = None
-    _class_lock = None
-    
-    @classmethod
-    def _ensure_class_manager(cls):
-        """确保类级别的Manager已初始化（单例模式）"""
-        if cls._class_manager is None:
-            try:
-                cls._class_manager = multiprocessing.Manager()
-                cls._class_shared_objects = {
-                    'path_to_id': cls._class_manager.dict(),
-                    'id_to_path': cls._class_manager.dict(),
-                    'predefined_counter': cls._class_manager.Value('i', 0),
-                    'temp_counter': cls._class_manager.Value('i', 0),
-                    'stats': cls._class_manager.dict()
-                }
-                cls._class_lock = cls._class_manager.Lock()
-                
-                # 初始化统计信息
-                with cls._class_lock:
-                    if 'initialized' not in cls._class_shared_objects['stats']:
-                        cls._class_shared_objects['stats']['predefined_files'] = 0
-                        cls._class_shared_objects['stats']['temp_files'] = 0
-                        cls._class_shared_objects['stats']['total_files'] = 0
-                        cls._class_shared_objects['stats']['reused_ids'] = 0
-                        cls._class_shared_objects['stats']['initialized'] = True
-                        
-            except Exception as e:
-                # 如果在子进程中无法创建Manager，使用本地状态
-                print(f"警告: 无法初始化Manager (可能在子进程中): {e}")
-                cls._class_manager = None
-                cls._class_shared_objects = None
-                cls._class_lock = None
     
     def __init__(self, project_root: str, all_files: List[str] = None):
         """
@@ -83,41 +39,156 @@ class DistributedFileIdManager:
             project_root: 项目根目录
             all_files: 预分配的文件列表（可选）
         """
-        # 确保类级别的Manager已初始化
-        self._ensure_class_manager()
-        
         self.project_root = Path(project_root).resolve()
+        self.cache_dir = os.path.join(project_root, ".file_cache")
         
-        # 使用类级别的共享对象或本地状态（如果在子进程中）
-        if self._class_shared_objects is not None:
-            self._shared_path_to_id = self._class_shared_objects['path_to_id']
-            self._shared_id_to_path = self._class_shared_objects['id_to_path']
-            self._shared_predefined_counter = self._class_shared_objects['predefined_counter']
-            self._shared_temp_counter = self._class_shared_objects['temp_counter']
-            self._shared_lock = self._class_lock
-            self._shared_stats = self._class_shared_objects['stats']
-        else:
-            raise RuntimeError("DistributedFileIdManager :找不到共享数据！")
+        # 初始化日志器
+        self.logger = get_logger()
         
-        # 如果提供了文件列表，进行预分配（确保只初始化一次）
-        if all_files and self._shared_lock is not None:
+        # 确保缓存目录存在
+        os.makedirs(self.cache_dir, exist_ok=True)
+        
+        # 共享状态文件路径
+        self._shared_state_file = os.path.join(self.cache_dir, "shared_files.json")
+        self._lock_file = os.path.normpath(os.path.join(self.cache_dir, "shared_files.lock"))
+        
+        # 进程内缓存
+        self._local_cache: Dict[str, str] = {}
+        self._local_reverse_cache: Dict[str, str] = {}
+        self._lock = threading.RLock()
+        
+        # 初始化状态
+        self._init_shared_state()
+        
+        # 如果提供了文件列表，进行预分配
+        if all_files:
             self._initialize_predefined_mappings(all_files)
     
-    def _safe_lock_operation(self, operation_func, fallback_func=None):
-        """安全执行需要锁的操作"""
-        if self._shared_lock is not None:
-            with self._shared_lock:
-                return operation_func()
-        elif fallback_func:
-            return fallback_func()
-        else:
-            return None
+    def __getstate__(self):
+        """序列化时只保存基本信息，排除锁对象"""
+        return {
+            'project_root': str(self.project_root),
+            'cache_dir': self.cache_dir,
+            '_local_cache': self._local_cache,
+            '_local_reverse_cache': self._local_reverse_cache
+        }
+    
+    def __setstate__(self, state):
+        """反序列化时重新创建锁对象"""
+        self.project_root = Path(state['project_root']).resolve()
+        self.cache_dir = state['cache_dir']
+        self._local_cache = state['_local_cache']
+        self._local_reverse_cache = state['_local_reverse_cache']
+        
+        # 重新创建不能被pickle的对象
+        self._lock = threading.RLock()
+        self.logger = get_logger()
+        
+        # 文件路径
+        self._shared_state_file = os.path.join(self.cache_dir, "shared_files.json")
+        self._lock_file = os.path.normpath(os.path.join(self.cache_dir, "shared_files.lock"))
+    
+    def _acquire_file_lock(self, timeout: float = 30.0) -> bool:
+        """获取文件锁"""
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                if not os.path.exists(self._lock_file):
+                    with open(self._lock_file, 'w') as f:
+                        f.write(str(os.getpid()))
+                    return True
+                else:
+                    # 检查锁文件是否过期（超过30秒）
+                    if time.time() - os.path.getmtime(self._lock_file) > 30:
+                        os.remove(self._lock_file)
+                        continue
+                time.sleep(0.1)
+            except Exception:
+                time.sleep(0.1)
+        return False
+    
+    def _release_file_lock(self):
+        """释放文件锁"""
+        try:
+            if os.path.exists(self._lock_file):
+                os.remove(self._lock_file)
+        except Exception:
+            pass
+    
+    def _init_shared_state(self):
+        """初始化共享状态"""
+        try:
+            if os.path.exists(self._shared_state_file):
+                # 清理旧的状态文件（如果超过1小时）
+                if time.time() - os.path.getmtime(self._shared_state_file) > 3600:
+                    os.remove(self._shared_state_file)
+        except Exception:
+            pass
+    
+    def _load_shared_state(self) -> Dict[str, any]:
+        """加载共享状态 - 如果文件不存在返回空状态，如果加载失败则抛异常"""
+        if not os.path.exists(self._shared_state_file):
+            # 文件不存在是正常情况（首次运行），返回空状态
+            self.logger.info(f"文件管理器共享状态文件不存在，初始化新的共享状态: {self._shared_state_file}")
+            return self._create_empty_shared_state()
+        
+        try:
+            # 检查文件大小，如果太小可能是损坏的
+            file_size = os.path.getsize(self._shared_state_file)
+            if file_size < 10:
+                raise RuntimeError(f"文件管理器共享状态文件损坏（文件大小 {file_size} 字节，小于最小阈值）: {self._shared_state_file}")
+            
+            with open(self._shared_state_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                
+            # 验证数据结构完整性
+            required_keys = {'path_to_id', 'id_to_path', 'predefined_counter', 'temp_counter', 'stats'}
+            if not all(key in data for key in required_keys):
+                missing_keys = required_keys - set(data.keys())
+                raise RuntimeError(f"文件管理器共享状态数据结构不完整，缺少必需的键: {missing_keys}")
+            
+            self.logger.info(f"成功加载文件管理器共享状态，包含 {len(data.get('path_to_id', {}))} 个文件映射")
+            return data
+            
+        except Exception as e:
+            # 共享状态加载失败是严重错误，直接抛异常
+            error_msg = f"文件管理器共享状态加载失败，多进程解析功能不可用: {e}"
+            self.logger.error(error_msg)
+            raise RuntimeError(error_msg) from e
+    
+    def _create_empty_shared_state(self) -> Dict[str, any]:
+        """创建空的共享状态结构"""
+        return {
+            'path_to_id': {},
+            'id_to_path': {},
+            'predefined_counter': 0,
+            'temp_counter': 0,
+            'stats': {
+                'predefined_files': 0,
+                'temp_files': 0,
+                'total_files': 0,
+                'reused_ids': 0
+            }
+        }
+    
+    def _save_shared_state(self, state: Dict[str, any]):
+        """保存共享状态"""
+        try:
+            with open(self._shared_state_file, 'w', encoding='utf-8') as f:
+                json.dump(state, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
     
     def _initialize_predefined_mappings(self, all_files: List[str]):
         """根据完整文件列表预先生成所有映射（多进程共享确定性算法）"""
-        def init_operation():
+        if not self._acquire_file_lock():
+            return
+        
+        try:
+            shared_state = self._load_shared_state()
+            
             # 检查是否已经初始化过预定义文件
-            if self._shared_predefined_counter.value > 0:
+            if shared_state['predefined_counter'] > 0:
                 return  # 已经初始化过，避免重复
             
             # 排序以确保确定性
@@ -127,17 +198,18 @@ class DistributedFileIdManager:
                 normalized_path = self._normalize_path(file_path)
                 file_id = f"file_{i:06d}"
                 
-                self._shared_path_to_id[normalized_path] = file_id
-                self._shared_id_to_path[file_id] = normalized_path
+                shared_state['path_to_id'][normalized_path] = file_id
+                shared_state['id_to_path'][file_id] = normalized_path
             
-            # 更新共享统计信息
-            self._shared_predefined_counter.value = len(sorted_files)
-            self._shared_stats['predefined_files'] = len(sorted_files)
-            self._shared_stats['total_files'] = len(sorted_files)
-        
-        if self._shared_lock is not None:
-            with self._shared_lock:
-                init_operation()
+            # 更新统计信息
+            shared_state['predefined_counter'] = len(sorted_files)
+            shared_state['stats']['predefined_files'] = len(sorted_files)
+            shared_state['stats']['total_files'] = len(sorted_files)
+            
+            self._save_shared_state(shared_state)
+            
+        finally:
+            self._release_file_lock()
     
     def get_file_id(self, file_path: Optional[str]) -> Optional[str]:
         """获取文件ID，如果不存在则动态分配临时ID（多进程共享状态）"""
@@ -146,24 +218,56 @@ class DistributedFileIdManager:
         
         normalized_path = self._normalize_path(file_path)
         
-        # 检查共享映射表（包含预定义和临时文件）
-        if self._shared_lock is not None:
-            with self._shared_lock:
-                existing_id = self._shared_path_to_id.get(normalized_path)
-                if existing_id:
-                    self._shared_stats['reused_ids'] = self._shared_stats.get('reused_ids', 0) + 1
-                    return existing_id
-                
-                # 不存在则动态分配临时ID
-                return self._create_temp_file_id_unsafe(normalized_path)
-        else:
-            # 在子进程中，使用本地模式
-            existing_id = self._shared_path_to_id.get(normalized_path)
+        # 检查本地缓存
+        with self._lock:
+            if normalized_path in self._local_cache:
+                return self._local_cache[normalized_path]
+        
+        # 检查共享映射表
+        if not self._acquire_file_lock():
+            # 如果无法获取锁，生成简单的临时ID
+            return f"temp_{abs(hash(normalized_path)) % 1000000}"
+        
+        try:
+            shared_state = self._load_shared_state()
+            
+            existing_id = shared_state['path_to_id'].get(normalized_path)
             if existing_id:
+                shared_state['stats']['reused_ids'] += 1
+                # 更新本地缓存
+                with self._lock:
+                    self._local_cache[normalized_path] = existing_id
+                    self._local_reverse_cache[existing_id] = normalized_path
+                self._save_shared_state(shared_state)
                 return existing_id
             
-            # 生成简单的文件ID
-            return f"file_{abs(hash(normalized_path)) % 1000000}"
+            # 不存在则动态分配临时ID
+            return self._create_temp_file_id_unsafe(shared_state, normalized_path)
+            
+        finally:
+            self._release_file_lock()
+    
+    def _create_temp_file_id_unsafe(self, shared_state: Dict[str, any], normalized_path: str) -> str:
+        """为动态发现的文件创建临时ID（内部使用，假设已加锁）"""
+        # 分配新的临时ID
+        shared_state['temp_counter'] += 1
+        temp_id = f"t{shared_state['temp_counter']:04d}"  # t0001, t0002, ...
+        
+        # 添加到共享映射表
+        shared_state['path_to_id'][normalized_path] = temp_id
+        shared_state['id_to_path'][temp_id] = normalized_path
+        
+        # 更新统计信息
+        shared_state['stats']['temp_files'] += 1
+        shared_state['stats']['total_files'] = shared_state['stats']['predefined_files'] + shared_state['stats']['temp_files']
+        
+        # 更新本地缓存
+        with self._lock:
+            self._local_cache[normalized_path] = temp_id
+            self._local_reverse_cache[temp_id] = normalized_path
+        
+        self._save_shared_state(shared_state)
+        return temp_id
     
     def register_file(self, file_path: str) -> str:
         """注册单个文件并获取ID（别名方法，保持接口兼容）"""
@@ -174,52 +278,65 @@ class DistributedFileIdManager:
         result = {}
         
         for file_path in file_paths:
-            # 使用标准的get_file_id方法，它已经处理了所有的锁和映射逻辑
             file_id = self.get_file_id(file_path)
             if file_id:
                 result[file_path] = file_id
         
         return result
     
-    def _create_temp_file_id_unsafe(self, normalized_path: str) -> str:
-        """为动态发现的文件创建临时ID（内部使用，假设已加锁）"""
-        if self._shared_temp_counter is not None:
-            # 分配新的临时ID
-            self._shared_temp_counter.value += 1
-            temp_id = f"t{self._shared_temp_counter.value:04d}"  # t0001, t0002, ...
-            
-            # 添加到共享映射表
-            self._shared_path_to_id[normalized_path] = temp_id
-            self._shared_id_to_path[temp_id] = normalized_path
-            
-            # 更新统计信息
-            self._shared_stats['temp_files'] = self._shared_stats.get('temp_files', 0) + 1
-            self._shared_stats['total_files'] = self._shared_stats.get('predefined_files', 0) + self._shared_stats.get('temp_files', 0)
-            
-            return temp_id
-        else:
-            # 在子进程中生成简单的临时ID
-            temp_id = f"temp_{abs(hash(normalized_path)) % 1000000}"
-            self._shared_path_to_id[normalized_path] = temp_id
-            self._shared_id_to_path[temp_id] = normalized_path
-            return temp_id
-    
     def get_file_by_id(self, file_id: str) -> Optional[str]:
         """根据ID获取文件路径（多进程共享状态）"""
-        if self._shared_lock is not None:
-            with self._shared_lock:
-                return self._shared_id_to_path.get(file_id)
-        else:
-            return self._shared_id_to_path.get(file_id)
+        # 检查本地缓存
+        with self._lock:
+            if file_id in self._local_reverse_cache:
+                return self._local_reverse_cache[file_id]
+        
+        # 检查共享状态
+        if not self._acquire_file_lock():
+            return None
+        
+        try:
+            shared_state = self._load_shared_state()
+            result = shared_state['id_to_path'].get(file_id)
+            
+            # 更新本地缓存
+            if result:
+                with self._lock:
+                    self._local_reverse_cache[file_id] = result
+                    self._local_cache[result] = file_id
+            
+            return result
+            
+        finally:
+            self._release_file_lock()
     
     def get_id_by_file(self, file_path: str) -> Optional[str]:
         """根据文件路径获取ID（不创建新ID，多进程共享状态）"""
         normalized_path = self._normalize_path(file_path)
-        if self._shared_lock is not None:
-            with self._shared_lock:
-                return self._shared_path_to_id.get(normalized_path)
-        else:
-            return self._shared_path_to_id.get(normalized_path)
+        
+        # 检查本地缓存
+        with self._lock:
+            if normalized_path in self._local_cache:
+                return self._local_cache[normalized_path]
+        
+        # 检查共享状态
+        if not self._acquire_file_lock():
+            return None
+        
+        try:
+            shared_state = self._load_shared_state()
+            result = shared_state['path_to_id'].get(normalized_path)
+            
+            # 更新本地缓存
+            if result:
+                with self._lock:
+                    self._local_cache[normalized_path] = result
+                    self._local_reverse_cache[result] = normalized_path
+            
+            return result
+            
+        finally:
+            self._release_file_lock()
     
     def _normalize_path(self, file_path: str) -> str:
         """将路径标准化为相对于项目根目录的相对路径"""
@@ -251,19 +368,25 @@ class DistributedFileIdManager:
 
     def get_file_mappings(self) -> Dict[str, str]:
         """获取所有文件映射（file_id -> path，多进程共享状态）"""
-        if self._shared_lock is not None:
-            with self._shared_lock:
-                return dict(self._shared_id_to_path)
-        else:
-            return dict(self._shared_id_to_path)
+        if not self._acquire_file_lock():
+            return {}
+        
+        try:
+            shared_state = self._load_shared_state()
+            return dict(shared_state['id_to_path'])
+        finally:
+            self._release_file_lock()
 
     def get_reverse_mappings(self) -> Dict[str, str]:
         """获取反向文件映射（path -> file_id，多进程共享状态）"""
-        if self._shared_lock is not None:
-            with self._shared_lock:
-                return dict(self._shared_path_to_id)
-        else:
-            return dict(self._shared_path_to_id)
+        if not self._acquire_file_lock():
+            return {}
+        
+        try:
+            shared_state = self._load_shared_state()
+            return dict(shared_state['path_to_id'])
+        finally:
+            self._release_file_lock()
     
     def get_all_mappings(self) -> Dict[str, str]:
         """获取所有文件到ID的映射（别名方法）"""
@@ -271,127 +394,40 @@ class DistributedFileIdManager:
 
     def get_stats(self) -> Dict[str, int]:
         """获取统计信息（多进程共享状态）"""
-        if self._shared_lock is not None:
-            with self._shared_lock:
-                stats = dict(self._shared_stats)
-                
-                # 计算最大文件ID
-                max_id = 0
-                for file_id in self._shared_id_to_path.keys():
-                    if len(file_id) > 1 and file_id[1:].isdigit():
-                        max_id = max(max_id, int(file_id[1:]))
-                stats['max_file_id'] = max_id
-                
-                # 移除内部标记
-                stats.pop('initialized', None)
-                return stats
-        else:
-            stats = dict(self._shared_stats)
-            stats['max_file_id'] = 0
-            return stats
-    
-    def remove_file(self, file_path: str) -> bool:
-        """移除文件映射（多进程共享状态）"""
-        normalized_path = self._normalize_path(file_path)
+        if not self._acquire_file_lock():
+            return {'total_files': 0, 'predefined_files': 0, 'temp_files': 0, 'max_file_id': 0, 'reused_ids': 0}
         
-        with self._shared_lock:
-            if normalized_path in self._shared_path_to_id:
-                file_id = self._shared_path_to_id[normalized_path]
-                del self._shared_path_to_id[normalized_path]
-                del self._shared_id_to_path[file_id]
-                
-                # 更新统计信息
-                if file_id.startswith('f'):
-                    self._shared_stats['predefined_files'] -= 1
-                elif file_id.startswith('t'):
-                    self._shared_stats['temp_files'] -= 1
-                
-                self._shared_stats['total_files'] = (
-                    self._shared_stats['predefined_files'] + self._shared_stats['temp_files']
-                )
-                
-                return True
-            return False
+        try:
+            shared_state = self._load_shared_state()
+            stats = dict(shared_state['stats'])
+            
+            # 计算最大文件ID
+            max_id = 0
+            for file_id in shared_state['id_to_path'].keys():
+                if len(file_id) > 1 and file_id[1:].isdigit():
+                    max_id = max(max_id, int(file_id[1:]))
+            stats['max_file_id'] = max_id
+            
+            return stats
+        finally:
+            self._release_file_lock()
     
     def save_to_file(self, filepath: str):
         """保存当前状态到文件（多进程共享状态）"""
-        if self._shared_lock is not None:
-            with self._shared_lock:
-                data = {
-                    'project_root': str(self.project_root),
-                    'shared_path_to_id': dict(self._shared_path_to_id),
-                    'shared_id_to_path': dict(self._shared_id_to_path),
-                    'shared_predefined_counter': self._shared_predefined_counter.value,
-                    'shared_temp_counter': self._shared_temp_counter.value,
-                    'shared_stats': dict(self._shared_stats)
-                }
-        else:
+        if not self._acquire_file_lock():
+            return
+        
+        try:
+            shared_state = self._load_shared_state()
             data = {
                 'project_root': str(self.project_root),
-                'shared_path_to_id': dict(self._shared_path_to_id),
-                'shared_id_to_path': dict(self._shared_id_to_path),
-                'shared_predefined_counter': 0,
-                'shared_temp_counter': 0,
-                'shared_stats': dict(self._shared_stats)
+                **shared_state
             }
-        
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-    
-    def load_from_file(self, filepath: str):
-        """从文件加载状态（多进程共享状态）"""
-        with open(filepath, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        
-        if self._shared_lock is not None:
-            with self._shared_lock:
-                # 清空现有数据
-                self._shared_path_to_id.clear()
-                self._shared_id_to_path.clear()
-                
-                # 加载数据
-                self._shared_path_to_id.update(data.get('shared_path_to_id', {}))
-                self._shared_id_to_path.update(data.get('shared_id_to_path', {}))
-                self._shared_predefined_counter.value = data.get('shared_predefined_counter', 0)
-                self._shared_temp_counter.value = data.get('shared_temp_counter', 0)
-                self._shared_stats.clear()
-                self._shared_stats.update(data.get('shared_stats', {}))
-        else:
-            # 在子进程中，直接更新本地状态
-            self._shared_path_to_id.clear()
-            self._shared_id_to_path.clear()
-            self._shared_path_to_id.update(data.get('shared_path_to_id', {}))
-            self._shared_id_to_path.update(data.get('shared_id_to_path', {}))
-            self._shared_stats.clear()
-            self._shared_stats.update(data.get('shared_stats', {}))
-    
-    def __getstate__(self):
-        """序列化时只保存项目根目录，共享对象通过类级别管理"""
-        return {
-            'project_root': str(self.project_root)
-        }
-    
-    def __setstate__(self, state):
-        """反序列化时恢复状态并重新连接到类级别的共享对象"""
-        self.project_root = Path(state['project_root']).resolve()
-        
-        # 在子进程中，直接引用已存在的类级别共享对象，不要创建新的Manager
-        # 如果类管理器不存在，说明我们在子进程中，应该等待主进程设置
-        if self._class_manager is not None:
-            self._shared_path_to_id = self._class_shared_objects['path_to_id']
-            self._shared_id_to_path = self._class_shared_objects['id_to_path']
-            self._shared_predefined_counter = self._class_shared_objects['predefined_counter']
-            self._shared_temp_counter = self._class_shared_objects['temp_counter']
-            self._shared_lock = self._class_lock
-            self._shared_stats = self._class_shared_objects['stats']
-        else:
-            # 如果在子进程中且Manager未初始化，使用本地状态（只读模式）
-            self._shared_path_to_id = {}
-            self._shared_id_to_path = {}
-            self._shared_predefined_counter = None
-            self._shared_temp_counter = None
-            self._shared_lock = None
-            self._shared_stats = {}
+            
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+        finally:
+            self._release_file_lock()
 
 
 # 简化的工具函数：直接创建文件管理器

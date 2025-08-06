@@ -944,26 +944,71 @@ class ClangParser:
         return None
     
     def _file_contains_only_relative_includes(self, file_path: str) -> bool:
-        """检查文件是否主要包含相对路径的include语句"""
+        """检查文件是否仅包含相对路径的include语句（没有其他实际代码内容）"""
         try:
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read()
             
             import re
-            # 查找所有 #include 语句
-            include_statements = re.findall(r'#include\s+[<"]([^>"]+)[>"]', content)
+            
+            # 移除注释和空行，获取有效内容
+            lines = content.split('\n')
+            effective_lines = []
+            
+            in_block_comment = False
+            for line in lines:
+                line = line.strip()
+                
+                # 跳过空行
+                if not line:
+                    continue
+                
+                # 处理块注释
+                if '/*' in line:
+                    in_block_comment = True
+                if '*/' in line:
+                    in_block_comment = False
+                    continue
+                if in_block_comment:
+                    continue
+                
+                # 跳过单行注释
+                if line.startswith('//'):
+                    continue
+                
+                # 移除行末注释
+                if '//' in line:
+                    line = line[:line.index('//')].strip()
+                    if not line:
+                        continue
+                
+                effective_lines.append(line)
+            
+            # 如果没有有效内容，返回False
+            if not effective_lines:
+                return False
+            
+            # 检查每一行有效内容
+            for line in effective_lines:
+                # 如果不是 #include 语句，说明有其他代码内容
+                if not re.match(r'^\s*#include\s+[<"]([^>"]+)[>"]', line):
+                    return False
+            
+            # 所有有效行都是include语句，现在检查是否都是相对路径
+            include_statements = re.findall(r'#include\s+[<"]([^>"]+)[>"]', '\n'.join(effective_lines))
             
             if not include_statements:
-                return False  # 没有include语句，视为普通文件
+                return False
             
-            # 检查是否大部分都是相对路径
-            relative_count = 0
+            # 检查所有include是否都是相对路径
             for include in include_statements:
-                if '../' in include or not os.path.isabs(include):
-                    relative_count += 1
+                # 相对路径的特征：包含 '../' 或者不是绝对路径（不以/开头，不是系统头文件）
+                # 系统头文件通常用<>包围且不包含路径分隔符，用户头文件用""包围
+                if not ('../' in include or ('/' in include and not include.startswith('/')) or 
+                       (not '/' in include and '"' in effective_lines[0])):  # 简单的头文件名且用引号包围
+                    return False
             
-            # 如果80%以上都是相对路径，则认为是需要特殊处理的文件
-            return (relative_count / len(include_statements)) >= 0.8
+            return True
             
         except Exception as e:
             self.logger.debug(f"分析文件内容失败: {file_path}, 错误: {e}")

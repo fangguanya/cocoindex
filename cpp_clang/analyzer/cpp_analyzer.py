@@ -34,6 +34,7 @@ from .shared_header_manager import (
     SharedHeaderManager, ThreadSafeHeaderProcessor, 
     get_shared_header_manager, init_shared_header_manager
 )
+from .shared_class_cache import init_shared_class_cache
 
 # Windows平台multiprocessing设置 - 修复兼容性问题
 if platform.system() == 'Windows':
@@ -57,7 +58,6 @@ class AnalysisConfig:
                  include_extensions: Optional[set] = None,
                  exclude_patterns: Optional[set] = None,
                  enable_dynamic_includes: bool = True,
-                 enable_multiprocess_safety: bool = True,
                  enable_legacy_header_scan: bool = False,
                  strict_validation: bool = False):
         self.project_root = project_root
@@ -70,7 +70,6 @@ class AnalysisConfig:
         self.include_extensions = include_extensions or {'.h', '.hpp', '.cpp', '.cc', '.cxx', '.c'}
         self.exclude_patterns = exclude_patterns or set()
         self.enable_dynamic_includes = enable_dynamic_includes
-        self.enable_multiprocess_safety = enable_multiprocess_safety
         self.enable_legacy_header_scan = enable_legacy_header_scan
         self.strict_validation = strict_validation
 
@@ -102,8 +101,7 @@ g_enable_multiprocess_safety: bool = True
 
 def _init_worker(compile_commands: Dict[str, Any], project_root: str, 
                 file_id_manager,  # 直接传递文件管理器实例
-                enable_dynamic_includes: bool = True,
-                enable_multiprocess_safety: bool = True):
+                enable_dynamic_includes: bool = True):
     """初始化工作进程 - 支持动态include和多进程安全，修复序列化问题"""
     global g_parser, g_extractor, g_project_root, g_file_manager, g_compile_commands
     global g_include_parser, g_enable_dynamic_includes, g_enable_multiprocess_safety
@@ -119,19 +117,38 @@ def _init_worker(compile_commands: Dict[str, Any], project_root: str,
         # 直接使用传递过来的文件管理器实例（共享对象自动处理序列化）
         g_project_root = project_root
         g_file_manager = file_id_manager
-        g_extractor = EntityExtractor(g_file_manager)
+        g_extractor = EntityExtractor(g_file_manager, project_root=project_root)
         
         # 设置功能开关
         g_enable_dynamic_includes = enable_dynamic_includes
-        g_enable_multiprocess_safety = enable_multiprocess_safety
+        g_enable_multiprocess_safety = True  # 强制启用多进程安全
         
         # 初始化动态include解析器
         if g_enable_dynamic_includes:
             g_include_parser = IncludeDirectiveParser(project_root)
         
-        # 初始化多进程安全的头文件管理器
-        if g_enable_multiprocess_safety:
-            init_shared_header_manager(project_root)
+        # 安全初始化多进程安全组件，增加超时和错误处理
+        try:
+            # 使用较短的超时来避免死锁
+            import signal
+            
+            def timeout_handler(signum, frame):
+                raise TimeoutError("初始化组件超时")
+            
+            # 设置5秒超时
+            signal.signal(signal.SIGALRM, timeout_handler) if hasattr(signal, 'SIGALRM') else None
+            signal.alarm(5) if hasattr(signal, 'alarm') else None
+            
+            try:
+                init_shared_header_manager(project_root)
+                init_shared_class_cache(project_root)
+            finally:
+                signal.alarm(0) if hasattr(signal, 'alarm') else None
+                
+        except Exception as e:
+            logger = get_logger()
+            logger.warning(f"多进程安全组件初始化失败，将使用单进程模式: {e}")
+            g_enable_multiprocess_safety = False
         
         from .logger import get_logger
         logger = get_logger()
@@ -231,9 +248,9 @@ def _parse_and_extract_worker(file_path: str) -> Optional[SerializableExtractedD
             except Exception as e:
                 logger.warning(f"动态include处理失败 {file_path}: {e}")
         
-        # 3. 处理动态发现的头文件（如果启用多进程安全）
+        # 3. 处理动态发现的头文件
         header_processing_results = {}
-        if g_enable_multiprocess_safety and discovered_headers:
+        if discovered_headers:
             try:
                 from .shared_header_manager import get_shared_header_manager
                 shared_manager = get_shared_header_manager(g_project_root)
@@ -433,8 +450,12 @@ class CppAnalyzer:
                 if config.enable_dynamic_includes:
                     self.include_parser = IncludeDirectiveParser(config.project_root)
                 
-                if config.enable_multiprocess_safety:
+                # 简化头文件管理器初始化，避免死锁
+                try:
                     self.shared_header_manager = get_shared_header_manager(config.project_root)
+                except Exception as e:
+                    logger.warning(f"头文件管理器初始化失败，将使用简化模式: {e}")
+                    self.shared_header_manager = None
 
             # 3. 处理头文件（根据配置选择策略）
             if config.enable_legacy_header_scan and not config.enable_dynamic_includes:
@@ -493,6 +514,32 @@ class CppAnalyzer:
                 )
                 self.logger.info("创建多进程共享文件管理器")
 
+            # 5.5. 初始化多进程安全组件
+            self.console.print("\n[bold]5.5. 初始化多进程安全组件...[/bold]")
+            self.logger.info("5.5. 初始化多进程安全组件...")
+            
+            with profiler.timer("init_multiprocess_safety"):
+                try:
+                    # 初始化头文件管理器
+                    header_manager_instance = init_shared_header_manager(config.project_root)
+                    self.logger.info("✓ 共享头文件管理器在主进程中初始化完成")
+                    
+                    # 初始化类缓存
+                    from .shared_class_cache import init_shared_class_cache
+                    class_cache_instance = init_shared_class_cache(config.project_root)
+                    self.logger.info("✓ 共享类缓存初始化完成")
+                    
+
+                    
+                    self.console.print("-> 多进程安全组件初始化完成")
+                    
+                except Exception as e:
+                    error_msg = f"多进程安全组件初始化失败: {e}"
+                    self.logger.error(error_msg)
+                    import traceback
+                    self.logger.error(f"错误详情:\n{traceback.format_exc()}")
+                    return self._create_failure_result("MultiprocessInit", error_msg)
+
             # 6. 并行解析和提取
             self.console.print("\n[bold]6. 开始并行解析和提取实体...[/bold]")
             self.logger.info("6. 开始并行解析和提取实体...")
@@ -500,27 +547,31 @@ class CppAnalyzer:
             with profiler.timer("parallel_parsing_and_extraction"):
                 num_jobs = config.num_jobs if config.num_jobs > 0 else multiprocessing.cpu_count()
                 self.console.print(f"-> 使用 {num_jobs} 个并行进程")
+                self.logger.info(f"计算得到并行进程数: {num_jobs}")
                 
                 all_results = []
                 
                 try:
+                    self.logger.info("开始创建Progress对象...")
                     with Progress(console=self.console) as progress:
                         task = progress.add_task("[cyan]解析和提取中...", total=len(filtered_files))
+                        self.logger.info("Progress任务创建成功")
                         
                         # 将编译命令和文件管理器传递给工作进程
                         init_args = (
                             temp_parser.compile_commands, 
                             config.project_root, 
                             file_id_manager,  # 直接传递文件管理器实例
-                            config.enable_dynamic_includes,
-                            config.enable_multiprocess_safety
+                            config.enable_dynamic_includes
                         )
+                        self.logger.info("准备创建多进程池...")
                         
                         with multiprocessing.Pool(
                             processes=num_jobs,
                             initializer=_init_worker,
                             initargs=init_args
                         ) as pool:
+                            self.logger.info("多进程池创建成功")
                             # 使用map_async实现真正的并行处理
                             async_result = pool.map_async(_parse_and_extract_worker, filtered_files)
                             
@@ -564,12 +615,11 @@ class CppAnalyzer:
                                     header_processing_stats[header_path] = processing_info
                     
                     self.console.print(f"-> 动态发现头文件: {len(dynamic_headers_found)} 个")
-                    if config.enable_multiprocess_safety:
-                        processed_count = sum(1 for info in header_processing_stats.values() 
-                                            if info.get('status') == 'success')
-                        skipped_count = sum(1 for info in header_processing_stats.values() 
-                                          if info.get('status') == 'skipped')
-                        self.console.print(f"-> 头文件处理: {processed_count} 个成功, {skipped_count} 个跳过")
+                    processed_count = sum(1 for info in header_processing_stats.values() 
+                                        if info.get('status') == 'success')
+                    skipped_count = sum(1 for info in header_processing_stats.values() 
+                                      if info.get('status') == 'skipped')
+                    self.console.print(f"-> 头文件处理: {processed_count} 个成功, {skipped_count} 个跳过")
                     
                     self.logger.info(f"动态发现头文件: {len(dynamic_headers_found)} 个")
 
@@ -587,6 +637,32 @@ class CppAnalyzer:
                 self.logger.info(f"文件管理器统计: 总文件数={stats.get('total_files', 0)}, "
                                f"预定义文件={stats.get('predefined_files', 0)}, "
                                f"动态文件={stats.get('temp_files', 0)}")
+            
+            # 8.5. 解析缺失的模板类（在验证之前）
+            self.console.print("\n[bold]8.5. 解析缺失的模板基类...[/bold]")
+            self.logger.info("8.5. 解析缺失的模板基类...")
+            
+            with profiler.timer("resolve_template_classes"):
+                # 直接使用全局extractor进行模板解析，避免不必要的数据拷贝
+                if g_extractor:
+                    # 设置clang解析器以便进行动态分析
+                    g_extractor.set_clang_parser(temp_parser)
+                    
+                    # 正向分析完整的类型信息，基于AST结构而不是修补缺失
+                    compile_commands_for_analysis = temp_parser.compile_commands if temp_parser else None
+                    generated_count = g_extractor.analyze_complete_type_information(compile_commands_for_analysis)
+                    
+                    # 更新merged_data中的类信息（g_extractor已经包含最新数据）
+                    extracted_data['classes'] = g_extractor.classes
+                    
+                    self.logger.info(f"AST类型信息分析完成: 新发现了 {generated_count} 个类型")
+                    if generated_count > 0:
+                        self.console.print(f"[green]-> 成功从AST发现 {generated_count} 个新类型[/green]")
+                else:
+                    self.logger.error("全局extractor不可用，跳过模板类解析")
+                    generated_count = 0
+            
+            logger.checkpoint("AST类型信息分析完成", discovered_types=generated_count)
 
             # 9. 验证提取的数据
             self.console.print("\n[bold]9. 验证提取的数据...[/bold]")
@@ -598,6 +674,12 @@ class CppAnalyzer:
                     validation_level=ValidationLevel.STANDARD,
                     strict_mode=getattr(config, 'strict_validation', False)
                 )
+                
+                # 增强：将cursor映射信息传递给验证引擎
+                if g_extractor and hasattr(g_extractor, 'template_resolver'):
+                    validation_engine.template_resolver = g_extractor.template_resolver
+                    self.logger.info("已将cursor映射信息传递给验证引擎")
+                
                 validation_result = validation_engine.validate_extracted_data(extracted_data)
             
             if not validation_result.validation_passed:
@@ -644,7 +726,7 @@ class CppAnalyzer:
                 }
                 
                 # 添加多进程安全统计
-                if config.enable_multiprocess_safety and self.shared_header_manager:
+                if self.shared_header_manager:
                     shared_stats = self.shared_header_manager.get_processing_statistics()
                     stats.update({
                         "shared_manager_stats": shared_stats,
@@ -668,6 +750,7 @@ class CppAnalyzer:
             )
 
         except Exception as e:
+            import traceback
             self.logger.error(f"分析过程中发生严重错误: {e}\n{traceback.format_exc()}")
             return self._create_failure_result("Exception", str(e))
         
@@ -681,8 +764,7 @@ class CppAnalyzer:
         modes = []
         if config.enable_dynamic_includes:
             modes.append("动态Include")
-        if config.enable_multiprocess_safety:
-            modes.append("多进程安全")
+        modes.append("多进程安全")  # 始终启用
         if config.enable_legacy_header_scan:
             modes.append("传统头文件扫描")
         
@@ -917,7 +999,7 @@ class CppAnalyzer:
         self.console.print(f"🚀 处理速度: {files_per_sec:.2f} 文件/秒")
         
         # 多进程安全统计
-        if config.enable_multiprocess_safety and 'shared_manager_stats' in stats:
+        if 'shared_manager_stats' in stats:
             shared_stats = stats['shared_manager_stats']
             self.console.print(f"\n[bold green]🔒 多进程安全统计:[/bold green]")
             self.console.print(f"  • 共享状态总数: {shared_stats.get('shared_total', 0)}")

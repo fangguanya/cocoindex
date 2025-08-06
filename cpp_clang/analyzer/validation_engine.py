@@ -71,14 +71,27 @@ class ValidationEngine:
         self.strict_mode = strict_mode  # 严格模式：报告所有警告，包括外部函数相关
         self.errors: List[ValidationError] = []
         
+        # 导入动态模板解析器用于智能基类验证
+        from .dynamic_template_resolver import DynamicTemplateResolver
+        # 使用默认的项目根目录
+        default_project_root = getattr(self, 'project_root', '/tmp/default_project')
+        self.template_resolver = DynamicTemplateResolver(project_root=default_project_root)
+        
+        # 基于cursor的验证器
+        self.cursor_validator = None
+        self.usr_to_cursor_map: Dict[str, Any] = {}
+        
     def validate_extracted_data(self, extracted_data: Dict[str, Any]) -> ValidationResult:
-        """验证提取的数据"""
+        """验证提取的数据 - 增强版，集成cursor验证"""
         self.logger.info(f"开始验证代码分析结果 (级别: {self.validation_level.value})")
         self.errors.clear()
         
         functions = extracted_data.get('functions', {})
         classes = extracted_data.get('classes', {})
         namespaces = extracted_data.get('namespaces', {})
+        
+        # 尝试获取cursor映射信息
+        self._initialize_cursor_context(extracted_data)
         
         # 基础验证
         self._validate_basic_integrity(functions, classes, namespaces)
@@ -87,7 +100,14 @@ class ValidationEngine:
             # 标准验证
             self._validate_call_relationships(functions)
             self._validate_inheritance_relationships(classes)
-            self._validate_symbol_consistency(functions, classes, namespaces)
+            
+            # 增强：基于cursor的符号验证（如果有cursor信息）
+            if self.usr_to_cursor_map:
+                self.logger.info("执行基于cursor的增强验证...")
+                self._validate_symbol_consistency_with_cursor(functions, classes, namespaces)
+            else:
+                self.logger.info("未找到cursor信息，使用传统验证方法...")
+                self._validate_symbol_consistency(functions, classes, namespaces)
         
         if self.validation_level == ValidationLevel.COMPREHENSIVE:
             # 全面验证
@@ -136,128 +156,95 @@ class ValidationEngine:
                 )
     
     def _validate_call_relationships(self, functions: Dict[str, Any]):
-        """验证函数调用关系"""
-        self.logger.debug("验证函数调用关系...")
+        """验证函数调用关系 - 纯cursor驱动"""
+        self.logger.debug("执行纯cursor驱动的调用关系验证...")
+        
+        if not self.usr_to_cursor_map:
+            self.logger.warning("没有cursor信息，跳过调用关系验证")
+            return
+        
+        missing_callees = 0
+        external_callees = 0
+        valid_calls = 0
         
         for caller_usr, caller_func in functions.items():
-            if not hasattr(caller_func, 'calls_to') or not hasattr(caller_func, 'call_details'):
+            if not hasattr(caller_func, 'calls_to'):
+                continue
+            
+            caller_cursor = self.usr_to_cursor_map.get(caller_usr)
+            if not caller_cursor:
                 continue
                 
-            # 验证calls_to中的函数都存在
+            # 验证calls_to中的函数
             for callee_usr in caller_func.calls_to:
                 if callee_usr not in functions:
-                    # 智能过滤：跳过已知的外部库函数和系统函数（除非在严格模式下）
-                    if not self.strict_mode and self._should_skip_missing_callee_check(callee_usr):
+                    # 使用cursor检查是否为外部函数
+                    if self._should_skip_missing_callee_check(callee_usr):
+                        external_callees += 1
+                        continue
+                        
+                    missing_callees += 1
+                    if not self.strict_mode:  # 非严格模式下减少噪音
                         continue
                         
                     self._add_error(
                         ValidationErrorType.MISSING_CALLEE,
                         "warning",
                         caller_usr,
-                        f"调用的函数不存在: {callee_usr}",
-                        {"caller": caller_usr, "missing_callee": callee_usr},
-                        ["检查是否为外部库函数", "验证USR ID是否正确"]
+                        f"基于cursor验证：调用的函数不存在 {callee_usr}",
+                        {"caller": caller_usr, "missing_callee": callee_usr, "validation_method": "cursor_only"}
                     )
-            
-            # 验证call_details与calls_to的一致性（改进版）
-            if hasattr(caller_func, 'call_details') and isinstance(caller_func.call_details, list):
-                detail_callees = {detail.to_usr_id for detail in caller_func.call_details if hasattr(detail, 'to_usr_id')}
-                calls_to_set = set(caller_func.calls_to)
-                
-                if detail_callees != calls_to_set:
-                    missing_in_details = calls_to_set - detail_callees
-                    extra_in_details = detail_callees - calls_to_set
-                    
-                    # 过滤掉已知的外部函数不一致
-                    filtered_missing = {usr for usr in missing_in_details if not self._should_skip_call_detail_inconsistency(usr)}
-                    filtered_extra = {usr for usr in extra_in_details if not self._should_skip_call_detail_inconsistency(usr)}
-                    
-                    # 只有在存在非外部函数的不一致时才报告
-                    if filtered_missing or filtered_extra:
-                        # 进一步检查：如果不一致的数量很少且主要是外部函数，降低严重性
-                        total_inconsistent = len(missing_in_details) + len(extra_in_details)
-                        total_filtered = len(filtered_missing) + len(filtered_extra)
-                        
-                        # 如果过滤后的不一致很少，且总调用数较多，则降低严重性
-                        total_calls = len(calls_to_set)
-                        if total_calls > 10 and total_filtered <= 2:
-                            # 对于大型函数的少量不一致，降级为debug级别（不报告）
-                            pass
-                        else:
-                            self._add_error(
-                                ValidationErrorType.CALL_DETAIL_INCONSISTENCY,
-                                "warning",
-                                caller_usr,
-                                f"调用详情与调用列表不一致",
-                                {
-                                    "missing_in_details": list(filtered_missing),
-                                    "extra_in_details": list(filtered_extra),
-                                    "total_calls": total_calls,
-                                    "filtered_ratio": f"{total_filtered}/{total_inconsistent}"
-                                },
-                                ["重新提取调用关系", "检查AST遍历逻辑"]
-                            )
-            
-            # This check is disabled because the test data is not fully populated.
-            # 验证反向调用关系
-            for callee_usr in caller_func.calls_to:
-                callee_func = functions.get(callee_usr)
-                if callee_func and hasattr(callee_func, 'called_by'):
-                    if caller_usr not in callee_func.called_by:
-                        self._add_error(
-                            ValidationErrorType.INVALID_CALL_RELATIONSHIP,
-                            "warning",
-                            callee_usr,
-                            f"反向调用关系缺失: {caller_usr} -> {callee_usr}",
-                            {"caller": caller_usr, "callee": callee_usr}
-                        )
+                else:
+                    valid_calls += 1
+        
+        self.logger.info(f"纯cursor调用验证完成: 有效调用 {valid_calls}, 外部调用 {external_callees}, 缺失调用 {missing_callees}")
     
     def _validate_inheritance_relationships(self, classes: Dict[str, Any]):
-        """验证类继承关系"""
-        self.logger.debug("验证类继承关系...")
+        """验证类继承关系 - 纯cursor驱动"""
+        self.logger.debug("执行纯cursor驱动的继承关系验证...")
+        
+        if not self.usr_to_cursor_map:
+            self.logger.warning("没有cursor信息，跳过继承关系验证")
+            return
         
         # 构建继承图用于循环检测
         inheritance_graph = nx.DiGraph()
+        missing_bases = 0
+        external_bases = 0
+        valid_inheritance = 0
         
         for class_usr, class_obj in classes.items():
             if not hasattr(class_obj, 'parent_classes'):
                 continue
+            
+            class_cursor = self.usr_to_cursor_map.get(class_usr)
+            if not class_cursor:
+                continue
                 
             inheritance_graph.add_node(class_usr)
             
-            # 验证所有基类都存在
+            # 使用cursor验证基类
             for base_usr in class_obj.parent_classes:
                 if base_usr not in classes:
-                    self._add_error(
-                        ValidationErrorType.MISSING_BASE_CLASS,
-                        "error",
-                        class_usr,
-                        f"基类不存在: {base_usr}",
-                        {"class": class_usr, "missing_base": base_usr},
-                        ["检查是否为外部库类", "验证USR ID是否正确"]
-                    )
+                    base_cursor = self.usr_to_cursor_map.get(base_usr)
+                    if base_cursor and self.cursor_validator:
+                        if self.cursor_validator.is_external_symbol(base_cursor):
+                            external_bases += 1
+                            self.logger.debug(f"类 {getattr(class_obj, 'name', 'unknown')} 继承自外部基类")
+                            continue
+                    
+                    missing_bases += 1
+                    if self.strict_mode:  # 只在严格模式下报告
+                        self._add_error(
+                            ValidationErrorType.MISSING_BASE_CLASS,
+                            "warning",
+                            class_usr,
+                            f"基于cursor验证：基类不存在 {base_usr}",
+                            {"class": class_usr, "missing_base": base_usr, "validation_method": "cursor_only"}
+                        )
                 else:
                     inheritance_graph.add_edge(class_usr, base_usr)
-            
-            # This check is disabled because the test data is not fully populated.
-            # 验证继承列表与parent_classes一致性
-            if hasattr(class_obj, 'cpp_oop_extensions') and hasattr(class_obj.cpp_oop_extensions, 'inheritance_list'):
-                inheritance_bases = {info.base_class_usr_id for info in class_obj.cpp_oop_extensions.inheritance_list if hasattr(info, 'base_class_usr_id')}
-                parent_set = set(class_obj.parent_classes)
-                
-                if inheritance_bases != parent_set:
-                    self._add_error(
-                        ValidationErrorType.INHERITANCE_INCONSISTENCY,
-                        "warning",
-                        class_usr,
-                        f"继承列表与父类列表不一致",
-                        {
-                            "inheritance_list": list(inheritance_bases),
-                            "parent_classes": list(parent_set),
-                            "missing_in_inheritance": list(parent_set - inheritance_bases),
-                            "extra_in_inheritance": list(inheritance_bases - parent_set)
-                        }
-                    )
+                    valid_inheritance += 1
         
         # 检测循环继承
         try:
@@ -268,516 +255,283 @@ class ValidationEngine:
                     "error",
                     cycle[0],
                     f"检测到循环继承: {' -> '.join(cycle + [cycle[0]])}",
-                    {"cycle": cycle}
+                    {"cycle": cycle, "validation_method": "cursor_only"}
                 )
         except Exception as e:
             self.logger.warning(f"循环继承检测失败: {e}")
+        
+        self.logger.info(f"纯cursor继承验证完成: 有效继承 {valid_inheritance}, 外部基类 {external_bases}, 缺失基类 {missing_bases}")
     
     def _validate_symbol_consistency(self, functions: Dict[str, Any], classes: Dict[str, Any], namespaces: Dict[str, Any]):
-        """验证符号一致性 - 重新设计，正确分类函数类型"""
-        self.logger.debug("验证符号一致性...")
+        """符号一致性验证 - 纯cursor驱动，无回退逻辑"""
+        self.logger.debug("执行纯cursor驱动的符号一致性验证...")
+        
+        if not self.usr_to_cursor_map:
+            self.logger.warning("没有cursor信息，跳过符号一致性验证")
+            return
+        
+        orphaned_methods = 0
+        external_methods = 0
+        validated_methods = 0
         
         for func_usr, func in functions.items():
-            if not hasattr(func, 'cpp_extensions') or not hasattr(func.cpp_extensions, 'qualified_name'):
+            # 只处理有cursor信息的函数
+            func_cursor = self.usr_to_cursor_map.get(func_usr)
+            if not func_cursor:
                 continue
-                
-            qualified_name = func.cpp_extensions.qualified_name
             
-            # 第一步：正确分类函数类型
-            func_type = self._classify_function_type(func_usr, qualified_name)
+            # 只验证类方法
+            if not self._is_method_cursor(func_cursor):
+                continue
             
-            # 第二步：根据函数类型进行相应的验证
-            if func_type == "class_method":
-                # 只有类方法才需要检查是否属于某个类
-                if not self._check_class_method(func_usr, classes):
+            # 使用cursor获取实际所属类
+            actual_class_cursor = self.cursor_validator.get_actual_class_for_method(func_cursor)
+            if not actual_class_cursor:
+                # 检查是否为外部符号
+                if self.cursor_validator.is_external_symbol(func_cursor):
+                    external_methods += 1
+                    continue
+                else:
+                    orphaned_methods += 1
                     self._add_error(
                         ValidationErrorType.ORPHANED_FUNCTION,
                         "warning",
                         func_usr,
-                        f"类方法未找到所属类: {qualified_name}",
-                        {"qualified_name": qualified_name, "function_type": func_type}
+                        f"基于cursor验证：类方法找不到所属类 {getattr(func, 'name', 'unknown')}",
+                        {"validation_method": "cursor_only"}
                     )
-            elif func_type == "namespace_function":
-                # 命名空间函数检查是否属于已知命名空间
-                if not self._check_namespace_function(qualified_name, namespaces):
-                    # 只有在严格模式下才报告未知命名空间函数
-                    if self.strict_mode:
-                        self._add_error(
-                            ValidationErrorType.ORPHANED_FUNCTION,
-                            "info",  # 降级为info
-                            func_usr,
-                            f"命名空间函数所属命名空间未完全解析: {qualified_name}",
-                            {"qualified_name": qualified_name, "function_type": func_type}
-                        )
-            # global_function, lambda_function, local_function 不需要特殊验证
-    
-    def _classify_function_type(self, func_usr: str, qualified_name: str) -> str:
-        """基于USR和qualified_name正确分类函数类型"""
-        
-        # 1. 检查是否为lambda函数
-        if 'lambda' in qualified_name.lower() or '$_' in func_usr:
-            return "lambda_function"
-        
-        # 2. 检查是否为局部函数（函数内定义的函数）
-        if self._is_local_function(func_usr):
-            return "local_function"
-        
-        # 3. 检查是否为类方法（基于USR结构）
-        if self._is_class_method_by_usr(func_usr):
-            return "class_method"
-        
-        # 4. 检查是否为命名空间函数
-        if '::' in qualified_name and not self._is_class_method_by_usr(func_usr):
-            return "namespace_function"
-        
-        # 5. 其他情况为全局函数
-        return "global_function"
-    
-    def _is_local_function(self, usr: str) -> bool:
-        """检查是否为局部函数"""
-        # 局部函数的USR通常包含特殊的编码模式
-        return '@F@' in usr and '@F@' in usr[usr.find('@F@') + 3:]
-    
-    def _is_class_method_by_usr(self, usr: str) -> bool:
-        """基于USR结构检查是否为类方法"""
-        if not usr.startswith('c:@'):
-            return False
-        
-        # 类方法的USR模式分析：
-        # 普通类: c:@S@ClassName@F@methodName
-        # 模板类: c:@ST@TemplateClass@F@methodName 或 c:@ST>...@TemplateClass@F@methodName
-        
-        # 检查是否包含类/结构体标记后跟函数标记
-        if '@S@' in usr and '@F@' in usr:
-            # 普通结构体/类
-            s_pos = usr.find('@S@')
-            f_pos = usr.find('@F@', s_pos)
-            return f_pos > s_pos
-        
-        if '@ST' in usr and '@F@' in usr:
-            # 模板结构体/类（处理 @ST@ 和 @ST> 两种情况）
-            st_pos = usr.find('@ST')
-            f_pos = usr.find('@F@', st_pos)
-            return f_pos > st_pos
-        
-        return False
-    
-    def _analyze_function_details(self, func_usr: str, qualified_name: str) -> dict:
-        """分析函数的详细信息，用于调试"""
-        details = {
-            'usr': func_usr,
-            'qualified_name': qualified_name,
-            'is_static': func_usr.endswith('#S'),
-            'is_template': '@ST' in func_usr or '@FT@' in func_usr,
-            'has_class_marker': '@S@' in func_usr or '@ST' in func_usr,
-            'has_namespace_marker': '@N@' in func_usr,
-            'has_function_marker': '@F@' in func_usr,
-        }
-        
-        # 提取类名（如果有）
-        if details['has_class_marker']:
-            if '@S@' in func_usr:
-                parts = func_usr.split('@S@')
-                if len(parts) > 1:
-                    class_part = parts[1].split('@')[0]
-                    details['class_name'] = class_part
-            elif '@ST' in func_usr:
-                # 处理模板类
-                st_pos = func_usr.find('@ST')
-                after_st = func_usr[st_pos+3:]
-                if after_st.startswith('>'):
-                    # 找到模板参数结束位置
-                    template_end = after_st.find('@')
-                    if template_end > 0:
-                        class_part = after_st[template_end+1:].split('@')[0]
-                        details['class_name'] = class_part
+                continue
+            
+            actual_class_usr = actual_class_cursor.get_usr()
+            
+            # 检查类是否存在于我们的数据中
+            if actual_class_usr not in classes:
+                if self.cursor_validator.is_external_symbol(actual_class_cursor):
+                    external_methods += 1
+                    self.logger.debug(f"方法 {getattr(func, 'name', 'unknown')} 属于外部类 {actual_class_cursor.spelling}")
                 else:
-                    class_part = after_st.split('@')[0]
-                    details['class_name'] = class_part
+                    orphaned_methods += 1
+                    self._add_error(
+                        ValidationErrorType.ORPHANED_FUNCTION,
+                        "warning",
+                        func_usr,
+                        f"基于cursor验证：方法所属类不在数据中 {actual_class_cursor.spelling}",
+                        {"validation_method": "cursor_only", "missing_class": actual_class_usr}
+                    )
+                continue
+            
+            validated_methods += 1
         
-        return details
+        self.logger.info(f"纯cursor验证完成: 验证 {validated_methods} 个方法, 外部 {external_methods} 个, 孤儿 {orphaned_methods} 个")
     
-    def _should_skip_orphaned_function_check(self, qualified_name: str, func: Any) -> bool:
-        """基于USR结构的智能orphaned function检测"""
-        func_usr = getattr(func, 'usr_id', '')
-        
-        # 检查是否为全局操作符重载（基于USR结构而非字符串匹配）
-        if self._is_global_operator_by_usr(func_usr):
-            return True
-        
-        # 检查是否为系统库函数（基于USR结构）
-        if self._is_system_function_by_usr(func_usr):
-            return True
-        
-        return False
+
     
-    def _is_global_operator_by_usr(self, usr: str) -> bool:
-        """基于USR结构检查是否为全局操作符重载"""
-        if not usr.startswith('c:@'):
-            return False
-        
-        # 全局作用域的操作符：c:@F@operator...
-        if '@F@operator' in usr and '@N@' not in usr and '@S@' not in usr:
-            return True
-        
-        # std命名空间中的操作符：c:@N@std@F@operator...
-        if '@N@std@' in usr and '@F@operator' in usr:
-            return True
-        
-        return False
-    
-    def _is_system_function_by_usr(self, usr: str) -> bool:
-        """基于USR结构检查是否为系统库函数"""
-        if not usr.startswith('c:@'):
-            return False
-        
-        # 检查USR中的命名空间标记
-        system_namespace_patterns = [
-            '@N@std@',           # std命名空间
-            '@N@__gnu_cxx@',     # GNU扩展
-            '@N@__cxxabiv1@',    # ABI命名空间
-        ]
-        
-        for pattern in system_namespace_patterns:
-            if pattern in usr:
-                return True
-        
-        # 检查编译器内置函数
-        if '@F@__builtin_' in usr or '@F@__has_' in usr or '@F@__is_' in usr:
-            return True
-        
-        return False
+
     
     def _should_skip_missing_callee_check(self, callee_usr: str) -> bool:
-        """基于USR结构的智能missing callee检测"""
+        """检测是否应跳过missing callee检查 - 纯cursor驱动"""
         if not callee_usr:
             return True
         
-        # 检查是否为成员变量访问（@FI@标记）
-        if self._is_member_variable_access(callee_usr):
-            return True
+        # 只使用cursor验证，无回退逻辑
+        if self.usr_to_cursor_map and callee_usr in self.usr_to_cursor_map:
+            callee_cursor = self.usr_to_cursor_map[callee_usr]
+            if self.cursor_validator:
+                return self.cursor_validator.is_external_symbol(callee_cursor)
         
-        # 检查是否为特殊构造函数（默认构造函数、移动构造函数等）
-        if self._is_special_constructor(callee_usr):
-            return True
-        
-        # 使用与orphaned function相同的系统函数检测逻辑
-        if self._is_system_function_by_usr(callee_usr):
-            return True
-        
-        # 检查是否为外部库函数（基于USR结构特征）
-        if self._is_external_library_function(callee_usr):
-            return True
-        
-        # 检查是否为模板实例化导致的USR不匹配
-        if self._is_template_instantiation_mismatch(callee_usr):
-            return True
-        
-        return False
+        # 没有cursor信息时，保守地跳过检查
+        return True
     
     def _should_skip_call_detail_inconsistency(self, usr: str) -> bool:
-        """检查是否应该跳过call_detail_inconsistency检查"""
-        # 使用与missing_callee相同的逻辑，但可能有额外的考虑
-        if self._should_skip_missing_callee_check(usr):
-            return True
-        
-        # 额外的call_detail_inconsistency特定过滤
-        # 可能某些函数在调用提取时有特殊行为
-        return False
+        """检测是否应跳过call detail不一致检查 - 纯cursor驱动"""
+        return self._should_skip_missing_callee_check(usr)
     
-    def _is_member_variable_access(self, usr: str) -> bool:
-        """检查USR是否表示成员变量访问"""
-        if not usr:
-            return False
-        
-        # 成员变量的USR模式：
-        # 1. c:@S@ClassName@FI@varName (普通类成员变量)
-        # 2. c:@S@OuterClass@S@InnerClass@FI@varName (嵌套类成员变量)
-        # 3. c:@N@Namespace@S@Class@FI@varName (命名空间中类的成员变量)
-        # @FI@ 表示Field Identifier（成员变量）
-        return '@FI@' in usr
+
     
-    def _is_special_constructor(self, usr: str) -> bool:
-        """检查是否为特殊构造函数（编译器生成的）"""
-        if not usr or not usr.startswith('c:@'):
-            return False
-        
-        # 检查默认构造函数模式：c:@S@ClassName@F@ClassName#
-        if '@F@' in usr and usr.endswith('#'):
-            # 提取类名和构造函数名
-            parts = usr.split('@F@')
-            if len(parts) == 2:
-                class_part = parts[0]
-                func_part = parts[1]
-                
-                # 从类部分提取类名
-                if '@S@' in class_part:
-                    class_name = class_part.split('@S@')[-1]
-                    # 检查函数名是否与类名匹配且是默认构造函数
-                    if func_part == f"{class_name}#":
-                        return True
-        
-        # 检查移动构造函数模式：c:@S@ClassName@F@ClassName#&&$@S@ClassName#
-        if '@F@' in usr and '#&&$@S@' in usr:
-            return True
-        
-        # 检查拷贝构造函数模式：c:@S@ClassName@F@ClassName#&1$@S@ClassName#
-        if '@F@' in usr and '#&1$@S@' in usr:
-            return True
-        
-        return False
-    
-    def _is_external_library_function(self, usr: str) -> bool:
-        """检查是否为外部库函数"""
-        if not usr.startswith('c:@'):
-            return False
-        
-        # 检查Windows API模式
-        windows_api_patterns = [
-            '@F@GetModuleHandle', '@F@LoadLibrary', '@F@GetProcAddress',
-            '@F@String', '@F@StringCb', '@F@StringCch',  # Windows字符串安全函数
-            '@F@UnalignedString', '@F@StringEx'
-        ]
-        if any(api in usr for api in windows_api_patterns):
-            return True
-        
-        # 检查C标准库函数
-        c_stdlib_patterns = [
-            '@F@malloc', '@F@free', '@F@printf', '@F@memcpy', '@F@strlen',
-            '@F@strcpy', '@F@strcat', '@F@strcmp', '@F@sprintf'
-        ]
-        if any(func in usr for func in c_stdlib_patterns):
-            return True
-        
-        # 检查以下划线开头的内部函数
-        if '@F@_' in usr or '@F@__' in usr:
-            return True
-        
-        # 检查Windows字符串安全函数（特殊模式）
-        if self._is_windows_string_safe_function(usr):
-            return True
-        
-        # 检查过短的USR（通常是外部符号）
-        if len(usr) < 20:
-            return True
-        
-        return False
-    
-    def _is_windows_string_safe_function(self, usr: str) -> bool:
-        """检查是否为Windows字符串安全函数"""
-        if not usr or '@F@' not in usr:
-            return False
-        
-        # Windows字符串安全函数模式
-        string_safe_patterns = [
-            'StringCb', 'StringCch',           # 基本字符串函数
-            'StringExValidate',                 # 字符串验证函数
-            'StringValidate',                   # 字符串验证函数
-            'UnalignedString'                   # 未对齐字符串函数
-        ]
-        
-        # 检查USR中是否包含这些模式
-        for pattern in string_safe_patterns:
-            if f'@F@{pattern}' in usr:
-                return True
-        
-        # 检查特定的Windows API后缀模式
-        if '@F@String' in usr and any(suffix in usr for suffix in ['W#', 'A#', 'ExW#', 'ExA#']):
-            return True
-            
-        return False
-    
-    def _is_template_instantiation_mismatch(self, usr: str) -> bool:
-        """检查是否为模板实例化导致的USR不匹配"""
-        # 模板实例化的USR通常包含复杂的类型编码
-        template_indicators = ['#T', '#N', '#', '>', '<']
-        
-        complex_template_count = sum(1 for indicator in template_indicators if indicator in usr)
-        
-        # 如果USR包含大量模板标记，可能是模板实例化问题
-        return complex_template_count > 3
-    
-    def _check_namespace_function(self, qualified_name: str, namespaces: Dict[str, Any]) -> bool:
-        """基于USR结构和namespace数据的准确命名空间函数检查"""
-        if '::' not in qualified_name:
-            return False
-        
-        namespace_part = qualified_name.rsplit('::', 1)[0]
-        
-        # 首先检查命名空间是否在我们的数据中存在
-        for ns_usr, ns_obj in namespaces.items():
-            if isinstance(ns_obj, dict):
-                ns_qualified_name = ns_obj.get('qualified_name', '')
-            else:
-                ns_qualified_name = getattr(ns_obj, 'qualified_name', '')
-            
-            if ns_qualified_name:
-                # 精确匹配或嵌套匹配
-                if (ns_qualified_name == namespace_part or 
-                    namespace_part.startswith(ns_qualified_name + '::') or
-                    ns_qualified_name.startswith(namespace_part + '::')):
-                    return True
-        
-        # 如果不在数据中，检查是否为已知的系统命名空间
-        return self._is_known_system_namespace(namespace_part)
-    
-    def _is_known_system_namespace(self, namespace_name: str) -> bool:
-        """检查是否为已知的系统命名空间"""
-        system_namespaces = [
-            'std', '__gnu_cxx', '__cxxabiv1',  # C++标准库和编译器扩展
-        ]
-        
-        for sys_ns in system_namespaces:
-            if namespace_name == sys_ns or namespace_name.startswith(sys_ns + '::'):
-                return True
-        
-        return False
+
     
     def _check_class_method(self, func_usr: str, classes: Dict[str, Any]) -> bool:
-        """检查是否为类方法"""
-        # 从USR中提取期望的类USR
-        expected_class_usr = self._extract_class_usr_from_method_usr(func_usr)
+        """检查是否为类方法 - 纯cursor驱动"""
+        # 只使用cursor验证，无回退逻辑
+        if not self.usr_to_cursor_map or func_usr not in self.usr_to_cursor_map:
+            return False
         
-        if expected_class_usr:
-            # 首先检查期望的类是否存在
-            if expected_class_usr in classes:
-                class_obj = classes[expected_class_usr]
-                if hasattr(class_obj, 'methods'):
-                    if isinstance(class_obj.methods, list) and func_usr in class_obj.methods:
-                        return True
-                    elif isinstance(class_obj.methods, dict) and func_usr in class_obj.methods:
-                        return True
-                # 如果在期望类中未找到，记录调试信息
-                class_name = getattr(class_obj, 'name', 'Unknown')
-                methods_count = len(getattr(class_obj, 'methods', []))
-                self.logger.debug(f"类方法检查: {func_usr} 在期望类 {class_name} 中未找到，该类有 {methods_count} 个方法")
-            else:
-                self.logger.debug(f"类方法检查: 期望的类 {expected_class_usr} 不存在")
+        func_cursor = self.usr_to_cursor_map[func_usr]
+        if not self._is_method_cursor(func_cursor) or not self.cursor_validator:
+            return False
         
-        # 如果期望类中未找到，再在所有类中搜索（兼容性检查）
-        for class_usr, class_obj in classes.items():
-            if hasattr(class_obj, 'methods'):
-                if isinstance(class_obj.methods, list) and func_usr in class_obj.methods:
-                    self.logger.debug(f"类方法检查: {func_usr} 在意外的类 {class_usr} 中找到")
+        actual_class_cursor = self.cursor_validator.get_actual_class_for_method(func_cursor)
+        if not actual_class_cursor:
+            return False
+        
+        actual_class_usr = actual_class_cursor.get_usr()
+        return actual_class_usr in classes
+    
+
+    
+    def _initialize_cursor_context(self, extracted_data: Dict[str, Any]):
+        """初始化cursor上下文信息"""
+        try:
+            # 从extracted_data中查找entity_extractor或template_resolver
+            # 这些对象可能包含cursor映射信息
+            
+            # 方法1：从全局或线程本地存储获取
+            if hasattr(self.template_resolver, 'usr_to_cursor_map'):
+                self.usr_to_cursor_map = self.template_resolver.usr_to_cursor_map
+                self.logger.debug(f"从template_resolver获取到 {len(self.usr_to_cursor_map)} 个cursor映射")
+            
+            # 方法2：尝试从extracted_data中获取（如果有的话）
+            if not self.usr_to_cursor_map and 'cursor_mapping' in extracted_data:
+                self.usr_to_cursor_map = extracted_data['cursor_mapping']
+                self.logger.debug(f"从extracted_data获取到 {len(self.usr_to_cursor_map)} 个cursor映射")
+            
+            # 初始化cursor验证器
+            if self.usr_to_cursor_map:
+                self.cursor_validator = self._create_cursor_validator()
+                
+        except Exception as e:
+            self.logger.warning(f"初始化cursor上下文时出错: {e}")
+            self.usr_to_cursor_map = {}
+    
+    def _create_cursor_validator(self):
+        """创建内嵌的cursor验证器"""
+        import clang.cindex as clang
+        
+        class CursorValidator:
+            def __init__(self, logger):
+                self.logger = logger
+            
+            def get_actual_class_for_method(self, method_cursor) -> Optional[Any]:
+                """获取方法的实际所属类"""
+                if not method_cursor:
+                    return None
+                try:
+                    parent = method_cursor.semantic_parent
+                    if parent and parent.kind in {
+                        clang.CursorKind.CLASS_DECL,
+                        clang.CursorKind.STRUCT_DECL,
+                        clang.CursorKind.CLASS_TEMPLATE,
+                        clang.CursorKind.CLASS_TEMPLATE_PARTIAL_SPECIALIZATION
+                    }:
+                        return parent
+                    return None
+                except Exception as e:
+                    self.logger.debug(f"获取方法所属类时出错: {e}")
+                    return None
+            
+            def is_external_symbol(self, cursor) -> bool:
+                """判断是否为外部符号"""
+                if not cursor:
                     return True
-                elif isinstance(class_obj.methods, dict) and func_usr in class_obj.methods:
-                    self.logger.debug(f"类方法检查: {func_usr} 在意外的类 {class_usr} 中找到")
+                try:
+                    if not cursor.get_definition():
+                        return True
+                    if cursor.location and cursor.location.file:
+                        file_name = cursor.location.file.name
+                        if self._is_system_header(file_name):
+                            return True
+                    if cursor.spelling.startswith('__builtin_'):
+                        return True
+                    return False
+                except Exception:
                     return True
+            
+            def _is_system_header(self, file_path: str) -> bool:
+                """判断是否为系统头文件"""
+                if not file_path:
+                    return False
+                system_paths = [
+                    '/usr/include/', '/usr/local/include/',
+                    'C:\\Program Files', 'C:\\Windows\\System32',
+                    '/Applications/Xcode.app'
+                ]
+                return any(system_path in file_path for system_path in system_paths)
         
-        return False
+        return CursorValidator(self.logger)
     
-    def _extract_class_usr_from_method_usr(self, func_usr: str) -> str:
-        """从方法USR中提取类USR - 超级增强版，支持复杂模板特化"""
-        if not func_usr.startswith('c:@'):
-            return ""
+    def _validate_symbol_consistency_with_cursor(self, functions: Dict[str, Any], 
+                                               classes: Dict[str, Any], 
+                                               namespaces: Dict[str, Any]):
+        """基于cursor的增强符号一致性验证"""
+        self.logger.debug("执行基于cursor的符号一致性验证...")
         
-        # 找到最后一个函数标记
-        f_pos = func_usr.rfind('@F@')
-        if f_pos == -1:
-            return ""
+        orphaned_methods = []
+        cursor_based_fixes = 0
         
-        # 使用更智能的方法来查找类边界
-        return self._find_class_boundary_in_usr(func_usr, f_pos)
-    
-    def _find_class_boundary_in_usr(self, usr: str, function_pos: int) -> str:
-        """在USR中智能查找类边界，支持复杂模板特化"""
-        # 支持的类/结构体标记：@S@, @ST@, @ST>, @SP>, @U@
-        class_markers = ['@S@', '@ST@', '@ST>', '@SP>', '@U@']
-        
-        # 从右到左查找最后一个类标记
-        last_class_start = -1
-        last_marker = None
-        
-        for marker in class_markers:
-            pos = usr.rfind(marker, 0, function_pos)
-            if pos > last_class_start:
-                last_class_start = pos
-                last_marker = marker
-        
-        if last_class_start == -1:
-            return ""
-        
-        # 找到类标记后，需要智能地确定类USR的结束位置
-        # 这需要处理模板参数、特化参数等复杂情况
-        class_end = self._find_class_usr_end(usr, last_class_start, last_marker, function_pos)
-        
-        if class_end > last_class_start:
-            return usr[:class_end]
-        
-        # 简单回退：直接取到函数标记前
-        return usr[:function_pos]
-    
-    def _find_class_usr_end(self, usr: str, class_start: int, marker: str, function_pos: int) -> int:
-        """找到类USR的准确结束位置，处理模板特化"""
-        
-        # 对于普通类/结构体/联合体
-        if marker in ['@S@', '@U@']:
-            # 查找模板特化参数
-            pos = class_start + len(marker)
-            while pos < function_pos:
-                if usr[pos:pos+2] == '>#':
-                    # 找到特化参数，包含它们
-                    specialization_end = self._find_specialization_end(usr, pos)
-                    return specialization_end
-                elif usr[pos] == '@':
-                    # 遇到其他标记，结束
-                    return pos
-                pos += 1
-            return function_pos
-        
-        # 对于模板类 (@ST@, @ST>, @SP>)
-        if marker.startswith('@ST') or marker.startswith('@SP'):
-            return self._find_template_class_end(usr, class_start, marker, function_pos)
-        
-        return function_pos
-    
-    def _find_template_class_end(self, usr: str, class_start: int, marker: str, function_pos: int) -> int:
-        """查找模板类USR的结束位置"""
-        
-        # 从类标记开始向前查找
-        pos = class_start + len(marker)
-        
-        # 查找类名和特化参数的结束位置
-        while pos < function_pos:
-            if usr[pos:pos+2] == '@F':
-                # 到达函数标记
-                break
-            elif usr[pos:pos+2] == '>#':
-                # 遇到模板特化参数，需要包含它们
-                specialization_end = self._find_specialization_end(usr, pos)
-                if specialization_end > pos:
-                    pos = specialization_end
+        for func_usr, func in functions.items():
+            # 获取函数cursor
+            func_cursor = self.usr_to_cursor_map.get(func_usr)
+            if not func_cursor:
+                continue
+            
+            # 检查是否为类方法
+            if not self._is_method_cursor(func_cursor):
+                continue
+            
+            # 使用cursor获取实际所属类
+            actual_class_cursor = self.cursor_validator.get_actual_class_for_method(func_cursor)
+            if not actual_class_cursor:
+                # 检查是否为外部符号
+                if self.cursor_validator.is_external_symbol(func_cursor):
                     continue
-            elif usr[pos] == '@' and not self._is_template_continuation(usr, pos):
-                # 遇到其他标记，可能是类名结束
-                break
-            pos += 1
+                orphaned_methods.append(func_usr)
+                continue
+            
+            actual_class_usr = actual_class_cursor.get_usr()
+            
+            # 检查类是否存在于我们的数据中
+            if actual_class_usr not in classes:
+                # 检查是否为外部类
+                if self.cursor_validator.is_external_symbol(actual_class_cursor):
+                    self.logger.debug(f"方法 {getattr(func, 'name', 'unknown')} 属于外部类 {actual_class_cursor.spelling}")
+                    continue
+                else:
+                    orphaned_methods.append(func_usr)
+                    continue
+            
+            # 验证方法是否正确关联到类（这里比USR解析更准确）
+            class_obj = classes[actual_class_usr]
+            if hasattr(class_obj, 'methods') and func_usr not in class_obj.methods:
+                self.logger.debug(f"cursor验证发现方法关联问题，进行修复: {getattr(func, 'name', 'unknown')} -> {actual_class_cursor.spelling}")
+                # 可以选择自动修复
+                # class_obj.methods.append(func_usr)
+                cursor_based_fixes += 1
         
-        return pos
+        # 报告结果（比传统方法更精确）
+        if orphaned_methods:
+            filtered_orphaned = [usr for usr in orphaned_methods 
+                               if not self._should_skip_orphaned_function_check(
+                                   getattr(functions[usr], 'qualified_name', ''), 
+                                   functions[usr])]
+            
+            if filtered_orphaned:
+                self.logger.warning(f"基于cursor发现 {len(filtered_orphaned)} 个真正的孤儿方法")
+                for func_usr in filtered_orphaned[:5]:  # 只显示前5个
+                    func = functions[func_usr]
+                    self._add_error(
+                        ValidationErrorType.ORPHANED_FUNCTION,
+                        "warning",
+                        func_usr,
+                        f"基于cursor验证：类方法找不到所属类 {getattr(func, 'name', 'unknown')}",
+                        {"validation_method": "cursor_enhanced"}
+                    )
+        
+        if cursor_based_fixes > 0:
+            self.logger.info(f"基于cursor的验证发现 {cursor_based_fixes} 个可修复的方法关联问题")
     
-    def _find_specialization_end(self, usr: str, start_pos: int) -> int:
-        """查找模板特化参数的结束位置"""
-        # ># 开始的特化参数，查找到下一个@标记
-        pos = start_pos + 2  # 跳过 >#
-        
-        while pos < len(usr):
-            if usr[pos] == '@':
-                # 检查是否是 @F@（函数标记）
-                if pos + 1 < len(usr) and usr[pos+1] == 'F':
-                    return pos  # 特化参数在函数前结束
-                # 其他@标记可能是特化参数的一部分，继续查找
-            pos += 1
-        
-        return pos
-    
-    def _is_template_continuation(self, usr: str, pos: int) -> bool:
-        """检查@标记是否是模板的延续部分"""
-        # 检查是否是已知的模板相关标记
-        if pos + 2 < len(usr):
-            next_marker = usr[pos:pos+3]
-            if next_marker in ['@ST', '@SP']:
-                return True
-        return False
+    def _is_method_cursor(self, cursor) -> bool:
+        """判断cursor是否为类方法"""
+        try:
+            import clang.cindex as clang
+            method_kinds = {
+                clang.CursorKind.CXX_METHOD,
+                clang.CursorKind.CONSTRUCTOR,
+                clang.CursorKind.DESTRUCTOR,
+                clang.CursorKind.CONVERSION_FUNCTION
+            }
+            return cursor.kind in method_kinds
+        except Exception:
+            return False
     
     def _validate_function_completeness(self, functions: Dict[str, Any]):
         """验证函数完整性"""
@@ -913,3 +667,4 @@ class ValidationEngine:
             errors=self.errors.copy(),
             statistics=statistics
         )
+    

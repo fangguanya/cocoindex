@@ -39,8 +39,9 @@ def main():
     parser.add_argument("--verbose", action="store_true", help="显示详细输出")
     parser.add_argument("--max_files", type=int, default=None, help="限制处理的文件数量，None 表示不限制")
     parser.add_argument("-j", "--jobs", type=int, default=2, help="并行处理任务数 (0 表示使用所有CPU核心)")
-    parser.add_argument("--strict_validation", action="store_true", help="启用严格验证模式（报告所有警告，包括外部函数相关）")
     #parser.add_argument("-j", "--jobs", type=int, default=0, help="并行处理任务数 (0 表示使用所有CPU核心)")
+    parser.add_argument("--strict_validation", action="store_true", help="启用严格验证模式（报告所有警告，包括外部函数相关）")
+    
     args = parser.parse_args()
     
     console = Console()
