@@ -206,6 +206,29 @@ class Function:
         
         # C++ 扩展
         self.cpp_extensions = cpp_extensions or CppExtensions(qualified_name=name)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式用于序列化"""
+        return {
+            "name": self.name,
+            "signature": self.signature,
+            "usr_id": self.usr_id,
+            "definition_file_id": self.definition_file_id,
+            "declaration_file_id": self.declaration_file_id,
+            "start_line": self.start_line,
+            "end_line": self.end_line,
+            "is_local": self.is_local,
+            "parameters": [p.__dict__ if hasattr(p, '__dict__') else p for p in self.parameters],
+            "code_content": self.code_content,
+            "declaration_locations": [loc.__dict__ if hasattr(loc, '__dict__') else loc for loc in self.declaration_locations],
+            "definition_location": self.definition_location.__dict__ if self.definition_location and hasattr(self.definition_location, '__dict__') else self.definition_location,
+            "is_declaration": self.is_declaration,
+            "is_definition": self.is_definition,
+            "calls_to": self.calls_to,
+            "called_by": self.called_by,
+            "call_details": [cd.__dict__ if hasattr(cd, '__dict__') else cd for cd in self.call_details],
+            "cpp_extensions": self.cpp_extensions.__dict__ if hasattr(self.cpp_extensions, '__dict__') else self.cpp_extensions
+        }
 
 class InheritanceInfo:
     """继承信息 - 性能优化版"""
@@ -282,6 +305,29 @@ class Class:
         self.member_variables = []  # 成员变量的USR ID列表
         self.fields = fields or {}  # 保留原有字段以兼容性
         self.cpp_oop_extensions = cpp_oop_extensions or CppOopExtensions(qualified_name=qualified_name)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式用于序列化"""
+        return {
+            "name": self.name,
+            "qualified_name": self.qualified_name,
+            "usr_id": self.usr_id,
+            "definition_file_id": self.definition_file_id,
+            "declaration_file_id": self.declaration_file_id,
+            "line": self.line,
+            "declaration_locations": [loc.__dict__ if hasattr(loc, '__dict__') else loc for loc in self.declaration_locations],
+            "definition_location": self.definition_location.__dict__ if self.definition_location and hasattr(self.definition_location, '__dict__') else self.definition_location,
+            "is_declaration": self.is_declaration,
+            "is_definition": self.is_definition,
+            "parent_classes": self.parent_classes,
+            "is_abstract": self.is_abstract,
+            "is_mixin": self.is_mixin,
+            "documentation": self.documentation,
+            "methods": self.methods,
+            "member_variables": self.member_variables,
+            "fields": self.fields,
+            "cpp_oop_extensions": self.cpp_oop_extensions.__dict__ if hasattr(self.cpp_oop_extensions, '__dict__') else self.cpp_oop_extensions
+        }
 
 class Namespace:
     """命名空间实体 - 性能优化版"""
@@ -313,6 +359,28 @@ class Namespace:
         self.aliases = aliases or {}
         self.using_declarations = using_declarations or []
         self.usr = usr  # USR作为内部关联和调试使用
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式用于序列化"""
+        return {
+            "name": self.name,
+            "qualified_name": self.qualified_name,
+            "usr_id": self.usr_id,
+            "definition_file_id": self.definition_file_id,
+            "line": self.line,
+            "declaration_locations": [loc.__dict__ if hasattr(loc, '__dict__') else loc for loc in self.declaration_locations],
+            "definition_location": self.definition_location.__dict__ if self.definition_location and hasattr(self.definition_location, '__dict__') else self.definition_location,
+            "is_anonymous": self.is_anonymous,
+            "is_inline": self.is_inline,
+            "parent_namespace": self.parent_namespace,
+            "nested_namespaces": self.nested_namespaces,
+            "classes": self.classes,
+            "functions": self.functions,
+            "variables": self.variables,
+            "aliases": self.aliases,
+            "using_declarations": self.using_declarations,
+            "usr": self.usr
+        }
 
 # ==============================================================================
 # 全局节点系统 - 性能优化版本

@@ -64,41 +64,60 @@ class SharedHeaderManager:
         except Exception as e:
             self.logger.warning(f"初始化头文件共享状态时出错: {e}")
     
-    def _acquire_file_lock(self, timeout: float = 5.0) -> bool:
-        """获取文件锁 - 快速失败避免死锁"""
+    def _acquire_file_lock(self, timeout: float = 1.5) -> bool:
+        """获取文件锁 - 快速失败机制，避免长时间阻塞"""
         start_time = time.time()
-        while time.time() - start_time < timeout:
+        max_attempts = 15  # 最多尝试15次
+        attempt = 0
+        
+        while time.time() - start_time < timeout and attempt < max_attempts:
+            attempt += 1
             try:
-                # 使用文件锁机制
+                # 原子性创建锁文件
                 if not os.path.exists(self._lock_file):
-                    with open(self._lock_file, 'w') as f:
-                        f.write(f"{self.process_id}:{self.thread_id}")
-                    return True
+                    try:
+                        # 使用排他模式创建文件，如果文件已存在会失败
+                        with open(self._lock_file, 'x') as f:
+                            f.write(f"{self.process_id}:{self.thread_id}:{time.time()}")
+                        return True
+                    except FileExistsError:
+                        # 文件已存在，继续下一轮尝试
+                        pass
                 else:
-                    # 检查锁文件是否过期（超过5秒就认为死锁）
-                    if time.time() - os.path.getmtime(self._lock_file) > 5:
-                        try:
-                            os.remove(self._lock_file)
-                            self.logger.debug("清理了过期的头文件锁文件")
-                        except:
-                            pass
+                    # 检查锁文件是否过期（超过3秒就认为死锁）
+                    try:
+                        lock_age = time.time() - os.path.getmtime(self._lock_file)
+                        if lock_age > 3.0:
+                            try:
+                                os.remove(self._lock_file)
+                                self.logger.debug(f"清理了过期的头文件锁文件 (age: {lock_age:.1f}s)")
+                                continue  # 立即重试
+                            except (OSError, FileNotFoundError):
+                                pass
+                    except (OSError, FileNotFoundError):
+                        # 文件可能已被其他进程删除，继续
                         continue
                         
                     # 检查是否是同一个进程持有锁
                     try:
                         with open(self._lock_file, 'r') as f:
                             lock_info = f.read().strip()
-                            if lock_info == f"{self.process_id}:{self.thread_id}":
+                            parts = lock_info.split(':')
+                            if len(parts) >= 2 and parts[0] == str(self.process_id) and parts[1] == str(self.thread_id):
                                 return True  # 已经持有锁
-                    except:
-                        pass
+                    except (OSError, FileNotFoundError):
+                        # 文件可能被删除，继续重试
+                        continue
                         
-                time.sleep(0.02)  # 更短的等待时间
+                # 指数退避等待策略
+                wait_time = min(0.001 * (2 ** min(attempt - 1, 5)), 0.05)  # 最多等待50ms
+                time.sleep(wait_time)
+                
             except Exception as e:
-                self.logger.debug(f"获取头文件锁时出错: {e}")
-                time.sleep(0.02)
+                self.logger.debug(f"获取头文件锁时出错 (attempt {attempt}): {e}")
+                time.sleep(0.001)
         
-        self.logger.warning(f"获取头文件锁超时 ({timeout}s)")
+        self.logger.debug(f"获取头文件锁失败 ({timeout}s, {attempt} attempts)")
         return False
     
     def _release_file_lock(self):
@@ -110,17 +129,27 @@ class SharedHeaderManager:
             pass
     
     def _load_shared_state(self) -> Dict[str, Any]:
-        """加载共享状态 - 如果文件不存在返回空状态，如果加载失败则抛异常"""
+        """加载共享状态 - 优化版本，减少重复加载"""
+        # 检查本地缓存，避免重复加载
+        if hasattr(self, '_cached_state') and self._cached_state:
+            return self._cached_state
+        
         if not os.path.exists(self._shared_state_file):
             # 文件不存在是正常情况（首次运行），返回空状态
             self.logger.info(f"头文件共享状态文件不存在，初始化新的共享状态: {self._shared_state_file}")
-            return self._create_empty_shared_state()
+            state = self._create_empty_shared_state()
+            self._cached_state = state
+            return state
         
         try:
             # 检查文件大小，如果太小可能是损坏的
             file_size = os.path.getsize(self._shared_state_file)
             if file_size < 10:
-                raise RuntimeError(f"头文件共享状态文件损坏（文件大小 {file_size} 字节，小于最小阈值）: {self._shared_state_file}")
+                self.logger.warning(f"头文件共享状态文件损坏（文件大小 {file_size} 字节），删除并重新初始化")
+                os.remove(self._shared_state_file)
+                state = self._create_empty_shared_state()
+                self._cached_state = state
+                return state
             
             with open(self._shared_state_file, 'rb') as f:
                 data = pickle.load(f)
@@ -130,16 +159,36 @@ class SharedHeaderManager:
                            'path_to_hash_map', 'hash_to_path_map', 'header_stats'}
             if not all(key in data for key in required_keys):
                 missing_keys = required_keys - set(data.keys())
-                raise RuntimeError(f"头文件共享状态数据结构不完整，缺少必需的键: {missing_keys}")
+                self.logger.warning(f"头文件共享状态数据结构不完整，缺少必需的键: {missing_keys}，重新初始化")
+                os.remove(self._shared_state_file)
+                state = self._create_empty_shared_state()
+                self._cached_state = state
+                return state
             
+            # 缓存到本地，避免重复加载
+            self._cached_state = data
             self.logger.info(f"成功加载头文件共享状态，包含 {len(data.get('header_info_cache', {}))} 个头文件信息")
             return data
             
+        except (EOFError, pickle.UnpicklingError, RuntimeError) as e:
+            # pickle文件损坏，删除并重新初始化
+            self.logger.warning(f"头文件共享状态文件损坏，删除并重新初始化: {e}")
+            try:
+                if os.path.exists(self._shared_state_file):
+                    os.remove(self._shared_state_file)
+            except Exception as cleanup_error:
+                self.logger.warning(f"清理损坏文件失败: {cleanup_error}")
+            
+            state = self._create_empty_shared_state()
+            self._cached_state = state
+            return state
+            
         except Exception as e:
-            # 共享状态加载失败是严重错误，直接抛异常
-            error_msg = f"头文件共享状态加载失败，多进程解析功能不可用: {e}"
-            self.logger.error(error_msg)
-            raise RuntimeError(error_msg) from e
+            # 其他未知错误，记录但继续使用空状态
+            self.logger.error(f"加载头文件共享状态时发生未知错误: {e}")
+            state = self._create_empty_shared_state()
+            self._cached_state = state
+            return state
     
     def _create_empty_shared_state(self) -> Dict[str, Any]:
         """创建空的共享状态结构"""
@@ -221,10 +270,11 @@ class SharedHeaderManager:
                     self.logger.debug(f"头文件已在本地缓存中处理: {Path(file_path).name}")
                     return False
         
-        # 获取文件锁并检查共享状态
+        # 获取文件锁并检查共享状态 - 优雅降级机制
         if not self._acquire_file_lock():
-            self.logger.warning(f"无法获取文件锁，跳过头文件: {Path(file_path).name}")
-            return False
+            self.logger.debug(f"无法获取文件锁，跳过头文件: {Path(file_path).name}")
+            # 优雅降级：允许继续处理，但不使用共享缓存
+            return True
         
         try:
             shared_state = self._load_shared_state()

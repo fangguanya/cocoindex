@@ -88,7 +88,10 @@ class SerializableExtractedData:
     def __init__(self, file_path: str, success: bool, parse_time: float, extraction_time: float,
                  functions: Dict[str, Any], classes: Dict[str, Any], namespaces: Dict[str, Any],
                  global_nodes: Dict[str, Any], file_mappings: Dict[str, Any], stats: Dict[str, Any],
-                 member_variables: Optional[Dict[str, Any]] = None):
+                 member_variables: Optional[Dict[str, Any]] = None,
+                 dynamic_headers: Optional[List[str]] = None,
+                 header_processing_results: Optional[Dict[str, Any]] = None,
+                 mmap_shared: bool = False):
         self.file_path = file_path
         self.success = success
         self.parse_time = parse_time
@@ -100,13 +103,28 @@ class SerializableExtractedData:
         self.global_nodes = global_nodes
         self.file_mappings = file_mappings
         self.stats = stats
+        self.dynamic_headers = dynamic_headers or []
+        self.header_processing_results = header_processing_results or {}
+        self.mmap_shared = mmap_shared
     
     @staticmethod
     def empty_result(file_path: str, error_msg: str = "") -> 'SerializableExtractedData':
+        """创建空结果"""
         return SerializableExtractedData(
-            file_path=file_path, success=False, parse_time=0.0, extraction_time=0.0,
-            functions={}, classes={}, namespaces={}, global_nodes={}, file_mappings={},
-            stats={"error": error_msg}, member_variables={}
+            file_path=file_path,
+            success=False,
+            parse_time=0.0,
+            extraction_time=0.0,
+            functions={},
+            classes={},
+            namespaces={},
+            global_nodes={},
+            file_mappings={},
+            stats={"error": error_msg},
+            member_variables={},
+            dynamic_headers=[],
+            header_processing_results={},
+            mmap_shared=False
         )
 
 class ParsedFile:

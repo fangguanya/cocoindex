@@ -32,7 +32,6 @@ def main():
     parser = argparse.ArgumentParser(description="C++ 项目分析工具")
     parser.add_argument("--project_root", default="N:/c7_enginedev/Engine/Source", help="项目根目录")
     parser.add_argument("--scan_directory", default="N:/c7_enginedev/Client", help="要分析的代码目录 (仅用于过滤)")
-    #parser.add_argument("--scan_directory", default="N:/c7_enginedev/Client/Plugins/KGCharacter/Source/KGCharacter")
     parser.add_argument("--compile_commands_path", default="L:/ai-cocoindex-clangcpp/cpp_clang/compile_commands.json", help="compile_commands.json 文件的路径")
     #parser.add_argument("--compile_commands_path", default="N:/c7_enginedev/compile_commands.json", help="compile_commands.json 文件的路径")
     parser.add_argument("--output_file", default="cpp_analysis_result.json", help="输出 JSON 文件路径")
@@ -66,6 +65,7 @@ def main():
     console.print(f"编译命令文件: {COMPILE_COMMANDS_PATH}")
     console.print(f"输出文件: {OUTPUT_FILE}")
     console.print(f"并行任务数: {NUM_JOBS if NUM_JOBS > 0 else '自动 (所有核心)'}")
+    console.print(f"MMap多进程数据共享: 强制启用")
     
     if not Path(PROJECT_ROOT).exists():
         console.print(f"[red]警告: 项目根目录不存在: {PROJECT_ROOT}[/red]")
@@ -102,7 +102,51 @@ def main():
             console.print(f"提取函数: {stats.get('total_functions', 0)}")
             console.print(f"提取类: {stats.get('total_classes', 0)}")
             console.print(f"提取命名空间: {stats.get('total_namespaces', 0)}")
-            console.print(f"分析用时: {stats.get('analysis_time_sec', 0):.2f}秒")
+            analysis_time = stats.get('analysis_time_sec', 0)
+            files_per_sec = stats.get('successful_processed_files', 0) / max(analysis_time, 1)
+            console.print(f"分析用时: {analysis_time:.2f}秒")
+            console.print(f"处理速度: {files_per_sec:.1f} 文件/秒")
+            
+            # MMap多进程数据共享统计
+            console.print(f"\n[bold green]MMap多进程数据共享统计:[/bold green]")
+            
+            # 缓存统计
+            cache_stats = stats.get('mmap_cache_stats', {})
+            if cache_stats:
+                hits = cache_stats.get('hits', 0)
+                misses = cache_stats.get('misses', 0)
+                total = hits + misses
+                hit_rate = (hits / total * 100) if total > 0 else 0
+                console.print(f"缓存命中率: {hit_rate:.1f}% ({hits}/{total})")
+                console.print(f"缓存写入: {cache_stats.get('writes', 0)}")
+                console.print(f"缓存错误: {cache_stats.get('errors', 0)}")
+            
+            # MMap统计
+            mmap_stats = stats.get('mmap_mmap_stats', {})
+            if mmap_stats:
+                console.print(f"MMap文件操作: 打开={mmap_stats.get('files_opened', 0)}, "
+                            f"读取={mmap_stats.get('reads', 0)}, "
+                            f"写入={mmap_stats.get('writes', 0)}, "
+                            f"删除={mmap_stats.get('deletes', 0)}")
+                console.print(f"MMap错误: {mmap_stats.get('errors', 0)}")
+            
+            # 分片统计
+            shard_stats = stats.get('mmap_shard_stats', {})
+            if shard_stats:
+                console.print(f"分片管理: 活跃分片={shard_stats.get('active_shards', 0)}, "
+                            f"路由请求={shard_stats.get('routing_requests', 0)}, "
+                            f"错误={shard_stats.get('errors', 0)}")
+            
+            # 锁统计
+            lock_stats = stats.get('mmap_lock_stats', {})
+            if lock_stats:
+                total_requests = lock_stats.get('total_requests', 0)
+                successful = lock_stats.get('successful_acquires', 0)
+                timeouts = lock_stats.get('timeout_acquires', 0)
+                fast_failures = lock_stats.get('fast_failures', 0)
+                success_rate = (successful / total_requests * 100) if total_requests > 0 else 0
+                console.print(f"锁管理: 成功率={success_rate:.1f}% ({successful}/{total_requests}), "
+                            f"超时={timeouts}, 快速失败={fast_failures}, 错误={lock_stats.get('errors', 0)}")
             
             if Path(result.output_path).exists():
                 file_size = Path(result.output_path).stat().st_size
@@ -136,6 +180,8 @@ if __name__ == "__main__":
     # 确保在Windows上多进程正常工作
     if platform.system() == 'Windows':
         multiprocessing.freeze_support()
+        # 优化Windows下的多进程性能
+        multiprocessing.set_start_method('spawn', force=True)
     
     exit_code = main()
     sys.exit(exit_code)

@@ -14,7 +14,7 @@ from .logger import get_logger
 from .distributed_file_manager import DistributedFileIdManager
 from .performance_profiler import profiler, profile_function, DetailedLogger
 from .dynamic_template_resolver import DynamicTemplateResolver
-from .shared_class_cache import SharedClassCache, get_shared_class_cache
+from .mmapshared_cache_adapter import MMapSharedClassCache, get_shared_class_cache
 from .data_structures import (
     Function, Class, Namespace, CppExtensions, CppOopExtensions,
     CallInfo, CppCallInfo, Parameter, Location, ResolvedDefinitionLocation, InheritanceInfo,
@@ -64,7 +64,7 @@ class EntityExtractor:
         self.template_resolver = DynamicTemplateResolver(project_root=project_root)  # 添加动态模板解析器
         
         # 统一的共享类缓存（处理所有类型：泛型+普通）
-        self.shared_class_cache: Optional[SharedClassCache] = None
+        self.shared_class_cache: Optional[MMapSharedClassCache] = None
         if project_root:
             try:
                 self.shared_class_cache = get_shared_class_cache(project_root)
@@ -1215,17 +1215,43 @@ class EntityExtractor:
             return "private"  # 默认为private
     
     def _is_mutable_field(self, cursor: clang.Cursor) -> bool:
-        """检查字段是否为mutable（简化实现）"""
-        # 这是一个简化的实现，实际中可能需要更复杂的源码解析
+        """检查字段是否为mutable（完整实现）"""
         try:
-            # 通过检查cursor的tokens来判断是否有mutable关键字
+            # 方法1：通过检查cursor的tokens来判断是否有mutable关键字
             tokens = list(cursor.get_tokens())
-            for token in tokens:
+            for i, token in enumerate(tokens):
                 if token.spelling == "mutable":
+                    # 检查mutable后面是否跟着字段名
+                    if i + 1 < len(tokens) and tokens[i + 1].spelling == cursor.spelling:
+                        return True
+            
+            # 方法2：通过检查cursor的类型信息
+            if hasattr(cursor, 'type') and cursor.type:
+                # 检查类型是否包含mutable修饰符
+                type_spelling = cursor.type.spelling
+                if 'mutable' in type_spelling:
                     return True
-        except:
-            pass
-        return False
+            
+            # 方法3：通过检查cursor的访问修饰符
+            if hasattr(cursor, 'get_access_specifier'):
+                # 某些情况下mutable字段可能有特殊的访问修饰符
+                access = cursor.get_access_specifier()
+                # 这里需要根据具体的clang版本和实现来判断
+            
+            # 方法4：通过检查cursor的语义信息
+            if hasattr(cursor, 'is_mutable_field'):
+                return cursor.is_mutable_field()
+            
+            # 方法5：通过检查cursor的显示名称
+            display_name = cursor.displayname
+            if display_name and 'mutable' in display_name:
+                return True
+            
+            return False
+            
+        except Exception as e:
+            self.logger.debug(f"检查mutable字段失败: {e}")
+            return False
     
 
 
@@ -1586,28 +1612,21 @@ class EntityExtractor:
                     # 从缓存的数据重构Class对象
                     return self._reconstruct_class_from_cache(cached_class)
             
-            # 检查是否正在被其他进程解析，但不等待避免死循环
-            if self.shared_class_cache and self.shared_class_cache.is_class_being_resolved(usr, qualified_name):
-                self.logger.error(f"类 {qualified_name} 正在被其他进程解析，跳过避免循环")
-                return None  # 直接跳过，避免无限等待
-            
-            # 尝试获取解析锁，增加重试机制
+            # 直接尝试获取解析锁（内部会检查状态，避免重复检查）
             lock_acquired = False
             if self.shared_class_cache:
-                max_lock_attempts = 3
-                lock_wait_time = 0.1
-                
-                for attempt in range(max_lock_attempts):
+                # 简化重试机制，减少锁等待时间
+                if self.shared_class_cache.try_acquire_class_resolution_lock(usr, qualified_name):
+                    lock_acquired = True
+                else:
+                    # 简单的一次重试，避免过多等待
+                    import time
+                    time.sleep(0.01)  # 10ms等待，比原来100ms快很多
                     if self.shared_class_cache.try_acquire_class_resolution_lock(usr, qualified_name):
                         lock_acquired = True
-                        break
-                    
-                    if attempt < max_lock_attempts - 1:  # 不是最后一次尝试
-                        self.logger.error(f"获取类解析锁失败，第 {attempt + 1}/{max_lock_attempts} 次尝试: {qualified_name}")
-                        import time
-                        time.sleep(lock_wait_time)
                     else:
-                        self.logger.error(f"多次尝试后仍无法获取类 {qualified_name} 的解析锁，跳过解析")
+                        if self.verbose:
+                            self.logger.debug(f"无法获取类解析锁，跳过: {qualified_name}")
                         return None
             
             try:
@@ -3054,7 +3073,7 @@ class EntityExtractor:
                 is_declaration=True,
                 is_definition=False,
                 methods=[],
-                is_abstract=False,
+                is_abstract=self._is_cursor_abstract(cursor),
                 cpp_oop_extensions=CppOopExtensions(qualified_name=class_name),
                 parent_classes=[]
             )

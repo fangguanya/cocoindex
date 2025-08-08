@@ -87,41 +87,60 @@ class SharedClassCache:
         except Exception as e:
             self.logger.warning(f"初始化类缓存共享状态时出错: {e}")
     
-    def _acquire_file_lock(self, timeout: float = 10.0) -> bool:
-        """获取文件锁 - 更短的超时和更好的错误处理"""
+    def _acquire_file_lock(self, timeout: float = 2.0) -> bool:
+        """获取文件锁 - 快速失败机制，避免长时间阻塞"""
         start_time = time.time()
-        while time.time() - start_time < timeout:
+        max_attempts = 20  # 最多尝试20次
+        attempt = 0
+        
+        while time.time() - start_time < timeout and attempt < max_attempts:
+            attempt += 1
             try:
-                # 使用文件锁机制
+                # 原子性创建锁文件
                 if not os.path.exists(self._lock_file):
-                    with open(self._lock_file, 'w') as f:
-                        f.write(f"{self.process_id}:{self.thread_id}")
-                    return True
+                    try:
+                        # 使用排他模式创建文件，如果文件已存在会失败
+                        with open(self._lock_file, 'x') as f:
+                            f.write(f"{self.process_id}:{self.thread_id}:{time.time()}")
+                        return True
+                    except FileExistsError:
+                        # 文件已存在，继续下一轮尝试
+                        pass
                 else:
-                    # 检查锁文件是否过期（超过10秒就认为死锁）
-                    if time.time() - os.path.getmtime(self._lock_file) > 10:
-                        try:
-                            os.remove(self._lock_file)
-                            self.logger.debug("清理了过期的锁文件")
-                        except:
-                            pass
+                    # 检查锁文件是否过期（超过5秒就认为死锁）
+                    try:
+                        lock_age = time.time() - os.path.getmtime(self._lock_file)
+                        if lock_age > 5.0:
+                            try:
+                                os.remove(self._lock_file)
+                                self.logger.debug(f"清理了过期的锁文件 (age: {lock_age:.1f}s)")
+                                continue  # 立即重试
+                            except (OSError, FileNotFoundError):
+                                pass
+                    except (OSError, FileNotFoundError):
+                        # 文件可能已被其他进程删除，继续
                         continue
                         
                     # 检查是否是同一个进程持有锁
                     try:
                         with open(self._lock_file, 'r') as f:
                             lock_info = f.read().strip()
-                            if lock_info == f"{self.process_id}:{self.thread_id}":
+                            parts = lock_info.split(':')
+                            if len(parts) >= 2 and parts[0] == str(self.process_id) and parts[1] == str(self.thread_id):
                                 return True  # 已经持有锁
-                    except:
-                        pass
+                    except (OSError, FileNotFoundError):
+                        # 文件可能被删除，继续重试
+                        continue
                         
-                time.sleep(0.05)  # 更短的等待时间
+                # 指数退避等待策略
+                wait_time = min(0.001 * (2 ** min(attempt - 1, 6)), 0.1)  # 最多等待100ms
+                time.sleep(wait_time)
+                
             except Exception as e:
-                self.logger.debug(f"获取锁时出错: {e}")
-                time.sleep(0.05)
+                self.logger.debug(f"获取锁时出错 (attempt {attempt}): {e}")
+                time.sleep(0.001)
         
-        self.logger.warning(f"获取文件锁超时 ({timeout}s)")
+        self.logger.debug(f"获取文件锁失败 ({timeout}s, {attempt} attempts)")
         return False
     
     def _release_file_lock(self):
@@ -133,17 +152,27 @@ class SharedClassCache:
             pass
     
     def _load_shared_state(self) -> Dict[str, Any]:
-        """加载共享状态 - 如果文件不存在返回空状态，如果加载失败则抛异常"""
+        """加载共享状态 - 优化版本，减少重复加载"""
+        # 检查本地缓存，避免重复加载
+        if hasattr(self, '_cached_state') and self._cached_state:
+            return self._cached_state
+        
         if not os.path.exists(self._shared_state_file):
             # 文件不存在是正常情况（首次运行），返回空状态
             self.logger.info(f"共享状态文件不存在，初始化新的共享状态: {self._shared_state_file}")
-            return self._create_empty_shared_state()
+            state = self._create_empty_shared_state()
+            self._cached_state = state
+            return state
         
         try:
             # 检查文件大小，如果太小可能是损坏的
             file_size = os.path.getsize(self._shared_state_file)
             if file_size < 10:
-                raise RuntimeError(f"共享状态文件损坏（文件大小 {file_size} 字节，小于最小阈值）: {self._shared_state_file}")
+                self.logger.warning(f"共享状态文件损坏（文件大小 {file_size} 字节），删除并重新初始化")
+                os.remove(self._shared_state_file)
+                state = self._create_empty_shared_state()
+                self._cached_state = state
+                return state
             
             with open(self._shared_state_file, 'rb') as f:
                 data = pickle.load(f)
@@ -153,16 +182,36 @@ class SharedClassCache:
                            'usr_to_hash_map', 'name_to_hash_map', 'parent_child_mapping', 'child_parent_mapping'}
             if not all(key in data for key in required_keys):
                 missing_keys = required_keys - set(data.keys())
-                raise RuntimeError(f"共享状态数据结构不完整，缺少必需的键: {missing_keys}")
+                self.logger.warning(f"共享状态数据结构不完整，缺少必需的键: {missing_keys}，重新初始化")
+                os.remove(self._shared_state_file)
+                state = self._create_empty_shared_state()
+                self._cached_state = state
+                return state
             
+            # 缓存到本地，避免重复加载
+            self._cached_state = data
             self.logger.info(f"成功加载共享状态，包含 {len(data.get('resolved_classes', {}))} 个已解析类")
             return data
             
+        except (EOFError, pickle.UnpicklingError, RuntimeError) as e:
+            # pickle文件损坏，删除并重新初始化
+            self.logger.warning(f"共享状态文件损坏，删除并重新初始化: {e}")
+            try:
+                if os.path.exists(self._shared_state_file):
+                    os.remove(self._shared_state_file)
+            except Exception as cleanup_error:
+                self.logger.warning(f"清理损坏文件失败: {cleanup_error}")
+            
+            state = self._create_empty_shared_state()
+            self._cached_state = state
+            return state
+            
         except Exception as e:
-            # 共享状态加载失败是严重错误，直接抛异常
-            error_msg = f"共享状态加载失败，多进程解析功能不可用: {e}"
-            self.logger.error(error_msg)
-            raise RuntimeError(error_msg) from e
+            # 其他未知错误，记录但继续使用空状态
+            self.logger.error(f"加载共享状态时发生未知错误: {e}")
+            state = self._create_empty_shared_state()
+            self._cached_state = state
+            return state
     
     def _create_empty_shared_state(self) -> Dict[str, Any]:
         """创建空的共享状态结构"""
@@ -212,7 +261,7 @@ class SharedClassCache:
         return hashlib.md5(normalized_key.encode('utf-8')).hexdigest()
     
     def is_class_resolved(self, usr: str, qualified_name: str = "") -> bool:
-        """检查类是否已解析（只使用全局共享存储，带循环检测）"""
+        """检查类是否已解析（优化版本，使用本地缓存）"""
         class_hash = self._generate_class_hash(usr, qualified_name)
         if not class_hash:
             return False
@@ -222,11 +271,16 @@ class SharedClassCache:
             self.logger.debug(f"检测到循环依赖，返回已解析: {qualified_name}")
             return True
         
-        self.logger.debug(f"检查类解析状态: {qualified_name} (hash: {class_hash})")
+        # 先检查本地缓存
+        if hasattr(self, '_local_resolved_cache') and class_hash in self._local_resolved_cache:
+            return self._local_resolved_cache[class_hash]
         
-        # 只检查共享状态，不使用本地缓存
+        #self.logger.debug(f"检查类解析状态: {qualified_name} (hash: {class_hash})")
+        
+        # 检查共享状态 - 优雅降级机制
         if not self._acquire_file_lock():
-            self.logger.warning(f"无法获取文件锁，跳过共享缓存检查: {qualified_name}")
+            self.logger.debug(f"无法获取文件锁，跳过共享缓存检查: {qualified_name}")
+            # 优雅降级：无法获取锁时，假设未解析，避免阻塞
             return False
         
         try:
@@ -236,20 +290,26 @@ class SharedClassCache:
             shared_state['cache_stats']['total_requests'] += 1
             
             status = shared_state['class_resolution_status'].get(class_hash)
+            resolved = False
+            
             if status == 'resolved':
                 shared_state['cache_stats']['cache_hits'] += 1
                 self.logger.debug("✓ 共享缓存命中")
-                self._save_shared_state(shared_state)
-                return True
+                resolved = True
             elif status in ['pending', 'resolving']:
                 shared_state['cache_stats']['duplicate_resolutions_prevented'] += 1
                 self.logger.debug("✓ 正在被其他进程解析")
-                self._save_shared_state(shared_state)
-                return True
+                resolved = True
+            else:
+                shared_state['cache_stats']['cache_misses'] += 1
             
-            shared_state['cache_stats']['cache_misses'] += 1
+            # 缓存到本地
+            if not hasattr(self, '_local_resolved_cache'):
+                self._local_resolved_cache = {}
+            self._local_resolved_cache[class_hash] = resolved
+            
             self._save_shared_state(shared_state)
-            return False
+            return resolved
             
         finally:
             self._release_file_lock()
@@ -260,11 +320,12 @@ class SharedClassCache:
         if not class_hash:
             return False
         
-        self.logger.debug(f"检查类解析状态: {qualified_name} (hash: {class_hash})")
+        #self.logger.debug(f"检查类解析状态: {qualified_name} (hash: {class_hash})")
         
-        # 检查共享状态
+        # 检查共享状态 - 优雅降级机制
         if not self._acquire_file_lock():
-            self.logger.warning(f"无法获取文件锁，跳过解析状态检查: {qualified_name}")
+            self.logger.debug(f"无法获取文件锁，跳过解析状态检查: {qualified_name}")
+            # 优雅降级：无法获取锁时，假设未在解析
             return False
         
         try:
@@ -297,7 +358,9 @@ class SharedClassCache:
         current_time = time.time()
         
         if not self._acquire_file_lock():
-            self.logger.warning(f"无法获取文件锁，拒绝解析: {qualified_name}")
+            self.logger.debug(f"无法获取文件锁，拒绝解析: {qualified_name}")
+            # 优雅降级：从处理栈中移除，避免后续问题
+            self._processing_stack.discard(class_hash)
             return False
         
         try:
@@ -335,7 +398,7 @@ class SharedClassCache:
                 shared_state['name_to_hash_map'][qualified_name].add(class_hash)
             
             self._save_shared_state(shared_state)
-            self.logger.debug(f"获取类解析锁成功: {usr} ({qualified_name})")
+            #self.logger.debug(f"获取类解析锁成功: {usr} ({qualified_name})")
             return True
             
         finally:
@@ -374,7 +437,9 @@ class SharedClassCache:
         
         # 更新共享缓存
         if not self._acquire_file_lock():
-            self.logger.warning(f"无法获取文件锁，跳过共享缓存更新: {qualified_name}")
+            self.logger.debug(f"无法获取文件锁，跳过共享缓存更新: {qualified_name}")
+            # 优雅降级：清理本地状态
+            self._processing_stack.discard(class_hash)
             return
         
         try:
@@ -421,7 +486,7 @@ class SharedClassCache:
         finally:
             self._release_file_lock()
         
-        self.logger.debug(f"类已标记为解析完成: {usr} ({qualified_name})")
+        #self.logger.debug(f"类已标记为解析完成: {usr} ({qualified_name})")
     
     def _update_inheritance_relations_unsafe(self, shared_state: Dict[str, Any], class_hash: str, parent_classes):
         """更新继承关系（假设已获取锁）"""
@@ -469,7 +534,9 @@ class SharedClassCache:
         self._processing_stack.discard(class_hash)
         
         if not self._acquire_file_lock():
-            self.logger.warning(f"无法获取文件锁，跳过标记失败: {qualified_name}")
+            self.logger.debug(f"无法获取文件锁，跳过标记失败: {qualified_name}")
+            # 优雅降级：清理本地状态
+            self._processing_stack.discard(class_hash)
             return
         
         try:
@@ -519,7 +586,8 @@ class SharedClassCache:
                 return
             
             if not self._acquire_file_lock():
-                self.logger.warning(f"无法获取文件锁，跳过继承关系更新: {child_name} -> {parent_name}")
+                self.logger.debug(f"无法获取文件锁，跳过继承关系更新: {child_name} -> {parent_name}")
+                # 优雅降级：允许程序继续，但不更新共享状态
                 return
             
             try:

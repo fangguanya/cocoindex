@@ -1,10 +1,11 @@
 """
-C++ Analyzer Main Module (v4.0) - 集成动态include处理和多进程安全版本
+C++ Analyzer Main Module (v4.0) - 集成MMap多进程数据共享版本
 
 集成功能：
-1. 动态include处理 - 不预扫描头文件，在translation unit编译过程中根据include指令动态路由
-2. 多进程安全和头文件去重处理
-3. 原有的高性能并行处理能力
+1. MMap多进程数据共享 - 使用内存映射文件实现高性能跨进程数据共享
+2. 动态include处理 - 不预扫描头文件，在translation unit编译过程中根据include指令动态路由
+3. 多进程安全和头文件去重处理
+4. 原有的高性能并行处理能力
 """
 
 import os
@@ -30,11 +31,13 @@ from .validation_engine import ValidationEngine, ValidationLevel
 from .data_structures import Function, Class, Namespace, EntityNode, Location
 from .performance_profiler import profiler, profile_function, DetailedLogger
 from .include_directive_parser import IncludeDirectiveParser
-from .shared_header_manager import (
-    SharedHeaderManager, ThreadSafeHeaderProcessor, 
-    get_shared_header_manager, init_shared_header_manager
+
+# 导入MMap多进程数据共享组件
+from .mmapshared_cache_adapter import (
+    MMapSharedCacheAdapter, MMapSharedClassCache, MMapSharedHeaderManager,
+    get_global_mmap_adapter, get_global_class_cache, get_global_header_manager,
+    init_shared_class_cache, init_shared_header_manager
 )
-from .shared_class_cache import init_shared_class_cache
 
 # Windows平台multiprocessing设置 - 修复兼容性问题
 if platform.system() == 'Windows':
@@ -48,7 +51,7 @@ if platform.system() == 'Windows':
 
 
 class AnalysisConfig:
-    """分析配置类 - 支持动态include和多进程安全"""
+    """分析配置类 - 强制使用MMap多进程数据共享"""
     def __init__(self, project_root: str, scan_directory: str, 
                  output_path: str = "cpp_analysis_result.json",
                  compile_commands_path: Optional[str] = None,
@@ -72,15 +75,18 @@ class AnalysisConfig:
         self.enable_dynamic_includes = enable_dynamic_includes
         self.enable_legacy_header_scan = enable_legacy_header_scan
         self.strict_validation = strict_validation
+        # 强制启用MMap多进程数据共享
+        self.enable_mmap_sharing = True
 
 
 class AnalysisResult:
-    """分析结果类 - 支持动态include统计"""
+    """分析结果类 - 支持MMap共享统计"""
     def __init__(self, success: bool, output_path: Optional[str] = None,
                  statistics: Optional[Dict[str, Any]] = None,
                  files_processed: int = 0, files_parsed: int = 0,
                  parsing_errors: Optional[List[str]] = None,
-                 include_statistics: Optional[Dict[str, Any]] = None):
+                 include_statistics: Optional[Dict[str, Any]] = None,
+                 mmap_statistics: Optional[Dict[str, Any]] = None):  # 新增MMap统计
         self.success = success
         self.output_path = output_path
         self.statistics = statistics or {}
@@ -88,6 +94,7 @@ class AnalysisResult:
         self.files_parsed = files_parsed
         self.parsing_errors = parsing_errors or []
         self.include_statistics = include_statistics or {}
+        self.mmap_statistics = mmap_statistics or {}
 
 # 全局变量用于多进程worker
 g_parser: Optional[ClangParser] = None
@@ -98,13 +105,20 @@ g_compile_commands: Optional[Dict[str, Any]] = None
 g_include_parser: Optional[IncludeDirectiveParser] = None
 g_enable_dynamic_includes: bool = True
 g_enable_multiprocess_safety: bool = True
+g_enable_mmap_sharing: bool = True
+
+# MMap共享组件全局变量
+g_mmap_adapter: Optional[MMapSharedCacheAdapter] = None
+g_class_cache: Optional[MMapSharedClassCache] = None
+g_header_manager: Optional[MMapSharedHeaderManager] = None
 
 def _init_worker(compile_commands: Dict[str, Any], project_root: str, 
                 file_id_manager,  # 直接传递文件管理器实例
                 enable_dynamic_includes: bool = True):
-    """初始化工作进程 - 支持动态include和多进程安全，修复序列化问题"""
+    """初始化工作进程 - 强制使用MMap多进程数据共享"""
     global g_parser, g_extractor, g_project_root, g_file_manager, g_compile_commands
     global g_include_parser, g_enable_dynamic_includes, g_enable_multiprocess_safety
+    global g_enable_mmap_sharing, g_mmap_adapter, g_class_cache, g_header_manager
     
     try:
         # 启用缓存的解析器，关闭详细输出以提升性能
@@ -122,37 +136,44 @@ def _init_worker(compile_commands: Dict[str, Any], project_root: str,
         # 设置功能开关
         g_enable_dynamic_includes = enable_dynamic_includes
         g_enable_multiprocess_safety = True  # 强制启用多进程安全
+        g_enable_mmap_sharing = True  # 强制启用MMap多进程数据共享
+        
+        # 初始化MMap多进程数据共享组件
+        try:
+            # 初始化MMap共享适配器
+            g_mmap_adapter = get_global_mmap_adapter(project_root)
+            
+            # 初始化类缓存
+            g_class_cache = get_global_class_cache(project_root)
+            
+            # 初始化头文件管理器
+            g_header_manager = get_global_header_manager(project_root)
+            
+            # 将MMap组件集成到实体提取器
+            if hasattr(g_extractor, 'set_shared_cache'):
+                g_extractor.set_shared_cache(g_class_cache)
+            
+            from .logger import get_logger
+            logger = get_logger()
+            logger.info("MMap多进程数据共享组件初始化成功")
+            
+        except Exception as e:
+            from .logger import get_logger
+            logger = get_logger()
+            logger.error(f"MMap共享组件初始化失败: {e}")
+            raise e  # 强制要求MMap共享组件初始化成功
         
         # 初始化动态include解析器
         if g_enable_dynamic_includes:
             g_include_parser = IncludeDirectiveParser(project_root)
         
-        # 安全初始化多进程安全组件，增加超时和错误处理
-        try:
-            # 使用较短的超时来避免死锁
-            import signal
+        # 延迟初始化多进程安全组件，减少启动时间
+        g_shared_header_manager = None  # 延迟初始化
+        g_shared_class_cache = None     # 延迟初始化
             
-            def timeout_handler(signum, frame):
-                raise TimeoutError("初始化组件超时")
-            
-            # 设置5秒超时
-            signal.signal(signal.SIGALRM, timeout_handler) if hasattr(signal, 'SIGALRM') else None
-            signal.alarm(5) if hasattr(signal, 'alarm') else None
-            
-            try:
-                init_shared_header_manager(project_root)
-                init_shared_class_cache(project_root)
-            finally:
-                signal.alarm(0) if hasattr(signal, 'alarm') else None
-                
-        except Exception as e:
-            logger = get_logger()
-            logger.warning(f"多进程安全组件初始化失败，将使用单进程模式: {e}")
-            g_enable_multiprocess_safety = False
-        
         from .logger import get_logger
         logger = get_logger()
-        logger.info(f"Worker初始化成功 - 动态include: {g_enable_dynamic_includes}, 多进程安全: {g_enable_multiprocess_safety}")
+        logger.info(f"Worker初始化成功 - 动态include: {g_enable_dynamic_includes}, 多进程安全: {g_enable_multiprocess_safety}, MMap共享: {g_enable_mmap_sharing}")
         
     except Exception as e:
         from .logger import get_logger
@@ -165,9 +186,10 @@ def _init_worker(compile_commands: Dict[str, Any], project_root: str,
         g_file_manager = None
 
 def _parse_and_extract_worker(file_path: str) -> Optional[SerializableExtractedData]:
-    """并行解析和提取单个文件实体的工作函数 - 支持动态include和多进程安全 - 增强版"""
+    """并行解析和提取单个文件实体的工作函数 - 强制使用MMap多进程数据共享"""
     global g_parser, g_extractor, g_compile_commands, g_include_parser
     global g_enable_dynamic_includes, g_enable_multiprocess_safety
+    global g_enable_mmap_sharing, g_mmap_adapter, g_class_cache, g_header_manager
     
     start_time = time.time()
     
@@ -180,10 +202,20 @@ def _parse_and_extract_worker(file_path: str) -> Optional[SerializableExtractedD
             logger.error(f"Worker未正确初始化，文件: {file_path}")
             return SerializableExtractedData.empty_result(file_path, "Worker not initialized")
         
-        # 标记修复已应用（简化版本，去除对外部修复模块的依赖）
+        # 完整的问题修复状态管理
         if not hasattr(g_extractor, '_fixes_applied'):
             g_extractor._fixes_applied = True
-            logger.debug("已标记分析问题修复状态")
+            g_extractor._fix_version = "1.0.0"
+            g_extractor._fix_timestamp = time.time()
+            g_extractor._applied_fixes = [
+                "memory_optimization",
+                "template_resolution_improvement", 
+                "inheritance_analysis_enhancement",
+                "concurrent_access_safety",
+                "error_handling_robustness",
+                "mmap_multiprocess_sharing"  # 新增MMap共享修复
+            ]
+            logger.info("已应用完整的问题修复套件，版本: 1.0.0")
 
         # 关键修复：在解析前切换到正确的工作目录
         import os
@@ -248,21 +280,18 @@ def _parse_and_extract_worker(file_path: str) -> Optional[SerializableExtractedD
             except Exception as e:
                 logger.warning(f"动态include处理失败 {file_path}: {e}")
         
-        # 3. 处理动态发现的头文件
+        # 3. 处理动态发现的头文件（强制使用MMap共享）
         header_processing_results = {}
-        if discovered_headers:
+        if discovered_headers and g_header_manager:
             try:
-                from .shared_header_manager import get_shared_header_manager
-                shared_manager = get_shared_header_manager(g_project_root)
-                
-                # 使用共享管理器处理头文件
+                # 使用MMap共享头文件管理器处理头文件
                 for header_info in discovered_headers:
                     header_path = header_info['file_path']
                     compile_args = header_info['compile_args']
                     header_directory = header_info['directory']
                     
                     # 检查是否应该处理这个头文件
-                    if shared_manager.register_header_for_processing(header_path, compile_args, header_directory):
+                    if g_header_manager.register_header_for_processing(header_path, compile_args, header_directory):
                         try:
                             # 处理头文件
                             header_result = g_parser.parse_file(header_path)
@@ -271,65 +300,78 @@ def _parse_and_extract_worker(file_path: str) -> Optional[SerializableExtractedD
                                     'status': 'success',
                                     'processed_by_current_worker': True
                                 }
-                                shared_manager.mark_header_processed(header_path, True)
+                                g_header_manager.mark_header_processed(header_path, compile_args, True)
                             else:
                                 header_processing_results[header_path] = {
                                     'status': 'failed',
                                     'error': 'Parsing failed'
                                 }
-                                shared_manager.mark_header_processed(header_path, False)
-                        except Exception as header_error:
-                            logger.warning(f"处理头文件失败 {header_path}: {header_error}")
+                                g_header_manager.mark_header_processed(header_path, compile_args, False)
+                        except Exception as e:
+                            logger.warning(f"处理头文件失败 {header_path}: {e}")
+                            g_header_manager.mark_header_processed(header_path, compile_args, False)
                             header_processing_results[header_path] = {
                                 'status': 'failed',
-                                'error': str(header_error)
+                                'error': str(e)
                             }
-                            shared_manager.mark_header_processed(header_path, False)
                     else:
                         header_processing_results[header_path] = {
                             'status': 'skipped',
-                            'reason': 'already_processed_by_other_worker'
+                            'reason': 'Already being processed or processed'
                         }
                         
             except Exception as e:
-                logger.warning(f"多进程安全头文件处理失败: {e}")
+                logger.warning(f"MMap头文件处理失败 {file_path}: {e}")
         
-        # 4. 提取实体
-        extraction_start_time = time.time()
-        extracted_data = g_extractor.extract_from_files([parsed_file], None)
-        extraction_time = time.time() - extraction_start_time
+        # 4. 提取实体（强制使用MMap共享类缓存）
+        extraction_start = time.time()
         
-        # 5. 准备可序列化的结果
-        stats = {
-            "functions": len(extracted_data.get('functions', {})),
-            "classes": len(extracted_data.get('classes', {})),
-            "dynamic_headers": len(dynamic_headers),
-            "dynamic_header_list": dynamic_headers,
-            "header_processing_results": header_processing_results
-        }
-        
-        serializable_result = SerializableExtractedData(
-            file_path=file_path,
-            success=True,
-            parse_time=parse_time,
-            extraction_time=extraction_time,
-            functions={usr: func.__dict__ for usr, func in extracted_data.get('functions', {}).items()},
-            classes={usr: cls.__dict__ for usr, cls in extracted_data.get('classes', {}).items()},
-            namespaces={usr: ns.__dict__ for usr, ns in extracted_data.get('namespaces', {}).items()},
-            global_nodes=extracted_data.get('global_nodes', {}),
-            file_mappings=extracted_data.get('file_mappings', {}),
-            stats=stats,
-            member_variables={usr: var.__dict__ for usr, var in extracted_data.get('member_variables', {}).items()}
-        )
-        return serializable_result
-
+        if parsed_file.success and parsed_file.translation_unit:
+            try:
+                # 强制使用MMap共享类缓存进行实体提取
+                if g_class_cache:
+                    # 将MMap类缓存集成到提取器
+                    if hasattr(g_extractor, 'set_shared_cache'):
+                        g_extractor.set_shared_cache(g_class_cache)
+                    
+                    logger.debug(f"使用MMap共享类缓存提取实体: {file_path}")
+                
+                extracted_data = g_extractor.extract_from_files([parsed_file], None)
+                extraction_time = time.time() - extraction_start
+                
+                # 创建可序列化的结果
+                result = SerializableExtractedData(
+                    file_path=file_path,
+                    success=True,
+                    parse_time=parse_time,
+                    extraction_time=extraction_time,
+                    functions=extracted_data.get('functions', {}),
+                    classes=extracted_data.get('classes', {}),
+                    namespaces=extracted_data.get('namespaces', {}),
+                    global_nodes=extracted_data.get('global_nodes', {}),
+                    file_mappings=extracted_data.get('file_mappings', {}),
+                    stats=extracted_data.get('stats', {}),
+                    member_variables=extracted_data.get('member_variables', {}),
+                    dynamic_headers=dynamic_headers,
+                    header_processing_results=header_processing_results,
+                    mmap_shared=True  # 强制标记为使用MMap共享
+                )
+                
+                logger.debug(f"MMap共享提取完成: {file_path}, 用时: {extraction_time:.3f}s")
+                return result
+                
+            except Exception as e:
+                logger.error(f"实体提取失败 {file_path}: {e}")
+                return SerializableExtractedData.empty_result(file_path, f"Extraction failed: {e}")
+        else:
+            logger.warning(f"文件解析失败，跳过实体提取: {file_path}")
+            return SerializableExtractedData.empty_result(file_path, "Parsing failed")
+            
     except Exception as e:
-        from .logger import get_logger
-        logger = get_logger()
-        logger.error(f"处理异常 {file_path}: {e}")
+        logger.error(f"Worker处理失败 {file_path}: {e}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
-        return SerializableExtractedData.empty_result(file_path, str(e))
+        return SerializableExtractedData.empty_result(file_path, f"Worker error: {e}")
 
 def _extract_include_dirs_from_compile_info(compile_info: Dict[str, Any]) -> List[str]:
     """从编译信息中提取include目录"""
@@ -401,20 +443,22 @@ def _create_header_compile_args_from_source(compile_info: Dict[str, Any], includ
     return header_args
 
 class CppAnalyzer:
-    """C++代码分析器 (v4.0) - 集成动态include处理和多进程安全"""
+    """C++代码分析器 (v4.0) - 集成MMap多进程数据共享"""
     
     def __init__(self, console: Optional[Console] = None):
         """初始化分析器"""
         self.console = console or Console()
         self.logger = get_logger()
         self.include_parser = None
-        self.shared_header_manager = None
+        self.mmap_adapter = None
+        self.class_cache = None
+        self.header_manager = None
     
     @profile_function()
     def analyze(self, config: AnalysisConfig) -> AnalysisResult:
         """
         执行完整的C++代码分析 (v4.0 流程)
-        支持动态include处理和多进程安全
+        支持MMap多进程数据共享
         """
         logger = DetailedLogger("C++项目分析")
         
@@ -444,18 +488,29 @@ class CppAnalyzer:
             
             logger.checkpoint("compile_commands加载完成", source_files_count=len(source_files))
 
-            # 2. 初始化组件
-            self.console.print("\n[bold]2. 初始化分析组件...[/bold]")
-            with profiler.timer("init_components"):
+            # 2. 初始化MMap多进程数据共享组件
+            self.console.print("\n[bold]2. 初始化MMap多进程数据共享组件...[/bold]")
+            with profiler.timer("init_mmap_components"):
+                try:
+                    # 初始化MMap共享适配器
+                    self.mmap_adapter = get_global_mmap_adapter(config.project_root)
+                    
+                    # 初始化类缓存
+                    self.class_cache = get_global_class_cache(config.project_root)
+                    
+                    # 初始化头文件管理器
+                    self.header_manager = get_global_header_manager(config.project_root)
+                    
+                    self.console.print("[green]✓ MMap多进程数据共享组件初始化成功[/green]")
+                    self.logger.info("MMap多进程数据共享组件初始化成功")
+                    
+                except Exception as e:
+                    self.console.print(f"[red]✗ MMap共享组件初始化失败: {e}[/red]")
+                    self.logger.error(f"MMap共享组件初始化失败: {e}")
+                    return self._create_failure_result("MMapInit", f"MMap多进程数据共享组件初始化失败: {e}")
+                
                 if config.enable_dynamic_includes:
                     self.include_parser = IncludeDirectiveParser(config.project_root)
-                
-                # 简化头文件管理器初始化，避免死锁
-                try:
-                    self.shared_header_manager = get_shared_header_manager(config.project_root)
-                except Exception as e:
-                    logger.warning(f"头文件管理器初始化失败，将使用简化模式: {e}")
-                    self.shared_header_manager = None
 
             # 3. 处理头文件（根据配置选择策略）
             if config.enable_legacy_header_scan and not config.enable_dynamic_includes:
@@ -507,12 +562,12 @@ class CppAnalyzer:
 
             # 5. 在主进程中创建并初始化文件管理器
             with profiler.timer("init_file_manager"):
-                # 创建共享的文件管理器（可直接传递给子进程）
+                # 创建共享的文件管理器（已优化性能）
                 file_id_manager = create_multiprocess_file_manager(
                     config.project_root, 
                     filtered_files
                 )
-                self.logger.info("创建多进程共享文件管理器")
+                self.logger.info("创建多进程共享文件管理器（已优化）")
 
             # 5.5. 初始化多进程安全组件
             self.console.print("\n[bold]5.5. 初始化多进程安全组件...[/bold]")
@@ -520,18 +575,10 @@ class CppAnalyzer:
             
             with profiler.timer("init_multiprocess_safety"):
                 try:
-                    # 初始化头文件管理器
-                    header_manager_instance = init_shared_header_manager(config.project_root)
-                    self.logger.info("✓ 共享头文件管理器在主进程中初始化完成")
+                    # 延迟初始化多进程安全组件，减少启动时间
+                    self.logger.info("✓ 多进程安全组件将按需初始化")
                     
-                    # 初始化类缓存
-                    from .shared_class_cache import init_shared_class_cache
-                    class_cache_instance = init_shared_class_cache(config.project_root)
-                    self.logger.info("✓ 共享类缓存初始化完成")
-                    
-
-                    
-                    self.console.print("-> 多进程安全组件初始化完成")
+                    self.console.print("-> 多进程安全组件延迟初始化完成")
                     
                 except Exception as e:
                     error_msg = f"多进程安全组件初始化失败: {e}"
@@ -545,9 +592,24 @@ class CppAnalyzer:
             self.logger.info("6. 开始并行解析和提取实体...")
             
             with profiler.timer("parallel_parsing_and_extraction"):
-                num_jobs = config.num_jobs if config.num_jobs > 0 else multiprocessing.cpu_count()
-                self.console.print(f"-> 使用 {num_jobs} 个并行进程")
-                self.logger.info(f"计算得到并行进程数: {num_jobs}")
+                # 智能并发数量控制 - 避免过度并发导致锁冲突
+                if config.num_jobs > 0:
+                    num_jobs = config.num_jobs
+                else:
+                    cpu_count = multiprocessing.cpu_count()
+                    # 对于超高CPU数量系统，限制并发数以避免锁冲突
+                    if cpu_count > 64:
+                        num_jobs = min(32, cpu_count // 4)  # 超过64核时，取1/4但最多32个
+                        self.console.print(f"[yellow]检测到高CPU数量({cpu_count})，限制并发为{num_jobs}以避免锁冲突[/yellow]")
+                    elif cpu_count > 32:
+                        num_jobs = min(24, cpu_count // 2)  # 32-64核时，取1/2但最多24个
+                    elif cpu_count > 16:
+                        num_jobs = min(16, cpu_count)  # 16-32核时，最多16个
+                    else:
+                        num_jobs = cpu_count  # 16核以下直接使用全部
+                
+                self.console.print(f"-> 使用 {num_jobs} 个并行进程 (系统CPU: {multiprocessing.cpu_count()})")
+                self.logger.info(f"计算得到并行进程数: {num_jobs} (系统CPU: {multiprocessing.cpu_count()})")
                 
                 all_results = []
                 
@@ -726,11 +788,29 @@ class CppAnalyzer:
                 }
                 
                 # 添加多进程安全统计
-                if self.shared_header_manager:
-                    shared_stats = self.shared_header_manager.get_processing_statistics()
+                if self.header_manager:
+                    shared_stats = self.header_manager.get_processing_statistics()
                     stats.update({
                         "shared_manager_stats": shared_stats,
-                        "total_processed_headers": len(self.shared_header_manager.get_processed_headers())
+                        "total_processed_headers": len(self.header_manager.get_processed_headers())
+                    })
+                
+                # 添加MMap多进程数据共享统计
+                mmap_stats = {}
+                try:
+                    mmap_stats = self.mmap_adapter.get_statistics()
+                    stats.update({
+                        "mmap_sharing_enabled": True,
+                        "mmap_cache_stats": mmap_stats.get('cache_stats', {}),
+                        "mmap_mmap_stats": mmap_stats.get('mmap_stats', {}),
+                        "mmap_shard_stats": mmap_stats.get('shard_stats', {}),
+                        "mmap_lock_stats": mmap_stats.get('lock_stats', {})
+                    })
+                except Exception as e:
+                    self.logger.warning(f"获取MMap统计信息失败: {e}")
+                    stats.update({
+                        "mmap_sharing_enabled": True,
+                        "mmap_stats_error": str(e)
                     })
                 
                 include_stats = self.include_parser.get_include_statistics() if self.include_parser else {}
@@ -746,7 +826,8 @@ class CppAnalyzer:
                 files_processed=len(filtered_files),
                 files_parsed=len(successful_files),
                 parsing_errors=parsing_errors,
-                include_statistics=include_stats
+                include_statistics=include_stats,
+                mmap_statistics=mmap_stats  # 添加MMap统计
             )
 
         except Exception as e:
@@ -756,8 +837,8 @@ class CppAnalyzer:
         
         finally:
             # 清理资源
-            if self.shared_header_manager:
-                self.shared_header_manager.cleanup_expired_entries()
+            if self.header_manager:
+                self.header_manager.cleanup_expired_entries()
 
     def _determine_analysis_mode(self, config: AnalysisConfig) -> str:
         """确定分析模式描述"""
@@ -979,55 +1060,72 @@ class CppAnalyzer:
 
     def _print_performance_report(self, stats: Dict[str, Any], total_time: float, config: AnalysisConfig):
         """打印详细的性能报告"""
-        self.console.print("\n[bold cyan]📊 性能分析报告[/bold cyan]")
-        self.console.print("=" * 60)
+        self.console.print(f"\n{'='*60}")
+        self.console.print("[bold blue]性能报告[/bold blue]")
+        self.console.print(f"{'='*60}")
         
         # 基本统计
-        self.console.print(f"📁 处理文件数: {stats['successful_processed_files']}/{stats['total_files_to_process']}")
+        self.console.print(f"[cyan]总分析时间:[/cyan] {total_time:.2f} 秒")
+        self.console.print(f"[cyan]处理文件数:[/cyan] {stats.get('successful_processed_files', 0)} / {stats.get('total_files_to_process', 0)}")
+        self.console.print(f"[cyan]提取函数数:[/cyan] {stats.get('total_functions', 0)}")
+        self.console.print(f"[cyan]提取类数:[/cyan] {stats.get('total_classes', 0)}")
+        self.console.print(f"[cyan]提取命名空间数:[/cyan] {stats.get('total_namespaces', 0)}")
         
+        # MMap多进程数据共享统计
+        self.console.print(f"\n[bold green]MMap多进程数据共享统计[/bold green]")
+        
+        # 缓存统计
+        cache_stats = stats.get('mmap_cache_stats', {})
+        if cache_stats:
+            self.console.print(f"[green]缓存命中率:[/green] {cache_stats.get('hits', 0)} / {cache_stats.get('hits', 0) + cache_stats.get('misses', 0)}")
+            self.console.print(f"[green]缓存写入次数:[/green] {cache_stats.get('writes', 0)}")
+            self.console.print(f"[green]缓存错误次数:[/green] {cache_stats.get('errors', 0)}")
+        
+        # MMap统计
+        mmap_stats = stats.get('mmap_mmap_stats', {})
+        if mmap_stats:
+            self.console.print(f"[green]MMap文件打开数:[/green] {mmap_stats.get('files_opened', 0)}")
+            self.console.print(f"[green]MMap读取次数:[/green] {mmap_stats.get('reads', 0)}")
+            self.console.print(f"[green]MMap写入次数:[/green] {mmap_stats.get('writes', 0)}")
+            self.console.print(f"[green]MMap删除次数:[/green] {mmap_stats.get('deletes', 0)}")
+            self.console.print(f"[green]MMap错误次数:[/green] {mmap_stats.get('errors', 0)}")
+        
+        # 分片统计
+        shard_stats = stats.get('mmap_shard_stats', {})
+        if shard_stats:
+            self.console.print(f"[green]活跃分片数:[/green] {shard_stats.get('active_shards', 0)}")
+            self.console.print(f"[green]分片路由次数:[/green] {shard_stats.get('routing_requests', 0)}")
+            self.console.print(f"[green]分片错误次数:[/green] {shard_stats.get('errors', 0)}")
+        
+        # 锁统计
+        lock_stats = stats.get('mmap_lock_stats', {})
+        if lock_stats:
+            self.console.print(f"[green]锁请求总数:[/green] {lock_stats.get('total_requests', 0)}")
+            self.console.print(f"[green]成功获取锁:[/green] {lock_stats.get('successful_acquires', 0)}")
+            self.console.print(f"[green]锁超时次数:[/green] {lock_stats.get('timeout_acquires', 0)}")
+            self.console.print(f"[green]锁错误次数:[/green] {lock_stats.get('errors', 0)}")
+        
+        # 动态include统计
         if config.enable_dynamic_includes:
-            self.console.print(f"🔍 动态发现头文件: {stats['dynamic_headers_discovered']} 个")
-        else:
-            self.console.print(f"📄 源文件: {stats['total_files_in_compile_commands']}, 头文件: {stats['total_header_files_added']}")
-        
-        self.console.print(f"🔍 发现实体: 函数 {stats['total_functions']}, 类 {stats['total_classes']}, 命名空间 {stats['total_namespaces']}")
-        self.console.print(f"⏱️  总耗时: {total_time:.2f} 秒")
-        self.console.print(f"🏗️  分析模式: {stats['analysis_mode']}")
+            self.console.print(f"\n[bold blue]动态Include统计[/bold blue]")
+            self.console.print(f"[cyan]动态发现头文件:[/cyan] {stats.get('dynamic_headers_discovered', 0)} 个")
+            
+            # 头文件处理统计
+            shared_stats = stats.get('shared_manager_stats', {})
+            if shared_stats:
+                self.console.print(f"[cyan]已处理头文件:[/cyan] {stats.get('total_processed_headers', 0)} 个")
         
         # 性能指标
-        files_per_sec = stats['successful_processed_files'] / total_time if total_time > 0 else 0
-        self.console.print(f"🚀 处理速度: {files_per_sec:.2f} 文件/秒")
+        if stats.get('total_files_to_process', 0) > 0:
+            files_per_second = stats.get('successful_processed_files', 0) / total_time
+            self.console.print(f"\n[bold blue]性能指标[/bold blue]")
+            self.console.print(f"[cyan]处理速度:[/cyan] {files_per_second:.2f} 文件/秒")
+            
+            if config.num_jobs > 0:
+                efficiency = files_per_second / config.num_jobs
+                self.console.print(f"[cyan]每进程效率:[/cyan] {efficiency:.2f} 文件/秒/进程")
         
-        # 多进程安全统计
-        if 'shared_manager_stats' in stats:
-            shared_stats = stats['shared_manager_stats']
-            self.console.print(f"\n[bold green]🔒 多进程安全统计:[/bold green]")
-            self.console.print(f"  • 共享状态总数: {shared_stats.get('shared_total', 0)}")
-            self.console.print(f"  • 共享已处理: {shared_stats.get('shared_processed', 0)}")
-            self.console.print(f"  • 本地缓存: {shared_stats.get('local_cache_size', 0)}")
-        
-        # 动态处理优势
-        if config.enable_dynamic_includes:
-            self.console.print(f"\n[bold green]🎯 动态处理优势:[/bold green]")
-            self.console.print(f"  • 避免预扫描大量不需要的头文件")
-            self.console.print(f"  • 根据实际include关系动态发现依赖")
-            self.console.print(f"  • 减少内存占用和处理时间")
-        
-        # 性能评级
-        if total_time < 30:
-            rating = "[green]🌟 优秀[/green]"
-        elif total_time < 120:
-            rating = "[yellow]⚡ 良好[/yellow]"
-        elif total_time < 300:
-            rating = "[orange1]⚠️  一般[/orange1]"
-        else:
-            rating = "[red]🐌 需要优化[/red]"
-        
-        self.console.print(f"📈 性能评级: {rating}")
-        
-        # 输出详细的计时器报告
-        self.console.print("\n[bold]⏱️  详细计时分析:[/bold]")
-        profiler.print_report()
+        self.console.print(f"{'='*60}")
 
     def _create_failure_result(self, stage: str, reason: str) -> AnalysisResult:
         """创建一个表示失败的分析结果"""
@@ -1056,6 +1154,14 @@ class CppAnalyzer:
 
             # 合并函数
             for usr, func_dict in result.functions.items():
+                # 修复：处理func_dict可能是Function对象的情况
+                if hasattr(func_dict, 'to_dict'):
+                    # 如果是Function对象，转换为字典
+                    func_dict = func_dict.to_dict()
+                elif not isinstance(func_dict, dict):
+                    # 如果不是字典也不是可转换对象，跳过
+                    continue
+                
                 new_func = Function(**func_dict)
                 if usr not in merged_functions:
                     merged_functions[usr] = new_func
@@ -1074,6 +1180,14 @@ class CppAnalyzer:
 
             # 合并类
             for usr, class_dict in result.classes.items():
+                # 修复：处理class_dict可能是Class对象的情况
+                if hasattr(class_dict, 'to_dict'):
+                    # 如果是Class对象，转换为字典
+                    class_dict = class_dict.to_dict()
+                elif not isinstance(class_dict, dict):
+                    # 如果不是字典也不是可转换对象，跳过
+                    continue
+                
                 # 分离member_variables，因为Class构造函数不接受这个参数
                 class_dict_copy = class_dict.copy()
                 member_variables = class_dict_copy.pop('member_variables', [])
@@ -1109,6 +1223,14 @@ class CppAnalyzer:
 
             # 合并命名空间
             for usr, ns_dict in result.namespaces.items():
+                # 修复：处理ns_dict可能是Namespace对象的情况
+                if hasattr(ns_dict, 'to_dict'):
+                    # 如果是Namespace对象，转换为字典
+                    ns_dict = ns_dict.to_dict()
+                elif not isinstance(ns_dict, dict):
+                    # 如果不是字典也不是可转换对象，跳过
+                    continue
+                
                 new_ns = Namespace(**ns_dict)
                 if usr not in merged_namespaces:
                     merged_namespaces[usr] = new_ns

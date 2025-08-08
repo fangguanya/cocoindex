@@ -126,11 +126,17 @@ class DistributedFileIdManager:
             pass
     
     def _load_shared_state(self) -> Dict[str, any]:
-        """加载共享状态 - 如果文件不存在返回空状态，如果加载失败则抛异常"""
+        """加载共享状态 - 优化版本，减少重复加载"""
+        # 检查本地缓存，避免重复加载
+        if hasattr(self, '_cached_state') and self._cached_state:
+            return self._cached_state
+        
         if not os.path.exists(self._shared_state_file):
             # 文件不存在是正常情况（首次运行），返回空状态
             self.logger.info(f"文件管理器共享状态文件不存在，初始化新的共享状态: {self._shared_state_file}")
-            return self._create_empty_shared_state()
+            state = self._create_empty_shared_state()
+            self._cached_state = state
+            return state
         
         try:
             # 检查文件大小，如果太小可能是损坏的
@@ -147,6 +153,8 @@ class DistributedFileIdManager:
                 missing_keys = required_keys - set(data.keys())
                 raise RuntimeError(f"文件管理器共享状态数据结构不完整，缺少必需的键: {missing_keys}")
             
+            # 缓存到本地，避免重复加载
+            self._cached_state = data
             self.logger.info(f"成功加载文件管理器共享状态，包含 {len(data.get('path_to_id', {}))} 个文件映射")
             return data
             
@@ -212,7 +220,7 @@ class DistributedFileIdManager:
             self._release_file_lock()
     
     def get_file_id(self, file_path: Optional[str]) -> Optional[str]:
-        """获取文件ID，如果不存在则动态分配临时ID（多进程共享状态）"""
+        """获取文件ID，优化版本，减少文件锁竞争"""
         if not file_path:
             return None
         
@@ -223,14 +231,27 @@ class DistributedFileIdManager:
             if normalized_path in self._local_cache:
                 return self._local_cache[normalized_path]
         
-        # 检查共享映射表
+        # 先检查共享状态（使用缓存的共享状态，减少文件锁）
+        shared_state = self._load_shared_state()
+        existing_id = shared_state['path_to_id'].get(normalized_path)
+        
+        if existing_id:
+            # 更新本地缓存
+            with self._lock:
+                self._local_cache[normalized_path] = existing_id
+                self._local_reverse_cache[existing_id] = normalized_path
+            return existing_id
+        
+        # 动态分配临时ID（需要文件锁）- 优雅降级机制
         if not self._acquire_file_lock():
-            # 如果无法获取锁，生成简单的临时ID
-            return f"temp_{abs(hash(normalized_path)) % 1000000}"
+            # 如果无法获取锁，生成基于进程的临时ID，避免冲突
+            return f"temp_{self.process_id}_{abs(hash(normalized_path)) % 100000}"
         
         try:
+            # 重新加载共享状态以确保最新
             shared_state = self._load_shared_state()
             
+            # 再次检查（可能在获取锁期间被其他进程添加）
             existing_id = shared_state['path_to_id'].get(normalized_path)
             if existing_id:
                 shared_state['stats']['reused_ids'] += 1

@@ -44,6 +44,10 @@ class IncludeDirectiveParser:
         self._include_cache: Dict[str, str] = {}  # include_path -> resolved_path
         self._file_include_map: Dict[str, List[IncludeDirective]] = {}  # file_path -> includes
         
+        # 添加性能优化的本地缓存
+        self._system_include_cache: Dict[str, bool] = {}  # file_path:line -> is_system_include
+        self._resolved_path_cache: Dict[str, str] = {}  # include_path -> resolved_path
+        
     def extract_include_directives_from_tu(self, translation_unit: clang.TranslationUnit) -> List[IncludeDirective]:
         """从translation unit中提取所有include指令"""
         directives = []
@@ -85,7 +89,12 @@ class IncludeDirectiveParser:
             return None
     
     def _is_system_include(self, cursor: clang.Cursor, file_path: str, line_number: int) -> bool:
-        """判断是否是系统include（<> vs ""）"""
+        """判断是否是系统include（<> vs ""）- 优化版本，使用本地缓存"""
+        # 检查本地缓存
+        cache_key = f"{file_path}:{line_number}"
+        if cache_key in self._system_include_cache:
+            return self._system_include_cache[cache_key]
+        
         try:
             # 读取源文件的对应行来判断include类型
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -93,9 +102,16 @@ class IncludeDirectiveParser:
                 if 0 <= line_number - 1 < len(lines):
                     line = lines[line_number - 1].strip()
                     # 检查是否包含 < 和 >
-                    return '<' in line and '>' in line
+                    is_system = '<' in line and '>' in line
+                    
+                    # 缓存结果
+                    self._system_include_cache[cache_key] = is_system
+                    return is_system
         except Exception:
             pass
+        
+        # 默认值并缓存
+        self._system_include_cache[cache_key] = False
         return False
     
     def extract_include_directives_from_source(self, file_path: str) -> List[IncludeDirective]:
@@ -130,15 +146,27 @@ class IncludeDirectiveParser:
     
     def resolve_include_directive(self, directive: IncludeDirective, 
                                 include_dirs: List[str]) -> IncludeResolutionResult:
-        """解析include指令到实际文件路径"""
+        """解析include指令到实际文件路径 - 优化版本，使用多层缓存"""
         
-        # 检查缓存
+        # 检查多层缓存
         cache_key = f"{directive.include_path}:{':'.join(include_dirs)}"
+        
+        # 1. 检查主缓存
         if cache_key in self._include_cache:
             return IncludeResolutionResult(
                 success=True,
                 resolved_path=self._include_cache[cache_key]
             )
+        
+        # 2. 检查解析路径缓存
+        if directive.include_path in self._resolved_path_cache:
+            resolved_path = self._resolved_path_cache[directive.include_path]
+            if os.path.exists(resolved_path):
+                self._include_cache[cache_key] = resolved_path
+                return IncludeResolutionResult(
+                    success=True,
+                    resolved_path=resolved_path
+                )
         
         searched_dirs = []
         
@@ -150,7 +178,9 @@ class IncludeDirectiveParser:
             
             if os.path.exists(candidate_path):
                 resolved_path = str(Path(candidate_path).resolve())
+                # 更新所有缓存
                 self._include_cache[cache_key] = resolved_path
+                self._resolved_path_cache[directive.include_path] = resolved_path
                 return IncludeResolutionResult(
                     success=True,
                     resolved_path=resolved_path,
@@ -164,7 +194,9 @@ class IncludeDirectiveParser:
             
             if os.path.exists(candidate_path):
                 resolved_path = str(Path(candidate_path).resolve())
+                # 更新所有缓存
                 self._include_cache[cache_key] = resolved_path
+                self._resolved_path_cache[directive.include_path] = resolved_path
                 return IncludeResolutionResult(
                     success=True,
                     resolved_path=resolved_path,

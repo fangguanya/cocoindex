@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Set, Tuple, Any
 from pathlib import Path
 from .logger import get_logger
 from .clang_parser import ClangParser
+import time
 
 class TemplateInstantiationInfo:
     """模板实例化信息"""
@@ -59,7 +60,7 @@ class DynamicTemplateResolver:
             raise RuntimeError("DynamicTemplateResolver 必须提供 project_root 参数以启用强制全局缓存")
         
         try:
-            from .shared_class_cache import get_shared_class_cache
+            from .mmapshared_cache_adapter import get_shared_class_cache
             self.shared_cache = get_shared_class_cache(project_root)
             if not self.shared_cache:
                 raise RuntimeError("共享类缓存初始化失败，无法获取有效的缓存实例")
@@ -681,22 +682,71 @@ class DynamicTemplateResolver:
         if base_cursor:
             self._handle_template_base_class_cursor(base_cursor, derived_usr, base_spec, file_path)
         else:
-            # 无cursor时的简化处理
+            # 无cursor时的完整处理
             try:
                 base_type = base_spec.type
                 if base_type:
+                    # 方法1：从类型中提取模板参数
                     template_args = self._extract_concrete_template_args(base_type)
+                    
+                    # 方法2：从类型名称中解析模板参数
+                    if not template_args:
+                        type_spelling = base_type.spelling
+                        template_args = self._parse_template_args_from_type_name(type_spelling)
+                    
+                    # 方法3：从显示名称中提取信息
+                    if not template_args and hasattr(base_type, 'get_display_name'):
+                        display_name = base_type.get_display_name()
+                        template_args = self._parse_template_args_from_display_name(display_name)
+                    
                     if template_args:
                         if not hasattr(self, 'template_base_instantiations'):
                             self.template_base_instantiations = {}
                         
-                        self.template_base_instantiations[derived_usr] = {
+                        # 记录完整的模板实例化信息
+                        instantiation_info = {
                             'base_usr': base_usr,
                             'template_args': template_args,
-                            'source_location': f"{file_path}:{base_spec.location.line}"
+                            'source_location': f"{file_path}:{base_spec.location.line}",
+                            'derived_usr': derived_usr,
+                            'type_spelling': base_type.spelling if base_type else '',
+                            'cursor_kind': base_spec.kind.name if hasattr(base_spec, 'kind') else '',
+                            'timestamp': time.time()
                         }
+                        
+                        self.template_base_instantiations[derived_usr] = instantiation_info
+                        
+                        # 同时记录到模板关系映射中
+                        if not hasattr(self, 'template_relationships'):
+                            self.template_relationships = {}
+                        
+                        if base_usr not in self.template_relationships:
+                            self.template_relationships[base_usr] = {
+                                'specializations': [],
+                                'instantiations': [],
+                                'base_template': True
+                            }
+                        
+                        self.template_relationships[base_usr]['instantiations'].append({
+                            'specialized_usr': derived_usr,
+                            'template_args': template_args,
+                            'source_location': instantiation_info['source_location']
+                        })
+                        
+                        self.logger.debug(f"记录模板实例化: {base_usr} -> {derived_usr} with args {template_args}")
+                        
             except Exception as e:
                 self.logger.debug(f"处理模板基类时出错: {e}")
+                # 记录错误信息以便后续分析
+                if not hasattr(self, 'template_processing_errors'):
+                    self.template_processing_errors = []
+                self.template_processing_errors.append({
+                    'error': str(e),
+                    'base_usr': base_usr,
+                    'derived_usr': derived_usr,
+                    'file_path': file_path,
+                    'timestamp': time.time()
+                })
     
     def _extract_concrete_template_args(self, template_type: clang.Type) -> List[str]:
         """使用clang API提取具体的模板参数"""
@@ -1853,7 +1903,7 @@ class DynamicTemplateResolver:
             self.logger.debug(f"构建完整USR映射时出错: {e}")
     
     def _create_class_from_cursor(self, cursor) -> Optional[Any]:
-        """从cursor创建类对象（简化版本）"""
+        """从cursor创建类对象（完整版本）"""
         if not cursor:
             return None
         
@@ -1868,13 +1918,27 @@ class DynamicTemplateResolver:
                                   clang.CursorKind.CLASS_TEMPLATE_PARTIAL_SPECIALIZATION]:
                 return None
             
-            # 这里需要导入Class，但为了避免循环导入，返回基本信息
+            # 创建完整的类信息
             class_info = {
                 'name': cursor.spelling or cursor.displayname,
                 'usr': cursor.get_usr(),
-                'kind': cursor.kind,
+                'kind': cursor.kind.name,
                 'location': cursor.location.file.name if cursor.location.file else "<unknown>",
-                'line': cursor.location.line if hasattr(cursor.location, 'line') else 0
+                'line': cursor.location.line if hasattr(cursor.location, 'line') else 0,
+                'column': cursor.location.column if hasattr(cursor.location, 'column') else 0,
+                'qualified_name': self._extract_qualified_name_from_cursor(cursor),
+                'is_template': cursor.kind in [clang.CursorKind.CLASS_TEMPLATE, 
+                                              clang.CursorKind.CLASS_TEMPLATE_PARTIAL_SPECIALIZATION],
+                'is_abstract': cursor.is_abstract_record() if hasattr(cursor, 'is_abstract_record') else False,
+                'is_polymorphic': getattr(cursor, 'is_polymorphic', lambda: False)(),
+                'access_specifier': self._get_access_specifier(cursor),
+                'template_parameters': self._extract_template_parameters_from_cursor(cursor),
+                'base_classes': self._extract_base_classes_from_cursor(cursor),
+                'methods': self._extract_methods_from_cursor(cursor),
+                'fields': self._extract_fields_from_cursor(cursor),
+                'nested_classes': self._extract_nested_classes_from_cursor(cursor),
+                'namespace': self._extract_namespace_from_cursor(cursor),
+                'timestamp': time.time()
             }
             
             return class_info
@@ -1882,3 +1946,225 @@ class DynamicTemplateResolver:
         except Exception as e:
             self.logger.debug(f"从cursor创建类对象时出错: {e}")
             return None
+    
+    def _get_access_specifier(self, cursor) -> str:
+        """获取访问修饰符"""
+        try:
+            access = cursor.access_specifier
+            if access == clang.AccessSpecifier.PUBLIC:
+                return "public"
+            elif access == clang.AccessSpecifier.PROTECTED:
+                return "protected"
+            elif access == clang.AccessSpecifier.PRIVATE:
+                return "private"
+            else:
+                return "private"
+        except:
+            return "private"
+    
+    def _extract_template_parameters_from_cursor(self, cursor) -> List[Dict[str, Any]]:
+        """从cursor提取模板参数"""
+        params = []
+        try:
+            for child in cursor.get_children():
+                if child.kind == clang.CursorKind.TEMPLATE_TYPE_PARAMETER:
+                    params.append({
+                        'name': child.spelling,
+                        'type': 'typename',
+                        'kind': 'type_parameter'
+                    })
+                elif child.kind == clang.CursorKind.TEMPLATE_NON_TYPE_PARAMETER:
+                    params.append({
+                        'name': child.spelling,
+                        'type': child.type.spelling if child.type else 'unknown',
+                        'kind': 'non_type_parameter'
+                    })
+        except Exception as e:
+            self.logger.debug(f"提取模板参数失败: {e}")
+        
+        return params
+    
+    def _extract_base_classes_from_cursor(self, cursor) -> List[Dict[str, Any]]:
+        """从cursor提取基类信息"""
+        base_classes = []
+        try:
+            for child in cursor.get_children():
+                if child.kind == clang.CursorKind.CXX_BASE_SPECIFIER:
+                    base_info = {
+                        'name': child.spelling,
+                        'usr': child.get_usr(),
+                        'access': self._get_access_specifier(child),
+                        'is_virtual': child.is_virtual_base() if hasattr(child, 'is_virtual_base') else False
+                    }
+                    base_classes.append(base_info)
+        except Exception as e:
+            self.logger.debug(f"提取基类信息失败: {e}")
+        
+        return base_classes
+    
+    def _extract_methods_from_cursor(self, cursor) -> List[Dict[str, Any]]:
+        """从cursor提取方法信息"""
+        methods = []
+        try:
+            for child in cursor.get_children():
+                if child.kind == clang.CursorKind.CXX_METHOD:
+                    method_info = {
+                        'name': child.spelling,
+                        'usr': child.get_usr(),
+                        'access': self._get_access_specifier(child),
+                        'is_virtual': child.is_virtual_method() if hasattr(child, 'is_virtual_method') else False,
+                        'is_pure_virtual': child.is_pure_virtual_method() if hasattr(child, 'is_pure_virtual_method') else False,
+                        'is_static': child.is_static_method() if hasattr(child, 'is_static_method') else False,
+                        'is_const': child.is_const_method() if hasattr(child, 'is_const_method') else False,
+                        'return_type': child.result_type.spelling if child.result_type else 'void'
+                    }
+                    methods.append(method_info)
+        except Exception as e:
+            self.logger.debug(f"提取方法信息失败: {e}")
+        
+        return methods
+    
+    def _extract_fields_from_cursor(self, cursor) -> List[Dict[str, Any]]:
+        """从cursor提取字段信息"""
+        fields = []
+        try:
+            for child in cursor.get_children():
+                if child.kind == clang.CursorKind.FIELD_DECL:
+                    field_info = {
+                        'name': child.spelling,
+                        'usr': child.get_usr(),
+                        'access': self._get_access_specifier(child),
+                        'type': child.type.spelling if child.type else 'unknown',
+                        'is_static': child.is_static_field() if hasattr(child, 'is_static_field') else False
+                    }
+                    fields.append(field_info)
+        except Exception as e:
+            self.logger.debug(f"提取字段信息失败: {e}")
+        
+        return fields
+    
+    def _extract_nested_classes_from_cursor(self, cursor) -> List[Dict[str, Any]]:
+        """从cursor提取嵌套类信息"""
+        nested_classes = []
+        try:
+            for child in cursor.get_children():
+                if child.kind in [clang.CursorKind.CLASS_DECL, clang.CursorKind.STRUCT_DECL]:
+                    nested_info = {
+                        'name': child.spelling,
+                        'usr': child.get_usr(),
+                        'kind': child.kind.name,
+                        'access': self._get_access_specifier(child)
+                    }
+                    nested_classes.append(nested_info)
+        except Exception as e:
+            self.logger.debug(f"提取嵌套类信息失败: {e}")
+        
+        return nested_classes
+    
+    def _extract_namespace_from_cursor(self, cursor) -> str:
+        """从cursor提取命名空间"""
+        try:
+            namespace = cursor.get_namespace()
+            if namespace:
+                return namespace.spelling
+            else:
+                return "global"
+        except Exception as e:
+            self.logger.debug(f"提取命名空间失败: {e}")
+            return "global"
+    
+    def _parse_template_args_from_type_name(self, type_name: str) -> List[str]:
+        """从类型名称中解析模板参数"""
+        args = []
+        try:
+            # 查找模板参数部分
+            if '<' in type_name and '>' in type_name:
+                start = type_name.find('<')
+                end = type_name.rfind('>')
+                if start < end:
+                    template_part = type_name[start + 1:end]
+                    
+                    # 分割模板参数（处理嵌套模板）
+                    depth = 0
+                    current_arg = ""
+                    for char in template_part:
+                        if char == '<':
+                            depth += 1
+                        elif char == '>':
+                            depth -= 1
+                        elif char == ',' and depth == 0:
+                            if current_arg.strip():
+                                args.append(current_arg.strip())
+                            current_arg = ""
+                            continue
+                        
+                        current_arg += char
+                    
+                    # 添加最后一个参数
+                    if current_arg.strip():
+                        args.append(current_arg.strip())
+                        
+        except Exception as e:
+            self.logger.debug(f"从类型名称解析模板参数失败: {e}")
+        
+        return args
+    
+    def _parse_template_args_from_display_name(self, display_name: str) -> List[str]:
+        """从显示名称中解析模板参数"""
+        args = []
+        try:
+            # 显示名称通常包含更详细的类型信息
+            if '<' in display_name and '>' in display_name:
+                start = display_name.find('<')
+                end = display_name.rfind('>')
+                if start < end:
+                    template_part = display_name[start + 1:end]
+                    
+                    # 处理显示名称中的特殊格式
+                    # 例如: "std::vector<int, std::allocator<int>>"
+                    depth = 0
+                    current_arg = ""
+                    for char in template_part:
+                        if char == '<':
+                            depth += 1
+                        elif char == '>':
+                            depth -= 1
+                        elif char == ',' and depth == 0:
+                            if current_arg.strip():
+                                # 清理参数（移除多余的空格和类型修饰符）
+                                cleaned_arg = self._clean_template_argument(current_arg.strip())
+                                if cleaned_arg:
+                                    args.append(cleaned_arg)
+                            current_arg = ""
+                            continue
+                        
+                        current_arg += char
+                    
+                    # 添加最后一个参数
+                    if current_arg.strip():
+                        cleaned_arg = self._clean_template_argument(current_arg.strip())
+                        if cleaned_arg:
+                            args.append(cleaned_arg)
+                            
+        except Exception as e:
+            self.logger.debug(f"从显示名称解析模板参数失败: {e}")
+        
+        return args
+    
+    def _clean_template_argument(self, arg: str) -> str:
+        """清理模板参数，移除不必要的修饰符"""
+        try:
+            # 移除常见的类型修饰符
+            modifiers = ['const ', 'volatile ', '&', '*', '&&']
+            cleaned = arg
+            for modifier in modifiers:
+                cleaned = cleaned.replace(modifier, '')
+            
+            # 移除多余的空格
+            cleaned = ' '.join(cleaned.split())
+            
+            return cleaned
+            
+        except Exception as e:
+            self.logger.debug(f"清理模板参数失败: {e}")
+            return arg
